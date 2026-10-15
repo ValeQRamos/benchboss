@@ -25,20 +25,24 @@ def week_projection(team: Team, periods: list[int], cal: SeasonCalendar, starter
 
     Each day the ``starters`` best players with a game play (a close, fast approximation of
     the real lineup that ignores position slots). On ``today_period`` only games that have not
-    tipped off yet count, because the rest is already in the live score. Players projected at
-    zero (out, suspended) do not count as games. Returns (points, games).
+    tipped off yet count, because the rest is already in the live score, and a starter whose
+    game has tipped off keeps his slot, so fewer slots are left for the later games. Players
+    projected at zero (out, suspended) do not count as games. Returns (points, games).
     """
     total, games = 0.0, 0
     for sp in periods:
         vals = []
+        open_slots = starters
         for s in team.roster:
             p = s.player
             if s.slot_id == IR or not cal.plays(p.pro_team_id, sp):
                 continue
             if sp == today_period and not not_started(cal, p.pro_team_id, sp, now):
+                if s.is_starting:
+                    open_slots -= 1
                 continue
             vals.append(day_value(p, sp, cal))
-        top = sorted(vals, reverse=True)[:starters]
+        top = sorted(vals, reverse=True)[:max(0, open_slots)]
         total += sum(top)
         games += sum(1 for v in top if v > 0)
     return total, games

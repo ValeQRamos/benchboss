@@ -76,6 +76,11 @@ class SeasonCalendar:
     def game(self, pro_team_id: int, period: int) -> Game | None:
         return self.games.get(pro_team_id, {}).get(period)
 
+    def first_tip(self, period: int) -> dt.datetime | None:
+        """Start time of the first NBA game of a day (None when nobody plays)."""
+        starts = [t[period].start for t in self.games.values() if period in t]
+        return min(starts) if starts else None
+
     def games_in(self, pro_team_id: int, periods) -> int:
         g = self.games.get(pro_team_id, {})
         return sum(1 for p in periods if p in g)

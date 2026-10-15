@@ -31,7 +31,7 @@ value(player, day) = 0                                  if his team has no game 
 | Healthy, probable | 100% |
 | Day-to-day, questionable | 75% |
 | Doubtful | 25% |
-| Out, suspended, injured reserve | 0% |
+| Out, suspended, injured reserve, bereavement or paternity leave | 0% |
 
 ## Lineup optimizer
 
@@ -39,7 +39,9 @@ For each day, benchboss assigns players to your league's starting slots (PG, SG,
 G, F, UT, ...) to maximize the total expected points. It does not guess: a dynamic program
 walks the slots one by one and keeps the best total for every set of players already used, so
 the answer is the true optimum for your slot rules. Ties favor keeping a player where he
-already is, so a day that is already right produces no moves.
+already is, so a day that is already right produces no moves. A player who cannot score that
+day (no game, out, suspended) is never moved into a starting slot, even an empty one: he is
+only left where he already is.
 
 - **Today** is sent as a normal lineup change. Future days are sent as ESPN "future roster"
   moves, which carry forward to the following days.
@@ -58,8 +60,9 @@ projected final = points scored so far this week
 ```
 
 N is the number of starting slots. For today, only games that have not tipped off yet count:
-the rest is already in the live score. Players projected at zero (out, suspended) do not count
-as games left.
+the rest is already in the live score. A starter whose game has tipped off keeps his slot, so
+today's later games share only the slots that are still open. Players projected at zero (out,
+suspended) do not count as games left.
 
 This is the same method for both teams, so the comparison is fair even when ESPN's own
 numbers are not available (ESPN does not publish a matchup projection for basketball).
@@ -82,13 +85,26 @@ day:
 2. Add up the positive differences. That is his **gain** for that pickup day.
 3. The **best day** is the pickup day with the highest gain minus drop cost (see 4 and 5).
    Picking up later can win when the player you drop still has games early in the week; ties
-   go to the earlier day, because waiting risks losing the player. Today only counts if his
-   game has not tipped off yet.
+   go to the earlier day, because waiting risks losing the player. **G** counts his games
+   from that day on.
 4. The **suggested drop** is the player whose absence costs you the fewest points over the
-   same days (often someone with few games left). His lost points are the **drop cost**.
-5. **Net** = gain minus drop cost. The list is sorted by net.
+   same days (often someone with few games left), chosen only among players projected below
+   the free agent and only where the league's position limits allow the swap (for example a
+   fifth center). His lost points are the **drop cost**. If nobody on your roster qualifies,
+   no drop is suggested, because you would have to release a better player for him. With an
+   open roster spot (fewer players than starters plus bench, not counting IR) nobody has to
+   go and there is no drop cost.
+5. **Net** = gain minus drop cost, for this week only. The list is sorted by net.
 
-Players on waivers start counting only after the waiver period (24 hours in most leagues).
+When the first pickup day can be today:
+
+- If your league locks rosters at the day's first tip-off (ESPN's `FIRSTGAME_SCORINGPERIOD`),
+  an add made after that joins your roster tomorrow and a drop takes effect tomorrow too, so
+  today stops counting for every free agent once the first game of the day has started.
+- In leagues that lock each player at his own game, today only counts if his game has not
+  tipped off yet.
+- Players on waivers start counting only after the waiver period (24 hours in most
+  leagues). Before the season starts they are ready for opening night.
 
 ## Trade finder
 
@@ -98,7 +114,9 @@ Players on waivers start counting only after the waiver period (24 hours in most
    `benchboss trades --needs` shows the whole table.
 3. **Candidates**: you give a player whose main position is your surplus and their need; you
    get one whose main position is their surplus and your need (or the position you asked for
-   with `--need`).
+   with `--need`). Players who are out, suspended or on injured reserve are left out on both
+   sides, and so are swaps of two players eligible at exactly the same positions, because
+   they change neither team's profile.
 4. **Fairness**: `1 - |difference in projection| / higher projection`. Ideas below 85% are
    dropped (`--fairness` changes it).
 5. **Limits**: deals that would break the league's position limits (for example a maximum of
@@ -107,7 +125,8 @@ Players on waivers start counting only after the waiver period (24 hours in most
    when you get the slightly better player. At most two ideas per team and two per player you
    give, so the list stays varied.
 
-Each idea comes with a short note you can send with `benchboss trade ... --msg`.
+Each idea comes with a short note you can send with `benchboss trade ... --msg`. It only
+calls the deal "close in value" from 85% fairness up.
 
 ## News
 
