@@ -27,3 +27,23 @@ def test_env_cookies_win(monkeypatch):
     monkeypatch.setenv("ESPN_S2", "s2value")
     monkeypatch.setenv("ESPN_SWID", "ABC")
     assert credentials.get() == ("s2value", "{ABC}")
+
+
+def test_store_falls_back_to_a_private_file_without_keychain(monkeypatch, tmp_path):
+    monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.null.Keyring")
+    import keyring.core
+
+    keyring.core._keyring_backend = None  # pick up the env var
+    where = credentials.store("s2value", "ABC")
+    assert "credentials.json" in where
+    assert credentials.get() == ("s2value", "{ABC}")
+    import os
+    import stat
+    import sys
+
+    f = credentials._file()
+    if sys.platform != "win32":
+        assert stat.S_IMODE(os.stat(f).st_mode) == 0o600
+    credentials.clear()
+    assert credentials.get() is None
+    keyring.core._keyring_backend = None

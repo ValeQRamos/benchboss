@@ -174,7 +174,9 @@ def cmd_matchup(c: Ctx):
     from benchboss.ui import dashboard
 
     d = dashboard.collect(c.session, with_trash=False, with_alerts=False, with_trending=False)
-    c.emit(dashboard.matchup_card(d, c.pal), d.outlook.to_dict() if d.outlook else None)
+    from rich.constrain import Constrain
+
+    c.emit(Constrain(dashboard.matchup_card(d, c.pal), 60), d.outlook.to_dict() if d.outlook else None)
 
 
 def cmd_activity(c: Ctx):

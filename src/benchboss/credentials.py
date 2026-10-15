@@ -45,9 +45,9 @@ def _file() -> Path:
 def _keyring():
     try:
         import keyring
-        from keyring.backends import fail
 
-        if isinstance(keyring.get_keyring(), fail.Keyring):
+        backend = type(keyring.get_keyring()).__module__
+        if backend.endswith((".fail", ".null")):  # no usable keychain on this machine
             return None
         return keyring
     except Exception:
@@ -94,7 +94,9 @@ def store(s2: str, swid: str) -> str:
         try:
             kr.set_password(SERVICE, "espn_s2", s2)
             kr.set_password(SERVICE, "SWID", swid)
-            return "your system keychain"
+            # trust the keychain only if the values really come back
+            if (kr.get_password(SERVICE, "espn_s2"), kr.get_password(SERVICE, "SWID")) == (s2, swid):
+                return "your system keychain"
         except Exception:
             pass
     f = _file()
