@@ -10,12 +10,15 @@ injuries) comes from site.api.espn.com and needs no cookies.
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import json
 import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
+from http.client import HTTPException  # not `import http.client`: http() below shadows it
 from typing import Any
 
 from benchboss import __version__
@@ -29,16 +32,22 @@ USER_AGENT = f"benchboss/{__version__} (+https://github.com/ValeQRamos/benchboss
 
 
 def _ssl_context() -> ssl.SSLContext:
-    # python.org builds of Python on macOS ship without root certificates: use certifi.
-    try:
+    # The system roots (and SSL_CERT_FILE / SSL_CERT_DIR) keep working behind corporate proxies;
+    # certifi is added on top because python.org builds on macOS ship without root certificates.
+    ctx = ssl.create_default_context()
+    with contextlib.suppress(ImportError, OSError):
         import certifi
 
-        return ssl.create_default_context(cafile=certifi.where())
-    except ImportError:
-        return ssl.create_default_context()
+        ctx.load_verify_locations(certifi.where())
+    return ctx
 
 
 _SSL = _ssl_context()
+
+# What a connection that breaks off after the request went out raises: urllib wraps none of
+# these (RemoteDisconnected, IncompleteRead, ConnectionResetError, ssl.SSLError, a cut-off
+# gzip body). HTTPError, URLError and TimeoutError are OSErrors too, so catch them first.
+_DROPPED = (HTTPException, OSError, EOFError, zlib.error)
 
 
 def http(url: str, *, params=None, headers=None, body=None, cookies=None, timeout=30) -> Any:
@@ -54,11 +63,17 @@ def http(url: str, *, params=None, headers=None, body=None, cookies=None, timeou
         data = json.dumps(body).encode()
         h["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=h, method="POST" if data else "GET")
+    # once a write is on its way, a broken answer does not tell whether ESPN applied it
+    unknown = "; it may or may not have gone through, check before retrying" if data else ""
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=_SSL) as r:
+            status = r.status
             raw = _gunzip(r.read())
     except urllib.error.HTTPError as e:
-        raw = _gunzip(e.read())
+        try:
+            raw = _gunzip(e.read())
+        except _DROPPED:
+            raw = b""
         msg = _error_message(raw)
         if e.code == 401:
             raise AuthError("ESPN rejected the cookies (expired, or not a member of this league): "
@@ -67,8 +82,14 @@ def http(url: str, *, params=None, headers=None, body=None, cookies=None, timeou
     except urllib.error.URLError as e:
         raise NetworkError(f"could not reach ESPN ({e.reason})") from e
     except TimeoutError as e:
-        raise NetworkError("ESPN did not answer in time") from e
-    return json.loads(raw) if raw else {}
+        raise NetworkError(f"ESPN did not answer in time{unknown}") from e
+    except _DROPPED as e:
+        raise NetworkError(f"the connection to ESPN dropped{unknown} ({type(e).__name__})") from e
+    try:
+        return json.loads(raw) if raw else {}
+    except ValueError as e:
+        raise EspnError(status, "the answer is not JSON (maintenance page or captive portal?)"
+                        + unknown) from e
 
 
 def _gunzip(raw: bytes) -> bytes:

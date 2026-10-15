@@ -26,6 +26,9 @@ def load() -> dict:
     return json.loads(gzip.decompress(raw))
 
 
+DEMO_CHAT = "demo-league-chat"
+
+
 class DemoClient:
     """Answers like ``espn.client.Client`` from the bundled dataset; refuses every write."""
 
@@ -70,7 +73,32 @@ class DemoClient:
     def comm(self, path="", *, params=None, fantasy_filter=None, body=None):
         if body is not None:
             raise BenchbossError("demo mode: nothing is sent to ESPN")
-        return {"topics": [], "messages": []}
+        if path == f"topics/{DEMO_CHAT}":
+            newest = sorted(self.chat(), key=lambda m: -m["date"])
+            return {"messages": newest[: (fantasy_filter or {}).get("limit") or 15]}
+        return {"topics": [{"id": DEMO_CHAT, "type": "CHAT_ALL_MEMBERS", "unreadMessageCount": 0}]}
+
+    def chat(self) -> list[dict]:
+        """A few league chat messages from the fictional managers, plus a waiver report."""
+        lg = self.data["league"]
+        noon = dt.datetime.combine(dt.date.fromisoformat(self.data["today"]), dt.time(12),
+                                   tzinfo=dt.timezone(dt.timedelta(hours=-5)))
+        team = lg["teams"][4]
+        claimed = team["roster"]["entries"][-1]["playerId"]
+        dropped = self.data["free_agents"][5]["id"]
+
+        def at(hours: float) -> int:
+            return int((noon - dt.timedelta(hours=hours)).timestamp() * 1000)
+
+        return [
+            {"id": "demo-1", "author": lg["members"][1]["id"], "messageTypeId": 0, "date": at(30),
+             "content": "Anyone selling a center? Taking offers all week."},
+            {"id": "demo-2", "author": "LM", "messageTypeId": 273, "date": at(8),
+             "attributes": {"team1": str(team["id"]), "team1addP1": str(claimed),
+                            "team1dropP1": str(dropped)}},
+            {"id": "demo-3", "author": lg["members"][2]["id"], "messageTypeId": 0, "date": at(5),
+             "content": "Waivers cleared. Good luck this week, everyone."},
+        ]
 
 
 _NEWS = [

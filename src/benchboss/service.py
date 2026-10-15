@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from pathlib import Path
 
@@ -217,13 +217,26 @@ class Session:
         return trades_mod.find_trades(lg, need=need, partner_id=pid, limit=n)
 
     def plan_days(self, periods: list[int]) -> list[DayPlan]:
-        """Preview: the best lineup for each day as it stands now (sends nothing)."""
+        """Preview: the best lineup for each day (sends nothing).
+
+        On ESPN a move carries forward to the next days that have no change of their own, so
+        a day whose lineup matches the day before is planned from the lineup the day before
+        ends up with. That is what apply_days finds when it re-reads the day.
+        """
         lg = self.league()
         current = lg.scoring_period
         plans = []
+        prev = None  # (period, lineup on ESPN, lineup after its moves) of the day before
         for sp in periods:
             roster = lg.me.roster if sp == current else self.roster_on(sp)
-            plans.append(plan_day(roster, lg.slot_counts, sp, self.calendar))
+            on_espn = {s.player.id: s.slot_id for s in roster}
+            if prev and prev[0] == sp - 1 and prev[1] == on_espn:
+                roster = [replace(s, slot_id=prev[2][s.player.id]) for s in roster]
+            plan = plan_day(roster, lg.slot_counts, sp, self.calendar)
+            after = {s.player.id: s.slot_id for s in roster}
+            after.update((m.player.id, m.to_slot) for m in plan.moves)
+            prev = (sp, on_espn, after)
+            plans.append(plan)
         return plans
 
     def apply_days(self, periods: list[int]) -> list[OptimizeResult]:
@@ -231,16 +244,20 @@ class Session:
 
         Every day is re-read right before it is planned, because moves on one day carry
         forward to the next ones: a day that looked fine in the preview can need moves after
-        an earlier day changes, and the other way around.
+        an earlier day changes, and the other way around. There is one result per day, also
+        when a day fails, so the caller can tell which days were sent.
         """
         current = self.current_period()
         return [self.apply_plan(sp, current) for sp in sorted(periods)]
 
     def apply_plan(self, period: int, current: int | None = None) -> OptimizeResult:
-        """Re-read one day and send what it still needs."""
+        """Re-read one day and send what it still needs. ESPN errors end up in the result."""
         lg = self.league()
-        current = current or self.current_period()
-        roster = self.roster_on(period)
+        try:
+            current = current or self.current_period()
+            roster = self.roster_on(period)
+        except BenchbossError as e:
+            return OptimizeResult(DayPlan(period), error=f"could not read the lineup: {e}")
         plan = plan_day(roster, lg.slot_counts, period, self.calendar)
         if period < current:
             return OptimizeResult(plan, error="that day is already over on ESPN")
