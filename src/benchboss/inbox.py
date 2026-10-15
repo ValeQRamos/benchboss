@@ -8,7 +8,9 @@ a brand-new DM is POST topics/ with {messages, subject, type, viewableBy}.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
+import weakref
 from dataclasses import dataclass
 
 from benchboss.errors import BenchbossError
@@ -66,7 +68,10 @@ def resolve_member(session, query: str) -> str:
 
 
 def thread(session, with_member: str | None) -> tuple[str | None, str]:
-    """(topic id or None, label) for the league chat or the DM with a member id."""
+    """(topic id or None, label) for the league chat or the DM with a member id.
+
+    None means nobody has written there yet.
+    """
     me = session.client.swid
     ts = topics(session)
     if with_member:
@@ -74,9 +79,30 @@ def thread(session, with_member: str | None) -> tuple[str | None, str]:
                     and set(t.get("viewableBy") or []) == {me, with_member}), None)
         return tid, f"DM with {people(session).get(with_member, with_member)}"
     tid = next((t["id"] for t in ts if t.get("type") == LEAGUE_CHAT), None)
-    if not tid:
-        raise BenchbossError("this league has no chat topic yet")
     return tid, "league chat"
+
+
+_looked_up: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def player_names(session, ids) -> dict[int, str]:
+    """Player id -> name for rostered players plus ``ids``.
+
+    Players on no roster (a pending waiver claim, someone dropped in a waiver report) are
+    looked up on ESPN in one request and remembered for the session; an id ESPN does not
+    know stays out of the map.
+    """
+    lg = session.league()
+    names = {s.player.id: s.player.name for t in lg.teams.values() for s in t.roster}
+    known = _looked_up.setdefault(session, {})
+    missing = sorted({int(i) for i in ids} - names.keys() - known.keys())
+    if missing:
+        with contextlib.suppress(BenchbossError):  # names are a nicety: keep the ids then
+            hits = session.client.players({"filterIds": {"value": missing}}, lg.scoring_period)
+            found = {x.get("id"): (x.get("player") or {}).get("fullName") for x in hits}
+            known.update((i, found.get(i)) for i in missing)
+    names.update((i, n) for i, n in known.items() if n)
+    return names
 
 
 def _card(m: dict, session) -> str:
@@ -90,7 +116,8 @@ def _card(m: dict, session) -> str:
     if not attrs or session is None:
         return label
     lg = session.league()
-    names = {s.player.id: s.player.name for t in lg.teams.values() for s in t.roster}
+    names = player_names(session, [v for k, v in attrs.items()
+                                   if ("addP" in k or "dropP" in k) and str(v).isdigit()])
     sides = []
     for side in ("1", "2"):
         tid = attrs.get(f"team{side}")
@@ -125,8 +152,12 @@ def format_message(m: dict, ppl: dict[str, str], session=None) -> tuple[str, str
 
 
 def send(session, text: str, to_member: str | None = None) -> str:
+    if not text.strip():
+        raise BenchbossError("the message is empty")
     me = session.client.swid
     tid, label = thread(session, to_member)
+    if not tid and not to_member:
+        raise BenchbossError("this league has no chat topic yet: post the first message on ESPN")
     msg = {"author": me, "content": text.strip(), "messageTypeId": 0}
     if tid:
         r = session.client.comm(f"topics/{tid}/messages/", body=msg)
@@ -153,10 +184,8 @@ def alerts(session, include_chat: bool = True) -> list[Alert]:
     lg = session.league()
     me = lg.my_team_id
     pending = pending_transactions(session)
-    names = {}
-    for t in lg.teams.values():
-        for s in t.roster:
-            names[s.player.id] = s.player.name
+    names = player_names(session, [i["playerId"] for tx in pending for i in tx.get("items") or []
+                                   if str(i.get("playerId", "")).isdigit()])
     out: list[Alert] = []
     for tx in pending:
         kind, status = tx.get("type", ""), tx.get("status", "")

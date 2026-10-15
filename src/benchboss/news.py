@@ -18,7 +18,7 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from benchboss.errors import BenchbossError
-from benchboss.espn.client import _SSL, SITE, http
+from benchboss.espn.client import _DROPPED, _SSL, SITE, http
 from benchboss.espn.models import Player
 
 FEED = f"{SITE}/fantasy/v2/games/fba/news/players"
@@ -71,7 +71,7 @@ def fetch(player_ids: list[int], days: int = 5, limit: int = 200,
                 spin=(raw.get("story") or "").strip() if rotowire else "",
                 source="RotoWire" if rotowire else "ESPN", kind=kind, link=web,
                 player_ids={raw.get("playerId")})
-    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days + 1)
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
     return sorted((x for x in items.values() if x.published >= cutoff),
                   key=lambda x: x.published, reverse=True)
 
@@ -113,5 +113,10 @@ def ai_digest(players: list[Player], days: int = 5, model: str | None = None,
         raise BenchbossError(f"Anthropic API {e.code}: {detail}") from e
     except urllib.error.URLError as e:
         raise BenchbossError(f"could not reach the Anthropic API ({e.reason})") from e
+    except TimeoutError as e:
+        raise BenchbossError("the Anthropic API did not answer in time") from e
+    except (*_DROPPED, ValueError) as e:
+        raise BenchbossError("the answer from the Anthropic API was cut off or garbled "
+                             f"({type(e).__name__})") from e
     text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
     return text.strip() or "(no answer)"
