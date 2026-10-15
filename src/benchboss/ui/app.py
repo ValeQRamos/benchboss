@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+from collections.abc import Callable
 
 from rich.console import Group, RenderableType
 from rich.text import Text
@@ -25,7 +26,7 @@ from benchboss import __version__
 from benchboss import config as config_mod
 from benchboss.errors import BenchbossError
 from benchboss.ui import dashboard, views
-from benchboss.ui.theme import DARK, LIGHT, palette
+from benchboss.ui.theme import DARK, LIGHT, Palette, palette
 
 THEMES = {
     "dark": Theme(name="benchboss-dark", primary=DARK.accent, secondary=DARK.info,
@@ -50,6 +51,13 @@ MENU = [
     ("standings", "Standings", "s"),
     ("roster", "Roster", "o"),
 ]
+PLANS = ("today", "week")  # the screens that can send moves to ESPN
+MENU_WIDTH = 26  # the width of #menu in the CSS below
+NARROW = 110  # below this many columns the menu hides itself (m shows it again)
+
+# Draws a screen from data already loaded: (palette, width) -> renderable. Kept so a resize
+# or a theme change can draw the screen again without asking ESPN.
+Draw = Callable[[Palette, int], RenderableType]
 
 
 class Benchboss(App):
@@ -60,6 +68,7 @@ class Benchboss(App):
     #top { height: 1; padding: 0 1; background: $panel; color: $foreground; }
     #main { height: 1fr; }
     #menu { width: 26; height: 1fr; border: none; padding: 1 0; background: $surface; }
+    #menu.hidden { display: none; }
     #menu > .option-list--option { padding: 0 2; }
     #content { padding: 1 2; }
     #body { width: 1fr; }
@@ -71,6 +80,7 @@ class Benchboss(App):
     BINDINGS = [Binding(key, f"show('{sid}')", label, show=sid in ("dash", "today", "week", "trash"))
                 for sid, label, key in MENU] + [
         Binding("g", "show('ainews')", "AI news", show=False),
+        Binding("m", "toggle_menu", "Menu"),
         Binding("r", "reload", "Refresh"),
         Binding("ctrl+t", "toggle_theme", "Light/Dark"),
         Binding("q", "quit", "Quit"),
@@ -81,9 +91,11 @@ class Benchboss(App):
         self.cfg = cfg or config_mod.load()
         self.demo = demo
         self._session = session
+        self._own_session = session is None  # r may rebuild it with fresh cookies and config
         self.current = "dash"
         self.pending: dict | None = None  # the plan on screen that Apply would send
-        self._last: tuple | None = None  # (kind, data) of the last screen, re-rendered on resize
+        self._last: tuple[str, Draw] | None = None  # (screen, draw) of what is on screen
+        self._narrow: bool | None = None
 
     # --- layout --------------------------------------------------------------------------------
 
@@ -104,7 +116,7 @@ class Benchboss(App):
         for t in THEMES.values():
             self.register_theme(t)
         self.theme = THEMES[self.cfg.theme].name
-        self.query_one("#menu", OptionList).focus()
+        self._fit_menu()  # also gives the focus to the menu, or to the screen when it is hidden
         self._top()
         self.action_show("dash")
         self.set_interval(60, self._auto_refresh)
@@ -140,10 +152,46 @@ class Benchboss(App):
 
     def _show(self, renderable: RenderableType, actions: bool = False) -> None:
         self.query_one("#body", Static).update(renderable)
-        self.query_one("#actions").set_class(actions, "visible")
+        self._set_actions(actions)
+
+    def _set_actions(self, visible: bool) -> None:
+        self.query_one("#actions").set_class(visible, "visible")
+        if not visible:
+            self.pending = None  # only a plan on screen, with its Apply button, can be sent
+            if isinstance(self.focused, Button):  # a hidden button must not keep the focus
+                self._focus_home()
+
+    def _focus_home(self) -> None:
+        menu = self.query_one("#menu", OptionList)
+        (self.query_one("#content") if menu.has_class("hidden") else menu).focus()
+
+    def _present(self, draw: Draw, pending: dict | None = None) -> None:
+        """Draw a screen on the UI thread. A plan that can be applied gets the Apply button and
+        is never drawn again in place (a theme change rebuilds it); anything else is kept so a
+        resize or a theme change can draw it again from the same data."""
+        self._last = None if pending else (self.current, draw)
+        self._show(draw(self.pal, self._width()), actions=bool(pending))
+        self.pending = pending
 
     def _width(self) -> int:
-        return max(40, self.query_one("#content").size.width - 4)
+        """Columns the screen can use: the window minus the menu, the padding and the scrollbar."""
+        menu = 0 if self.query_one("#menu").has_class("hidden") else MENU_WIDTH
+        return max(20, self.size.width - menu - 6)
+
+    def _set_menu(self, visible: bool) -> None:
+        menu = self.query_one("#menu", OptionList)
+        menu.set_class(not visible, "hidden")
+        if visible:
+            menu.focus()
+        elif self.focused is None or self.focused is menu:  # a hidden menu must not keep the keys
+            self.query_one("#content").focus()
+
+    def _fit_menu(self) -> None:
+        """Hide the menu on a narrow window so the tables keep their columns; m shows it."""
+        narrow = self.size.width < NARROW
+        if narrow != self._narrow:  # only when the width crosses the line, so m sticks
+            self._narrow = narrow
+            self._set_menu(not narrow)
 
     # --- navigation ----------------------------------------------------------------------------
 
@@ -153,6 +201,9 @@ class Benchboss(App):
     def action_show(self, sid: str) -> None:
         self.current = sid
         self.pending = None
+        self._last = None
+        if self._narrow:
+            self._set_menu(False)  # on a narrow window the menu closes once you pick a screen
         menu = self.query_one("#menu", OptionList)
         idx = next((i for i, (s, _, _) in enumerate(MENU) if s == sid), None)
         if idx is not None and menu.highlighted != idx:
@@ -161,8 +212,20 @@ class Benchboss(App):
         self._status("talking to ESPN..." if not self.demo else "demo data")
         self.load(sid)
 
+    def action_toggle_menu(self) -> None:
+        self._set_menu(self.query_one("#menu").has_class("hidden"))
+        self._rerender()
+
     def action_reload(self) -> None:
-        if self._session is not None and hasattr(self._session, "_league"):
+        if self._own_session and not self.demo:
+            # read the cookies and config again: `benchboss login` or `setup` may have run in
+            # another terminal since the app started
+            theme = self.cfg.theme
+            with contextlib.suppress(BenchbossError):
+                self.cfg = config_mod.load()
+            self.cfg.theme = theme
+            self._session = None
+        elif self._session is not None and hasattr(self._session, "_league"):
             self._session._league = None
         self.action_show(self.current)
 
@@ -171,82 +234,78 @@ class Benchboss(App):
         self.theme = THEMES[self.cfg.theme].name
         if not self.demo:
             with contextlib.suppress(OSError):
-                config_mod.save(self.cfg)
+                config_mod.save_theme(self.cfg.theme)  # only the theme, never env overrides
         self._top()
-        self._rerender()
+        if self.pending:
+            self.action_show(self.current)  # a plan that can be applied is rebuilt, not redrawn
+        else:
+            self._rerender()
 
     def _auto_refresh(self) -> None:
         if self.current == "dash":
             self.load("dash")
 
     def on_resize(self) -> None:
+        if not self.query("#menu"):
+            return  # the window can report its size before the widgets exist
+        self._fit_menu()
         self._rerender()
 
     def _rerender(self) -> None:
-        if self._last and self._last[0] == "dash":
-            self._show(dashboard.render(self._last[1], self.pal, self._width()))
+        """Draw the current screen again (new width or palette) from the data already loaded."""
+        if self._last and self._last[0] == self.current:
+            self._show(self._last[1](self.pal, self._width()))
 
     # --- data ----------------------------------------------------------------------------------
 
     @work(thread=True, exclusive=True, group="load")
     def load(self, sid: str) -> None:
-        pending = None
         try:
-            renderable, actions, pending = self._build(sid)
+            draw, pending = self._build(sid)
         except BenchbossError as e:
-            renderable, actions = self._error(e), False
+            draw, pending = self._error(e), None
         except Exception as e:  # never let a bad payload kill the app
-            renderable, actions = self._error(f"{type(e).__name__}: {e}"), False
+            draw, pending = self._error(f"{type(e).__name__}: {e}"), None
         if get_current_worker().is_cancelled:
             return  # the user already moved to another screen
-        self.call_from_thread(self._finish, sid, renderable, actions, pending)
+        self.call_from_thread(self._finish, sid, draw, pending)
 
-    def _finish(self, sid: str, renderable: RenderableType, actions: bool, pending) -> None:
+    def _finish(self, sid: str, draw: Draw, pending: dict | None) -> None:
         """Runs on the UI thread: only the screen the user is looking at gets drawn, and only
         the plan that is drawn can be applied."""
         if self.current != sid:
             return
-        self.pending = pending
         self._top()
-        self._show(renderable, actions)
+        self._present(draw, pending)
         self._status("demo data · nothing is sent to ESPN" if self.demo
                      else "r refresh · ctrl+t light/dark · q quit")
 
-    def _error(self, e) -> RenderableType:
+    @staticmethod
+    def _error(e) -> Draw:
         msg = str(e)
-        hint = ""
         if "benchboss setup" in msg or "benchboss login" in msg:
-            hint = "\n\nOpen a terminal and run the command above, then press r."
-        return Text(f"{msg}{hint}", style=self.pal.bad)
+            msg += "\n\nOpen a terminal and run the command above, then press r."
+        return lambda pal, w: Text(msg, style=pal.bad)
 
-    def _build(self, sid: str) -> tuple[RenderableType, bool, dict | None]:
-        s, pal = self.session, self.pal
+    def _build(self, sid: str) -> tuple[Draw, dict | None]:
+        """Read what a screen needs (in a worker thread). Returns how to draw it, and the plan
+        Apply would send when the screen is a plan with moves to make."""
+        s = self.session
         if sid == "dash":
             d = dashboard.collect(s)
-            self._last = ("dash", d)
-            return dashboard.render(d, pal, self._width()), False, None
-        if sid in ("today", "week"):
-            from benchboss.service import periods_for
-
-            periods = [p for p in periods_for(s, sid) if p >= s.league().scoring_period]
-            plans = s.plan_days(periods)
-            todo = [p for p in plans if p.changed]
-            head = Text(("Today" if sid == "today" else "Rest of the matchup week") + "\n",
-                        style=f"bold {pal.accent}")
-            body = views.plan(plans, s.calendar, pal)
-            if not todo:
-                return Group(head, body, Text("\n✓ Already optimal. Nothing to do.", style=pal.good)), False, None
-            moves = sum(len(p.moves) for p in todo)
-            note = Text(f"\n{moves} move{'s' * (moves != 1)} on {len(todo)} day"
-                        f"{'s' * (len(todo) != 1)}. Press Apply to send them to ESPN.", style=pal.text)
-            pending = {"periods": [p.period for p in plans], "day": s.today, "kind": sid}
-            return Group(head, body, note), True, pending
+            return (lambda pal, w: dashboard.render(d, pal, w, news_hint="n for more")), None
+        if sid in PLANS:
+            return self._build_plan(s, sid)
         if sid == "activity":
-            return views.activity(s.activity(), s.calendar, s.matchup_periods(), s.today_period, pal), False, None
+            acts, periods, cal = s.activity(), s.matchup_periods(), s.calendar
+            day = cal.period_of(s.today)  # not clamped: outside the season no column is today
+            return (lambda pal, w: views.activity(acts, cal, periods, day, pal)), None
         if sid == "trash":
-            hint = Text("\nGrab one from a terminal: benchboss add \"Player\" --drop \"Player\"",
-                        style=pal.dim)
-            return Group(views.trash(s.trash(n=12), s.calendar, pal, self._width()), hint), False, None
+            picks, cal = s.trash(n=12), s.calendar
+            return (lambda pal, w: Group(
+                views.trash(picks, cal, pal, w),
+                Text("\nGrab one from a terminal: benchboss add \"Player\" --drop \"Player\"",
+                     style=pal.dim))), None
         if sid in ("news", "ainews"):
             from benchboss import news as news_mod
 
@@ -255,48 +314,93 @@ class Benchboss(App):
             if sid == "ainews":
                 if self.demo:
                     raise BenchbossError("the AI briefing is not available with demo data")
-                return Group(Text("AI briefing (Claude with web search), last 5 days\n",
-                                  style=f"bold {pal.accent}"),
-                             Text(news_mod.ai_digest(roster, 5), style=pal.text)), False, None
+                text = news_mod.ai_digest(roster, 5)
+                return (lambda pal, w: Group(
+                    Text("AI briefing (Claude with web search), last 5 days\n", style=f"bold {pal.accent}"),
+                    Text(text, style=pal.text))), None
             names = {p.id: p.name for p in roster}
             items = s.news([p.id for p in roster], 5)
             tip = ("Press g for an AI briefing with web search (sends your players' names to the "
                    "Anthropic API)." if news_mod.ai_available() and not self.demo else
                    "Want more? Set ANTHROPIC_API_KEY and press g for an AI briefing, or ask "
                    "Copilot Chat for news on your players (player-news skill).")
-            return Group(Text("News and spins on your players, last 5 days\n", style=f"bold {pal.accent}"),
-                         views.news(items, names, pal, 5), Text(tip, style=pal.dim)), False, None
+            return (lambda pal, w: Group(
+                Text("News and spins on your players, last 5 days\n", style=f"bold {pal.accent}"),
+                views.news(items, names, pal, 5), Text(tip, style=pal.dim))), None
         if sid == "trades":
             from benchboss.core import trades as trades_mod
 
             lg = s.league()
             ideas = trades_mod.find_trades(lg, limit=8)
             bal = trades_mod.describe_needs(lg)
-            hint = Text("\nSend one from a terminal: benchboss trade --give \"A\" --get \"B\" --msg \"...\"",
-                        style=pal.dim)
-            return Group(Text("Trade ideas\n", style=f"bold {pal.accent}"), views.trades(ideas, pal),
-                         Text(""), views.needs(bal, lg.me.name, pal), hint), False, None
+            return (lambda pal, w: Group(
+                Text("Trade ideas\n", style=f"bold {pal.accent}"), views.trades(ideas, pal),
+                Text(""), views.needs(bal, lg.me.name, pal),
+                Text("\nSend one from a terminal: benchboss trade --give \"A\" --get \"B\" --msg \"...\"",
+                     style=pal.dim))), None
         if sid == "inbox":
             from benchboss import inbox
 
-            return views.alerts(inbox.alerts(s), pal), False, None
+            items = inbox.alerts(s)
+            return (lambda pal, w: views.alerts(items, pal)), None
         if sid == "standings":
-            return views.standings(s.league(), pal), False, None
-        if sid == "roster":
             lg = s.league()
-            today = {x.player.id for x in lg.me.roster if s.calendar.plays(x.player.pro_team_id, s.today_period)}
-            return views.roster(lg, pal, today), False, None
+            return (lambda pal, w: views.standings(lg, pal)), None
+        if sid == "roster":
+            lg, cal = s.league(), s.calendar
+            day = cal.period_of(s.today)
+            in_season = 1 <= day <= cal.final_period  # before or after it, nobody plays today
+            today = {x.player.id for x in lg.me.roster if in_season and cal.plays(x.player.pro_team_id, day)}
+            return (lambda pal, w: views.roster(lg, pal, today)), None
         raise BenchbossError(f"unknown screen {sid}")
+
+    def _build_plan(self, s, sid: str) -> tuple[Draw, dict | None]:
+        from benchboss.service import periods_for
+
+        cal = s.calendar
+        day = cal.period_of(s.today)
+        if sid == "today" and day < 1:
+            start = cal.date_of(1)
+            msg = (f"The season starts {start:%a %b} {start.day}, so there is no lineup to set "
+                   "today. Press w to set your lineup for the first week.")
+            return (lambda pal, w: Text(msg, style=pal.text)), None
+        if sid == "today" and day > cal.final_period:
+            return (lambda pal, w: Text("The fantasy season is over.", style=pal.text)), None
+        periods = [p for p in periods_for(s, sid) if p >= s.league().scoring_period]
+        plans = s.plan_days(periods)
+        todo = [p for p in plans if p.changed]
+        moves = sum(len(p.moves) for p in todo)
+        title = "Today" if sid == "today" else "Rest of the matchup week"
+
+        def draw(pal: Palette, width: int) -> RenderableType:
+            head = Text(title + "\n", style=f"bold {pal.accent}")
+            body = views.plan(plans, cal, pal)
+            if not todo:
+                return Group(head, body, Text("\n✓ Already optimal. Nothing to do.", style=pal.good))
+            return Group(head, body, Text(f"\n{moves} move{'s' * (moves != 1)} on {len(todo)} day"
+                                          f"{'s' * (len(todo) != 1)}. Press Apply to send them to ESPN.",
+                                          style=pal.text))
+
+        pending = {"periods": [p.period for p in plans], "day": s.today, "kind": sid} if todo else None
+        return draw, pending
 
     # --- writes --------------------------------------------------------------------------------
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if not self.query_one("#actions").has_class("visible"):
+            return  # a hidden button never acts, even if it still had the focus
         if event.button.id == "cancel":
-            self.pending = None
-            self._show(Text("Cancelled. Nothing was sent.", style=self.pal.dim))
-        elif event.button.id == "apply" and self.pending:
-            pending, self.pending = self.pending, None
-            self.query_one("#actions").set_class(False, "visible")
+            self._present(lambda pal, w: Text("Cancelled. Nothing was sent.", style=pal.dim))
+        elif event.button.id == "apply":
+            pending = self.pending
+            if not pending or pending["kind"] != self.current or self.current not in PLANS:
+                return
+            if self._session is None or self._session.today != pending["day"]:
+                self._present(lambda pal, w: Text("The fantasy day changed since this plan was made. "
+                                                  "Press t or w to rebuild it.", style=pal.warn))
+                self._status("nothing was sent")
+                return
+            self._set_actions(False)
             self._status("sending to ESPN...")
             self.apply(pending)
 
@@ -306,7 +410,7 @@ class Benchboss(App):
         span = "day" if pending["kind"] == "today" else "week"
         if s.today != pending["day"]:
             msg = "The fantasy day changed since this plan was made. Press t or w to rebuild it."
-            self.call_from_thread(self._show, Text(msg, style=self.pal.warn))
+            self.call_from_thread(self._present, lambda pal, w: Text(msg, style=pal.warn))
             self.call_from_thread(self._status, "nothing was sent")
             return
         if self.demo:
@@ -316,7 +420,7 @@ class Benchboss(App):
             msg = (f"Your {span} is set: {moves} move{'s' * (moves != 1)} across {days} "
                    f"day{'s' * (days != 1)}. (Demo: nothing was sent.)")
             self.call_from_thread(self.notify, msg, title="Done", timeout=8)
-            self.call_from_thread(self._show, Text("✓ " + msg, style=f"bold {self.pal.good}"))
+            self.call_from_thread(self._present, lambda pal, w: Text("✓ " + msg, style=f"bold {pal.good}"))
             self.call_from_thread(self._status, "")
             return
         try:
@@ -325,6 +429,8 @@ class Benchboss(App):
             results, fatal = [], str(e)
         else:
             fatal = ""
+        finally:
+            s._league = None  # the lineup changed on ESPN: the next screen reads it again
         days, moves, lines, errors = 0, 0, [], [fatal] if fatal else []
         for r in results:
             label = f"{s.calendar.date_of(r.plan.period):%a %b %d}"
@@ -338,12 +444,13 @@ class Benchboss(App):
             msg = "Not everything was sent:\n" + "\n".join(errors + lines)
             self.call_from_thread(self.notify, "\n".join(errors), title="Not everything was sent",
                                   severity="error", timeout=12)
-            self.call_from_thread(self._show, Text(msg, style=self.pal.bad))
+            self.call_from_thread(self._present, lambda pal, w: Text(msg, style=pal.bad))
         else:
             msg = f"Your {span} is set: {moves} move{'s' * (moves != 1)} across {days} day{'s' * (days != 1)}."
+            done = "\n".join(lines)
             self.call_from_thread(self.notify, msg, title="Done", timeout=8)
-            self.call_from_thread(self._show, Group(Text("✓ " + msg, style=f"bold {self.pal.good}"),
-                                                    Text("\n".join(lines), style=self.pal.dim)))
+            self.call_from_thread(self._present, lambda pal, w: Group(
+                Text("✓ " + msg, style=f"bold {pal.good}"), Text(done, style=pal.dim)))
         self.call_from_thread(self._status, "")
 
 

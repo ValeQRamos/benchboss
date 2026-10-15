@@ -244,16 +244,17 @@ def standings_card(d: Dashboard, pal: Palette) -> Panel:
 
 
 def trash_card(d: Dashboard, pal: Palette) -> Panel | None:
-    if not d.trash:
+    picks = [pick for pick in d.trash if round(pick.net) > 0]  # late on Sunday nobody helps
+    if not picks:
         return None
     t = Table.grid(expand=True, padding=(0, 1))
     t.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
     t.add_column(no_wrap=True, justify="right")
-    for pick in d.trash:
+    for pick in picks:
         p = pick.player
         label = f"{p.short_name} {p.pro_team}" + (" (W)" if pick.on_waivers else "")
         t.add_row(Text(label, style=pal.text),
-                  Text.assemble((f"+{pick.net:.0f} pts", f"bold {pal.good}" if pick.net > 0 else pal.dim),
+                  Text.assemble((f"{pick.net:+.0f} pts", f"bold {pal.good}"),
                                 (f" · {pick.games_left} game{'' if pick.games_left == 1 else 's'}", pal.dim)))
     return _panel(t, "BEST TRASH THIS WEEK", pal, "points added if you grab him")
 
@@ -278,7 +279,7 @@ def alerts_card(d: Dashboard, pal: Palette) -> Panel | None:
     return _panel(Group(*rows), "INBOX", pal)
 
 
-def news_card(d: Dashboard, pal: Palette) -> Panel | None:
+def news_card(d: Dashboard, pal: Palette, hint: str = "benchboss news for more") -> Panel | None:
     if not d.news:
         return None
     names = {s.player.id: s.player.short_name for s in d.league.me.roster}
@@ -297,12 +298,14 @@ def news_card(d: Dashboard, pal: Palette) -> Panel | None:
         if last and n.headline.startswith(last[0]):
             line.stylize("bold", 0, len(last[0]))
         t.add_row(Text(f"{ago:>3}", style=pal.dim), line)
-    return _panel(t, "LATEST NEWS", pal, "n for more")
+    return _panel(t, "LATEST NEWS", pal, hint)
 
 
-def render(d: Dashboard, pal: Palette, width: int) -> RenderableType:
+def render(d: Dashboard, pal: Palette, width: int,
+           news_hint: str = "benchboss news for more") -> RenderableType:
+    """``news_hint`` is the subtitle of the news card: the app passes its own key for it."""
     left = [matchup_card(d, pal), roster_card(d, pal)]
-    right = [c for c in (alerts_card(d, pal), activity_card(d, pal), news_card(d, pal),
+    right = [c for c in (alerts_card(d, pal), activity_card(d, pal), news_card(d, pal, news_hint),
                          trash_card(d, pal), trending_card(d, pal), standings_card(d, pal))
              if c is not None]
     footer = Text.assemble(("● ", pal.good), ("plays today · proj = ESPN projection", pal.dim))

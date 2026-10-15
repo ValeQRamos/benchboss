@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 
 from rich import box
+from rich.cells import cell_len
 from rich.console import Group, RenderableType
 from rich.table import Table
 from rich.text import Text
@@ -14,7 +15,7 @@ from benchboss.core.calendar import SeasonCalendar
 from benchboss.core.lineup import DayPlan
 from benchboss.core.trades import TradeIdea
 from benchboss.core.trash import TrashPick
-from benchboss.espn.constants import BENCH, IR, SLOT
+from benchboss.espn.constants import BENCH, IR, POSITION, SLOT
 from benchboss.espn.models import League, Player
 from benchboss.inbox import Alert
 from benchboss.news import NewsItem
@@ -115,50 +116,104 @@ def plan(plans: list[DayPlan], cal: SeasonCalendar, pal: Palette) -> RenderableT
 
 def trash(picks: list[TrashPick], cal: SeasonCalendar, pal: Palette,
           width: int = 120) -> RenderableType:
-    """Free agents by net points added this week. Below 110 columns the table drops the
-    position and ownership columns and folds the NBA team into the player name."""
-    compact = width < 110
+    """Free agents by net points added this week, fitted to ``width`` columns.
+
+    Below 110 columns (or when the full table is wider than ``width``) the NBA team and the
+    injury fold into the player name and the position and ownership columns go. If that is
+    still too wide, the grab day gets shorter, then the Drop column goes (the drop is named
+    in the caption when it is the same player on every row), then Proj, +Pts and #, and only
+    then long names are cut. Net and G, the columns the list is ranked by, always show in full.
+    """
+    drops = {pk.drop.name for pk in picks if pk.drop}
+    num = {"justify": "right"}
+
+    def grab(pk: TrashPick, short: bool) -> str:
+        if not pk.best_day:
+            text = "-"
+        else:
+            d = cal.date_of(pk.best_day)
+            text = f"{d:%a} {d.day}" if short else _day(d)
+        return text + (" (W)" if pk.on_waivers else "")
+
+    def columns(compact: bool) -> dict[str, tuple[dict, list]]:
+        names = []
+        for pk in picks:
+            name = Text(pk.player.name, style=pal.text)
+            if compact:
+                name.append(f" {pk.player.pro_team}", style=pal.dim)
+                if pk.player.injury:
+                    name.append(f" {pk.player.injury}", style=pal.warn)
+            names.append(name)
+        cols: dict[str, tuple[dict, list]] = {
+            "#": (num, [str(i) for i in range(1, len(picks) + 1)]),
+            "Player": ({"overflow": "ellipsis"}, names)}
+        if not compact:
+            cols["Pos"] = ({}, [pk.player.positions for pk in picks])
+            cols["Team"] = ({}, [pk.player.pro_team for pk in picks])
+            cols["Inj"] = ({}, [_inj(pk.player, pal) for pk in picks])
+        cols["Proj"] = (num, [_num(pk.player.proj) for pk in picks])
+        cols["G"] = (num, [str(pk.games_left) for pk in picks])
+        cols["Grab"] = ({}, [grab(pk, False) for pk in picks])
+        cols["+Pts"] = (num, [f"{pk.gain:.1f}" for pk in picks])
+        cols["Drop"] = ({"overflow": "ellipsis"},
+                        [Text(pk.drop.name if pk.drop else "-", style=pal.dim) for pk in picks])
+        cols["Net"] = (num, [Text(f"{pk.net:+.1f}", style=f"bold {pal.good}" if pk.net > 0 else pal.dim)
+                             for pk in picks])
+        if not compact:
+            cols["Own%"] = (num, [f"{pk.player.owned:.1f}" for pk in picks])
+        return cols
+
+    def size(head: str, cells: list) -> int:
+        return max([cell_len(head)] + [c.cell_len if isinstance(c, Text) else cell_len(c) for c in cells])
+
+    def need(cols: dict, player: int) -> int:
+        # every column is padded by one space on each side except at the outer edges, plus
+        # one edge space on each side and one divider between columns
+        return player + sum(size(k, v[1]) for k, v in cols.items() if k != "Player") + 3 * len(cols) - 1
+
+    cols = columns(compact=False)
+    if width < 110 or need(cols, size("Player", cols["Player"][1])) > width:
+        cols = columns(compact=True)
+    full = size("Player", cols["Player"][1])
+    if need(cols, full) > width:
+        cols["Grab"] = ({}, [grab(pk, True) for pk in picks])
+    if need(cols, full) > width and len(drops) <= 1:
+        cols.pop("Drop")
+    for key in ("Proj", "+Pts", "Drop", "#"):
+        if need(cols, min(full, 16)) <= width:
+            break
+        cols.pop(key, None)
+
     t = _table(pal, "Most valuable trash this week")
-    num = {"justify": "right", "no_wrap": True, "min_width": 5}
-    cols = [("#", {"justify": "right", "no_wrap": True}),
-            ("Player", {"no_wrap": True, "overflow": "ellipsis", "min_width": 14, "ratio": 1})]
-    if not compact:
-        cols += [("Pos", {"no_wrap": True}), ("Team", {"no_wrap": True}), ("Inj", {"no_wrap": True})]
-    cols += [("Proj", num), ("G", {"justify": "right", "no_wrap": True}),
-             ("Grab", {"no_wrap": True, "min_width": 10}), ("+Pts", num),
-             ("Drop", {"no_wrap": True, "overflow": "ellipsis", "min_width": 8}), ("Net", num)]
-    if not compact:
-        cols += [("Own%", num)]
-    for col, kw in cols:
-        t.add_column(col, **kw)
-    for i, pk in enumerate(picks, 1):
-        p = pk.player
-        grab = _day(cal.date_of(pk.best_day)) if pk.best_day else "-"
-        if pk.on_waivers:
-            grab += " (W)"
-        name = Text(p.name, style=pal.text)
-        if compact:
-            name.append(f" {p.pro_team}", style=pal.dim)
-            if p.injury:
-                name.append(f" {p.injury}", style=pal.warn)
-        row = [str(i), name]
-        if not compact:
-            row += [p.positions, p.pro_team, _inj(p, pal)]
-        row += [_num(p.proj), str(pk.games_left), grab, f"{pk.gain:.1f}",
-                Text(pk.drop.name if pk.drop else "-", style=pal.dim),
-                Text(f"{pk.net:+.1f}", style=f"bold {pal.good}" if pk.net > 0 else pal.dim)]
-        if not compact:
-            row += [f"{p.owned:.1f}"]
-        t.add_row(*row)
-    t.caption = ("+Pts = points he adds over your weakest starter on the days he plays, from the "
-                 "grab day to Sunday. Net subtracts what the suggested drop would have scored. "
-                 "G = games he can still play for you.")
+    room = width - need(cols, 0)
+    for head, (kw, _) in cols.items():
+        extra = {"max_width": max(6, room)} if head == "Player" and room < full else {}
+        t.add_column(head, no_wrap=True, **kw, **extra)
+    for i in range(len(picks)):
+        t.add_row(*[cells[i] for _, cells in cols.values()])
+
+    who = "the suggested drop"
+    if "Drop" not in cols and len(drops) == 1:
+        who = f"{next(iter(drops))}, the suggested drop,"
+    gain = "points he adds over your weakest starter on the days he plays, from the grab day to Sunday"
+    if "+Pts" in cols:
+        caption = f"+Pts = {gain}. Net subtracts what {who} would have scored."
+    else:
+        caption = f"Net = {gain}, minus what {who} would have scored."
+    t.caption = caption + " G = games he can still play for you."
     return t
 
 
-def trades(ideas: list[TradeIdea], pal: Palette, need: str | None = None) -> RenderableType:
+def trades(ideas: list[TradeIdea], pal: Palette, need: str | None = None,
+           league: League | None = None) -> RenderableType:
     if not ideas:
         if need:
+            full = _at_position_limit(league, need) if league else None
+            if full:
+                count, limit = full
+                return Text(f"You already have {count} {need.upper()} and this league allows at most "
+                            f"{limit}, so no trade can bring you another. Drop one or trade one away "
+                            "first.", style=pal.dim)
             return Text(f"No fair 1-for-1 deal brings you a {need.upper()} right now. Try a lower "
                         "--fairness, or `benchboss trades --needs` to see who is deep there.",
                         style=pal.dim)
@@ -175,6 +230,16 @@ def trades(ideas: list[TradeIdea], pal: Palette, need: str | None = None) -> Ren
                                    (f"   fairness {t.fairness:.0%}", pal.good)))
         parts.append(Text(f"   \"{t.message()}\"", style=pal.dim))
     return Group(*parts)
+
+
+def _at_position_limit(league: League, need: str) -> tuple[int, int] | None:
+    """(players you have, league limit) when the position is already full, else None."""
+    pos = next((k for k, v in POSITION.items() if v == need.upper()), None)
+    limit = league.position_limits.get(pos, -1) if pos is not None else -1
+    if limit is None or limit < 0:
+        return None
+    count = sum(1 for s in league.me.roster if s.player.position_id == pos)
+    return (count, limit) if count >= limit else None
 
 
 def needs(balance: dict[str, dict[str, float]], my_team: str, pal: Palette) -> RenderableType:
