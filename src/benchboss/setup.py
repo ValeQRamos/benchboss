@@ -5,10 +5,13 @@ from __future__ import annotations
 import re
 import sys
 import urllib.parse
+from collections.abc import Container
+
+from rich.markup import escape
 
 from benchboss import config as config_mod
 from benchboss import credentials
-from benchboss.errors import BenchbossError
+from benchboss.errors import AuthError, BenchbossError
 from benchboss.espn.client import Client, http
 from benchboss.espn.models import parse_league
 
@@ -51,6 +54,15 @@ def _ask(c, prompt: str, default: str = "") -> str:
     return answer or default
 
 
+def _ask_number(c, prompt: str, valid: Container[int], default: str = "") -> int:
+    """Ask until the answer is one of the numbers shown."""
+    while True:
+        answer = _ask(c, prompt, default)
+        if answer.isdigit() and int(answer) in valid:
+            return int(answer)
+        c.out.print("Type one of the numbers shown.")
+
+
 def run(c) -> None:
     pal = c.pal
     out = c.out
@@ -67,8 +79,13 @@ def run(c) -> None:
         if sys.platform == "darwin":
             how = _ask(c, "Import them from Chrome (c) or paste them (p)?", "c").lower()[:1]
         if how == "c":
-            source, s2, swid = credentials.from_chrome()
-        else:
+            try:
+                source, s2, swid = credentials.from_chrome()
+            except AuthError as e:
+                out.print(f"[{pal.dim}]Could not import from Chrome ({escape(str(e))}).[/] "
+                          "Paste them instead.")
+                how = "p"
+        if how != "c":
             import getpass
 
             out.print("In Chrome: espn.com > DevTools (Cmd/Ctrl+Option/Alt+I) > Application > "
@@ -93,8 +110,7 @@ def run(c) -> None:
         out.print("Your basketball leagues:")
         for i, lg in enumerate(leagues, 1):
             out.print(f"  {i}. {lg['league_name']}  [{pal.dim}]{lg['season']} · id {lg['league_id']}[/]")
-        n = int(_ask(c, "Which one?", "1"))
-        pick = leagues[max(1, min(n, len(leagues))) - 1]
+        pick = leagues[_ask_number(c, "Which one?", range(1, len(leagues) + 1), "1") - 1]
     if pick:
         league_id, team_id, season = pick["league_id"], pick["team_id"], pick["season"] or season
     else:
@@ -109,16 +125,21 @@ def run(c) -> None:
         teams = sorted(lg.teams.values(), key=lambda t: t.id)
         for t in teams:
             out.print(f"  {t.id}. {t.name}  [{pal.dim}]{t.owner_name}[/]")
-        lg.my_team_id = int(_ask(c, "Which team is yours (number)?"))
+        lg.my_team_id = _ask_number(c, "Which team is yours (number)?", lg.teams)
     out.print(f"[{pal.good}]✓[/] {lg.name}: you are [bold]{lg.me.name}[/].")
 
     # 4. colors
     theme = _ask(c, "Terminal background: dark (d) or light (l)?", "d").lower()[:1]
     cfg = c.cfg
-    cfg.league_id, cfg.team_id, cfg.season = league_id, lg.my_team_id, season
+    cfg.league_id, cfg.team_id = league_id, lg.my_team_id
+    # Save no season for the current one, so benchboss follows the league into next season.
+    cfg.season = None if season == config_mod.current_season() else season
     cfg.league_name, cfg.team_name = lg.name, lg.me.name
     cfg.theme = "light" if theme == "l" else "dark"
     path = config_mod.save(cfg)
     out.print(f"[{pal.good}]✓[/] Saved to {path}\n")
+    if cfg.season:
+        out.print(f"[{pal.dim}]This league is from the {season - 1}-{season % 100:02d} season, so "
+                  "benchboss stays on it. Run `benchboss setup` again once ESPN renews it.[/]\n")
     out.print("You are all set. Try:\n  [bold]benchboss[/]            the app\n"
               "  [bold]benchboss dash[/]       the dashboard\n  [bold]benchboss optimize week[/]")

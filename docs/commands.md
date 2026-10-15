@@ -3,7 +3,9 @@
 Generated from the CLI by `python tools/gen_commands_doc.py`. Every command also
 accepts the global flags `--json`, `--demo`, `--theme dark|light` and `--yes`.
 
-Running `benchboss` with no command opens the interactive app.
+Running `benchboss` with no command opens the interactive app (it needs a terminal).
+With `--json`, write commands print one JSON result as well; without `--yes` they
+send nothing and exit with code 10.
 
 ## Look
 
@@ -81,7 +83,7 @@ benchboss fa [-h] [--json] [--demo] [--theme {dark,light}] [-y] [-n N]
 | Option | Meaning |
 |---|---|
 | `pos` | PG SG SF PF C G F |
-| `-n` |  |
+| `-n` | How many (default 25) |
 
 ### `benchboss trending`
 
@@ -94,7 +96,7 @@ benchboss trending [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 
 | Option | Meaning |
 |---|---|
-| `-n` |  |
+| `-n` | How many (default 15) |
 
 ### `benchboss news`
 
@@ -109,7 +111,7 @@ benchboss news [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 | Option | Meaning |
 |---|---|
 | `players` | Player names; default: your roster |
-| `--days` |  |
+| `--days` | How many days back (default 5) |
 | `--ai` | AI briefing with web search (needs ANTHROPIC_API_KEY) |
 
 ### `benchboss trades`
@@ -128,7 +130,7 @@ benchboss trades [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 | `--with` | Only this team or manager |
 | `--fairness` | Minimum value match 0-1 (default 0.85) |
 | `--needs` | Show every team's positional surplus and needs |
-| `-n` |  |
+| `-n` | How many ideas (default 8) |
 
 ### `benchboss alerts`
 
@@ -168,7 +170,7 @@ benchboss add [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 
 | Option | Meaning |
 |---|---|
-| `player` |  |
+| `player` | The free agent or waiver player to add |
 | `--dry-run` | Show the move, send nothing |
 | `--drop` | Player to release in the same move |
 | `--bid` | FAAB bid, if your league uses a budget |
@@ -185,7 +187,7 @@ benchboss drop [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 
 | Option | Meaning |
 |---|---|
-| `player` |  |
+| `player` | The player on your roster to release |
 | `--dry-run` | Show the move, send nothing |
 
 ### `benchboss trade`
@@ -199,8 +201,8 @@ benchboss trade [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 
 | Option | Meaning |
 |---|---|
-| `--give` |  |
-| `--get` |  |
+| `--give` | Your player to send (repeat for more) |
+| `--get` | Their player you want (repeat for more, all from one team) |
 | `--msg` | Note the other manager will see |
 | `--dry-run` | Show the offer, send nothing |
 
@@ -216,10 +218,10 @@ benchboss chat [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 
 | Option | Meaning |
 |---|---|
-| `text` |  |
+| `text` | Message to post; leave it out to read the chat |
 | `--to` | Direct message instead of the league chat |
 | `--dry-run` | Show the message, send nothing |
-| `-n` |  |
+| `-n` | How many messages to show (default 15) |
 
 ## Account
 

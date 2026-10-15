@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import datetime as dt
 import getpass
 import json
 import sys
@@ -13,7 +15,7 @@ from rich.text import Text
 
 from benchboss import __version__, credentials
 from benchboss import config as config_mod
-from benchboss.errors import BenchbossError, NotConfirmed, WriteFailed
+from benchboss.errors import BenchbossError, ConfigError, NotConfirmed, WriteFailed
 from benchboss.ui import views
 from benchboss.ui.theme import palette
 
@@ -34,7 +36,12 @@ docs: https://github.com/ValeQRamos/benchboss   bugs and ideas: k1lldeer@proton.
 class Ctx:
     def __init__(self, args):
         self.args = args
-        self.cfg = config_mod.load()
+        try:
+            self.cfg = config_mod.load()
+        except ConfigError:
+            if not args.demo:
+                raise
+            self.cfg = config_mod.Config()  # the demo league does not need the real config
         if getattr(args, "theme", None):
             self.cfg.theme = args.theme
         self.pal = palette(self.cfg.theme)
@@ -78,7 +85,14 @@ class Ctx:
 
 # --- account ------------------------------------------------------------------------------------
 
+def _not_in_demo(c: Ctx) -> None:
+    if c.args.demo:
+        raise BenchbossError(f"`{c.args.cmd}` works on your real account, so it is off in demo mode; "
+                             "run it without --demo")
+
+
 def cmd_login(c: Ctx):
+    _not_in_demo(c)
     a = c.args
     if a.manual or (not a.chrome and sys.platform != "darwin"):
         c.out.print("Paste your ESPN cookies (they are hidden while you type).\n"
@@ -95,20 +109,25 @@ def cmd_login(c: Ctx):
 
 
 def cmd_logout(c: Ctx):
+    _not_in_demo(c)
     credentials.clear()
     c.out.print("Cookies removed.")
 
 
 def cmd_setup(c: Ctx):
+    _not_in_demo(c)
     from benchboss import setup as setup_mod
 
     setup_mod.run(c)
 
 
 def cmd_status(c: Ctx):
+    if c.args.demo:
+        _demo_status(c)
+        return
     cfg = c.cfg
     creds = credentials.get()
-    data = {"version": __version__, "config": str(cfg.path), "league_id": cfg.league_id,
+    data = {"version": __version__, "demo": False, "config": str(cfg.path), "league_id": cfg.league_id,
             "team_id": cfg.team_id, "season": cfg.effective_season, "theme": cfg.theme,
             "cookies": bool(creds)}
     lines = [f"benchboss {__version__}", f"config     {cfg.path}",
@@ -122,9 +141,23 @@ def cmd_status(c: Ctx):
             data["connected"] = True
             lines.append(f"ESPN       connected: {lg.name}, team {lg.me.name}")
         except BenchbossError as e:
-            data["connected"] = False
+            # keep the reason in the JSON too: exit code 3 means the cookies need a new login
+            data.update(connected=False, error=str(e), error_code=e.exit_code)
             lines.append(f"ESPN       {e}")
     c.emit("\n".join(lines), data)
+
+
+def _demo_status(c: Ctx):
+    """Status of the built-in demo league; the real config and keychain are never read."""
+    lg = c.session.league()
+    data = {"version": __version__, "demo": True, "config": None, "league_id": lg.id,
+            "team_id": lg.my_team_id, "season": lg.season, "theme": c.cfg.theme,
+            "cookies": None, "connected": False}
+    lines = [f"benchboss {__version__}",
+             "mode       demo: built-in sample data, your config and cookies are not read",
+             f"league     {lg.id} {lg.name}", f"team       {lg.my_team_id} {lg.me.name}",
+             f"season     {lg.season}", f"theme      {c.cfg.theme}"]
+    c.emit(Text("\n".join(lines)), data)
 
 
 # --- read -------------------------------------------------------------------------------------------
@@ -147,17 +180,41 @@ def cmd_dash(c: Ctx):
     with Live(console=c.out, screen=True, auto_refresh=False) as live:
         while True:
             try:
-                live.update(dashboard.render(once(), c.pal, c.out.width), refresh=True)
+                board = dashboard.render(once(), c.pal, c.out.width)
+                live.update(_fit_height(c.out, board, c.out.height, c.pal), refresh=True)
             except BenchbossError as e:
                 live.update(f"[{c.pal.bad}]{e}[/] (retrying)", refresh=True)
             time.sleep(max(15, c.args.watch))
+
+
+def _fit_height(console: Console, renderable, height: int, pal):
+    """Cut a render that is taller than the screen and say so: a full-screen Live view
+    would crop it without any hint."""
+    lines = console.render_lines(renderable, console.options, pad=False)
+    if len(lines) <= height:
+        return renderable
+    from rich.console import Group
+    from rich.segment import SegmentLines
+
+    return Group(SegmentLines(lines[:max(1, height - 1)], new_lines=True),
+                 Text("more below: make the pane taller", style=pal.dim, no_wrap=True,
+                      overflow="ellipsis"))
+
+
+def _period_today(s) -> int | None:
+    """Today's scoring period, or None before or after the season (today_period is clamped
+    to the season, so on its own it would point at opening night during the preseason)."""
+    sp = s.today_period
+    return sp if s.calendar.date_of(sp) == s.today else None
 
 
 def cmd_roster(c: Ctx):
     s = c.session
     lg = s.league()
     cal = s.calendar
-    today = {sp.player.id for sp in lg.me.roster if cal.plays(sp.player.pro_team_id, s.today_period)}
+    sp_today = _period_today(s)
+    today = ({sp.player.id for sp in lg.me.roster if cal.plays(sp.player.pro_team_id, sp_today)}
+             if sp_today else set())
     c.emit(views.roster(lg, c.pal, today),
            [{"slot": sp.slot, "plays_today": sp.player.id in today, **sp.player.to_dict()}
             for sp in lg.me.roster])
@@ -183,7 +240,8 @@ def cmd_activity(c: Ctx):
     s = c.session
     acts = s.activity()
     periods = s.matchup_periods()
-    c.emit(views.activity(acts, s.calendar, periods, s.today_period, c.pal),
+    # the real day, not clamped: before the season no column is marked as today
+    c.emit(views.activity(acts, s.calendar, periods, s.calendar.period_of(s.today), c.pal),
            [a.to_dict() for a in acts])
 
 
@@ -220,10 +278,16 @@ def cmd_trades(c: Ctx):
 def _partner(s, q):
     if not q:
         return None
-    from benchboss.text import match_one
+    from benchboss.text import match_one, norm
+
+    def label(t):
+        return f"{t.name} {t.owner_name}"
 
     lg = s.league()
-    return match_one(lg.teams.values(), q, lambda t: f"{t.name} {t.owner_name}", where="this league").id
+    others = [t for t in lg.teams.values() if t.id != lg.my_team_id]
+    if not any(norm(q) in norm(label(t)) for t in others) and norm(q) in norm(label(lg.me)):
+        raise BenchbossError(f"'{q}' is your own team: name another team or manager")
+    return match_one(others, q, label, where="the other teams of this league", kind="teams").id
 
 
 def cmd_news(c: Ctx):
@@ -262,16 +326,14 @@ def cmd_optimize(c: Ctx):
         raise BenchbossError("those days are already over")
     plans = s.plan_days(periods)
     todo = [p for p in plans if p.changed]
-    if c.args.json and (c.args.dry_run or not c.args.yes):
-        print(json.dumps([{"date": s.calendar.date_of(p.period).isoformat(),
-                           "moves": [str(m) for m in p.moves], "projected": round(p.projected, 1)}
-                          for p in plans], indent=2))
+    if c.args.json:
+        _optimize_json(c, s, plans, todo)
         return
+    when = _when(s, plans)
     if not c.args.quiet:
         c.out.print(views.plan(plans, s.calendar, c.pal))
     if not todo:
-        c.out.print(Text(f"✓ Your lineup is already optimal for {_span(len(plans))}.",
-                         style=c.pal.good))
+        c.out.print(Text(f"✓ Your lineup is already optimal for {when}.", style=c.pal.good))
         return
     if c.args.dry_run:
         c.out.print(Text("Dry run: nothing was sent. Moves on one day carry forward, so later "
@@ -280,61 +342,146 @@ def cmd_optimize(c: Ctx):
     if not c.confirm(f"Apply the lineup for {len(plans)} day{'s' * (len(plans) != 1)}?"):
         return
     results = s.apply_days([p.period for p in plans])
+    for r in results:
+        if not r.error and r.status != "ALREADY_OPTIMAL":
+            c.out.print(Text(f"{_label(s.calendar.date_of(r.plan.period))}: ESPN: {r.status}",
+                             style=c.pal.dim))
+    moves, days = _check_results(c, s, results)
+    done = f"{moves} move{'s' * (moves != 1)}"
+    if len(plans) == 1:
+        msg = f"✓ Your lineup for {when} is set: {done}."
+    else:
+        msg = f"✓ Your week is set: {done} across {days} day{'s' * (days != 1)}."
+    c.out.print(Text(msg, style=f"bold {c.pal.good}"))
+
+
+def _optimize_json(c: Ctx, s, plans, todo) -> None:
+    """JSON mode: the plan (dry run or not confirmed) or what ESPN answered for each day.
+    stdout stays valid JSON; errors go to stderr with the usual exit codes."""
+    from benchboss.service import OptimizeResult
+
+    def row(plan, result=None):
+        out = {"date": s.calendar.date_of(plan.period).isoformat(),
+               "moves": [str(m) for m in plan.moves], "projected": round(plan.projected, 1)}
+        if result is not None:
+            out.update(status=result.status or None, error=result.error or None)
+        return out
+
+    if c.args.dry_run or not c.args.yes:
+        print(json.dumps([row(p) for p in plans], indent=2))
+        if todo and not c.args.dry_run:
+            raise NotConfirmed("NOT DONE: nothing was sent; repeat with --yes to apply the plan")
+        return
+    if todo:
+        results = s.apply_days([p.period for p in plans])
+    else:
+        results = [OptimizeResult(p, status="ALREADY_OPTIMAL") for p in plans]
+    print(json.dumps([row(r.plan, r) for r in results], indent=2))
+    _check_results(c, s, results)
+
+
+def _check_results(c: Ctx, s, results) -> tuple[int, int]:
+    """Count what ESPN applied; raise WriteFailed (exit 4) when any day was not set."""
     moves, days, failed = 0, 0, []
     for r in results:
-        day = s.calendar.date_of(r.plan.period)
-        label = f"{day:%a %b} {day.day}"
         if r.error:
-            failed.append(f"{label}: {r.error}")
+            failed.append(f"{_label(s.calendar.date_of(r.plan.period))}: {r.error}")
         elif r.status != "ALREADY_OPTIMAL":
             moves += len(r.plan.moves)
             days += 1
-            c.out.print(Text(f"{label}: ESPN: {r.status}", style=c.pal.dim))
     for f in failed:
         c.err.print(Text(f"✗ {f}", style=c.pal.bad))
     if failed:
-        raise WriteFailed(f"{len(failed)} day(s) were not set; the others were sent")
-    c.out.print(Text(f"✓ Your {_span(len(plans))} is set: {moves} move{'s' * (moves != 1)} "
-                     f"across {days} day{'s' * (days != 1)}.", style=f"bold {c.pal.good}"))
+        rest = "nothing was changed" if days == 0 else f"{days} other day(s) were set"
+        raise WriteFailed(f"{len(failed)} day(s) were not set; {rest}")
+    return moves, days
 
 
-def _span(n_days: int) -> str:
-    return "day" if n_days == 1 else "week"
+def _label(day: dt.date) -> str:
+    return f"{day:%a %b} {day.day}"
 
 
-def _write(c: Ctx, pending):
-    c.out.print(Text(pending.summary))
+def _when(s, plans) -> str:
+    """'today', 'tomorrow' or the date for one day; 'the rest of the week' for several."""
+    if len(plans) != 1:
+        return "the rest of the week"
+    day = s.calendar.date_of(plans[0].period)
+    if day == s.today:
+        return "today"
+    if day == s.today + dt.timedelta(days=1):
+        return "tomorrow"
+    return _label(day)
+
+
+def _write(c: Ctx, summary: str, send) -> None:
+    """Show a write, ask, send it and print ESPN's answer.
+
+    With --json, stdout gets one JSON object (summary, dry_run, sent, status, error) and
+    nothing else. ESPN can answer HTTP 200 with a FAILED_* status (roster lock, undroppable
+    player and so on): that exits 4 like any other refused write."""
+    js = c.args.json
+    result = {"summary": summary, "dry_run": bool(c.args.dry_run), "sent": False,
+              "status": None, "error": None}
+    if not js:
+        c.out.print(Text(summary))
     if c.args.dry_run:
-        c.out.print(Text("Dry run: nothing was sent.", style=c.pal.dim))
+        if js:
+            print(json.dumps(result, indent=2))
+        else:
+            c.out.print(Text("Dry run: nothing was sent.", style=c.pal.dim))
         return
-    if c.confirm():
-        c.out.print(f"ESPN: {pending.run(c.session)}")
+    if js and not c.args.yes:
+        # never prompt in JSON mode: the question would end up inside the JSON
+        print(json.dumps(result, indent=2))
+        raise NotConfirmed("NOT DONE: nothing was sent; repeat with --yes to send it")
+    if not c.confirm():
+        return
+    try:
+        status = send()
+    except BenchbossError as e:
+        if js:
+            print(json.dumps({**result, "error": str(e)}, indent=2))
+        raise
+    failed = status.startswith("FAILED")
+    if js:
+        print(json.dumps({**result, "sent": True, "status": status,
+                          "error": f"ESPN answered {status}" if failed else None}, indent=2))
+    else:
+        c.out.print(Text(f"ESPN: {status}"))
+    if failed:
+        raise WriteFailed(f"ESPN answered {status}")
 
 
 def cmd_add(c: Ctx):
     from benchboss import actions
 
-    _write(c, actions.prepare_add(c.session, c.args.player, c.args.drop, c.args.bid))
+    p = actions.prepare_add(c.session, c.args.player, c.args.drop, c.args.bid)
+    _write(c, p.summary, lambda: p.run(c.session))
 
 
 def cmd_drop(c: Ctx):
     from benchboss import actions
 
-    _write(c, actions.prepare_drop(c.session, c.args.player))
+    p = actions.prepare_drop(c.session, c.args.player)
+    _write(c, p.summary, lambda: p.run(c.session))
 
 
 def cmd_trade(c: Ctx):
     from benchboss import actions
 
-    _write(c, actions.prepare_trade(c.session, c.args.give, c.args.get, c.args.msg or ""))
+    p = actions.prepare_trade(c.session, c.args.give, c.args.get, c.args.msg or "")
+    _write(c, p.summary, lambda: p.run(c.session))
 
 
 def cmd_chat(c: Ctx):
     from benchboss import inbox
 
     s = c.session
+    text = (c.args.text or "").strip()
+    if c.args.text is not None and not text:
+        raise BenchbossError("the message is empty: nothing to send")
     to = inbox.resolve_member(s, c.args.to) if c.args.to else None
-    if not c.args.text:
+    if not text:
         tid, label = inbox.thread(s, to)
         msgs = inbox.messages(s, tid, c.args.n) if tid else []
         ppl = inbox.people(s)
@@ -350,12 +497,7 @@ def cmd_chat(c: Ctx):
             c.out.print(Text("(no messages yet)", style=c.pal.dim))
         return
     _, label = inbox.thread(s, to)
-    c.out.print(Text(f"Message to {label}: {c.args.text}"))
-    if c.args.dry_run:
-        c.out.print(Text("Dry run: nothing was sent.", style=c.pal.dim))
-        return
-    if c.confirm():
-        c.out.print(f"ESPN: {inbox.send(s, c.args.text, to)}")
+    _write(c, f"Message to {label}: {text}", lambda: inbox.send(s, text, to))
 
 
 def cmd_app(c: Ctx):
@@ -365,6 +507,17 @@ def cmd_app(c: Ctx):
 
 
 # --- parser -------------------------------------------------------------------------------------------
+
+def _count(value: str) -> int:
+    """argparse type for -n and --days: a whole number, 1 or more."""
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{value}' is not a whole number") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return n
+
 
 def build_parser() -> argparse.ArgumentParser:
     def global_options(suppress: bool) -> argparse.ArgumentParser:
@@ -412,15 +565,15 @@ def build_parser() -> argparse.ArgumentParser:
     add("activity", cmd_activity, "games per player this matchup week, day by day")
     p = add("trash", cmd_trash, "most valuable free agents for this week (points added, best day to grab)")
     p.add_argument("pos", nargs="?", help="PG SG SF PF C G F")
-    p.add_argument("-n", type=int, default=10, help="how many (default 10)")
+    p.add_argument("-n", type=_count, default=10, help="how many (default 10)")
     p = add("fa", cmd_fa, "free agents by %% rostered")
     p.add_argument("pos", nargs="?", help="PG SG SF PF C G F")
-    p.add_argument("-n", type=int, default=25)
+    p.add_argument("-n", type=_count, default=25, help="how many (default 25)")
     p = add("trending", cmd_fa, "free agents being added the most")
-    p.add_argument("-n", type=int, default=15)
+    p.add_argument("-n", type=_count, default=15, help="how many (default 15)")
     p = add("news", cmd_news, "recent news and spins on your players (or on the players you name)")
     p.add_argument("players", nargs="*", help="player names; default: your roster")
-    p.add_argument("--days", type=int, default=5)
+    p.add_argument("--days", type=_count, default=5, help="how many days back (default 5)")
     p.add_argument("--ai", action="store_true", help="AI briefing with web search (needs ANTHROPIC_API_KEY)")
     p = add("trades", cmd_trades, "trade finder: fair 1-for-1 deals that fix positional needs")
     p.add_argument("--need", choices=["PG", "SG", "SF", "PF", "C", "pg", "sg", "sf", "pf", "c"],
@@ -428,7 +581,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--with", dest="partner", metavar="TEAM", help="only this team or manager")
     p.add_argument("--fairness", type=float, default=0.85, help="minimum value match 0-1 (default 0.85)")
     p.add_argument("--needs", action="store_true", help="show every team's positional surplus and needs")
-    p.add_argument("-n", type=int, default=8)
+    p.add_argument("-n", type=_count, default=8, help="how many ideas (default 8)")
     add("alerts", cmd_alerts, "trade offers, accepted trades, pending claims, unread DMs")
 
     p = add("optimize", cmd_optimize, "set the best lineup: today, tomorrow, week, or a date")
@@ -436,30 +589,49 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="show the plan, send nothing")
     p.add_argument("-q", "--quiet", action="store_true", help="only print the final result")
     p = add("add", cmd_add, "sign a free agent or put in a waiver claim")
-    p.add_argument("player")
+    p.add_argument("player", help="the free agent or waiver player to add")
     p.add_argument("--dry-run", action="store_true", help="show the move, send nothing")
     p.add_argument("--drop", help="player to release in the same move")
     p.add_argument("--bid", type=int, help="FAAB bid, if your league uses a budget")
     p = add("drop", cmd_drop, "release a player")
-    p.add_argument("player")
+    p.add_argument("player", help="the player on your roster to release")
     p.add_argument("--dry-run", action="store_true", help="show the move, send nothing")
     p = add("trade", cmd_trade, "send a trade offer")
-    p.add_argument("--give", action="append", required=True, metavar="PLAYER")
-    p.add_argument("--get", action="append", required=True, metavar="PLAYER")
+    p.add_argument("--give", action="append", required=True, metavar="PLAYER",
+                   help="your player to send (repeat for more)")
+    p.add_argument("--get", action="append", required=True, metavar="PLAYER",
+                   help="their player you want (repeat for more, all from one team)")
     p.add_argument("--msg", help="note the other manager will see")
     p.add_argument("--dry-run", action="store_true", help="show the offer, send nothing")
     p = add("chat", cmd_chat, "read or post in the league chat, or a DM with --to")
-    p.add_argument("text", nargs="?")
+    p.add_argument("text", nargs="?", help="message to post; leave it out to read the chat")
     p.add_argument("--to", metavar="TEAM_OR_NAME", help="direct message instead of the league chat")
     p.add_argument("--dry-run", action="store_true", help="show the message, send nothing")
-    p.add_argument("-n", type=int, default=15)
+    p.add_argument("-n", type=_count, default=15, help="how many messages to show (default 15)")
     return ap
 
 
+def _isatty(stream) -> bool:
+    try:
+        return bool(stream and stream.isatty())
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
 def main(argv: list[str] | None = None) -> None:
+    # A console that cannot show a character (Windows pipes and redirects use the ANSI code
+    # page) gets a "?" instead of a crash, which matters most after a write went through.
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError, ValueError, OSError):
+            stream.reconfigure(errors="replace")
     ap = build_parser()
     args = ap.parse_args(argv)
-    if not args.cmd:
+    if not args.cmd or args.cmd == "app":
+        if args.json:
+            ap.error("--json needs a command, for example `benchboss dash --json`")
+        if not (_isatty(sys.stdin) and _isatty(sys.stdout)):
+            ap.error("the interactive app needs a terminal; run a command instead, "
+                     "for example `benchboss dash` (see `benchboss -h`)")
         args.cmd, args.fn = "app", cmd_app
     try:
         c = Ctx(args)
@@ -467,6 +639,9 @@ def main(argv: list[str] | None = None) -> None:
     except BenchbossError as e:
         Console(stderr=True, highlight=False).print(Text.assemble(("benchboss: ", "bold red"), str(e)))
         sys.exit(e.exit_code)
+    except EOFError:  # Ctrl-D or no input at a prompt
+        print("\nbenchboss: cancelled, no input", file=sys.stderr)
+        sys.exit(130)
     except KeyboardInterrupt:
         sys.exit(130)
 
