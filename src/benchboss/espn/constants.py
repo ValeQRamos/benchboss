@@ -25,14 +25,18 @@ PRO_TEAM = {0: "FA", 1: "ATL", 2: "BOS", 3: "NOP", 4: "CHI", 5: "CLE", 6: "DAL",
             23: "SAC", 24: "SAS", 25: "OKC", 26: "UTA", 27: "WSH", 28: "TOR", 29: "MEM",
             30: "CHA"}
 
-# player.injuryStatus -> short tag
+# player.injuryStatus -> short tag (bereavement and paternity leave read as OUT)
 INJURY_TAG = {"ACTIVE": "", "NORMAL": "", "DAY_TO_DAY": "DTD", "OUT": "OUT",
               "SUSPENSION": "SUSP", "INJURY_RESERVE": "IR", "QUESTIONABLE": "Q",
-              "PROBABLE": "P", "DOUBTFUL": "D"}
+              "PROBABLE": "P", "DOUBTFUL": "D", "BEREAVEMENT": "OUT", "PATERNITY": "OUT"}
 
 # How much of a player's projection we trust for a given status when planning lineups.
-INJURY_FACTOR = {"OUT": 0.0, "SUSPENSION": 0.0, "INJURY_RESERVE": 0.0, "DOUBTFUL": 0.25,
-                 "DAY_TO_DAY": 0.75, "QUESTIONABLE": 0.75}
+INJURY_FACTOR = {"OUT": 0.0, "SUSPENSION": 0.0, "INJURY_RESERVE": 0.0, "BEREAVEMENT": 0.0,
+                 "PATERNITY": 0.0, "DOUBTFUL": 0.25, "DAY_TO_DAY": 0.75, "QUESTIONABLE": 0.75}
+
+# rosterSettings.rosterLocktimeType: adds and drops made after the day's first tip-off only
+# take effect the next day.
+ROSTER_LOCK_FIRST_GAME = "FIRSTGAME_SCORINGPERIOD"
 
 # Stat ids used by points leagues (scoringSettings.scoringItems[].statId)
 STAT = {0: "PTS", 1: "BLK", 2: "STL", 3: "AST", 4: "OREB", 5: "DREB", 6: "REB", 7: "EJ",

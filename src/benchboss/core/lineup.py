@@ -24,20 +24,26 @@ def day_value(p: Player, period: int, cal: SeasonCalendar) -> float:
 
 
 def best_lineup(pool: list[RosterSpot], slot_counts: dict[int, int],
-                values: list[float]) -> dict[int, int]:
+                values: list[float], can_play: list[bool] | None = None) -> dict[int, int]:
     """Index into ``pool`` -> starting slot id, maximizing the sum of ``values``.
 
     Ties keep players where they already are (a tiny bonus), so a "no-op" day stays a no-op.
+    A player who plays but has no projection yet still beats an empty slot. ``can_play``
+    (one flag per player) marks who can score that day at all: the others are worth nothing,
+    so they are never moved into a slot, only left where they already are.
     """
     slots = [s for s, n in sorted(slot_counts.items()) if s not in (BENCH, IR) for _ in range(n)]
     elig = [set(spot.player.eligible_slots) for spot in pool]
+    worth = [values[i] or (1e-3 if can_play is None or can_play[i] else 0.0)
+             for i in range(len(pool))]
     best: dict[int, tuple[float, tuple]] = {0: (0.0, ())}
     for sl in slots:
         nxt: dict[int, tuple[float, tuple]] = {}
         for mask, (val, picks) in best.items():
             options = [(None, 0.0)] + [
-                (i, (values[i] or 1e-3) + (1e-6 if pool[i].slot_id == sl else 0.0))
-                for i in range(len(pool)) if not mask >> i & 1 and sl in elig[i]]
+                (i, worth[i] + (1e-6 if pool[i].slot_id == sl else 0.0))
+                for i in range(len(pool)) if not mask >> i & 1 and sl in elig[i]
+                and (worth[i] > 0 or pool[i].slot_id == sl)]
             for i, v in options:
                 m2 = mask if i is None else mask | 1 << i
                 cand = (val + v, picks + ((i, sl),))
@@ -100,7 +106,9 @@ def plan_day(roster: list[RosterSpot], slot_counts: dict[int, int], period: int,
         else:
             plan.bench.append((s.player, "locked"))
     values = [day_value(s.player, period, cal) for s in pool]
-    assign = best_lineup(pool, counts, values)
+    can_play = [cal.plays(s.player.pro_team_id, period)
+                and INJURY_FACTOR.get(s.player.injury_status or "", 1.0) > 0 for s in pool]
+    assign = best_lineup(pool, counts, values, can_play)
     for i, spot in enumerate(pool):
         target = assign.get(i, BENCH)
         if spot.slot_id != target:
@@ -117,7 +125,7 @@ def plan_day(roster: list[RosterSpot], slot_counts: dict[int, int], period: int,
 def _bench_reason(p: Player, period: int, cal: SeasonCalendar) -> str:
     if not cal.plays(p.pro_team_id, period):
         return "no game"
-    if p.injury in ("OUT", "SUSP", "IR"):
+    if INJURY_FACTOR.get(p.injury_status or "", 1.0) == 0:
         return p.injury
     tag = f"{p.injury} " if p.injury else ""
     return f"{tag}proj {p.proj:.1f}"

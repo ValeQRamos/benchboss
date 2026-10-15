@@ -25,7 +25,7 @@ def test_trash_ranks_by_net_gain(session):
     assert nets == sorted(nets, reverse=True)
     for p in picks:
         assert p.best_day is None or p.best_day >= session.today_period
-        assert p.drop is not None
+        assert p.drop is None or p.drop.proj < p.player.proj
 
 
 def test_trade_ideas_are_fair_and_varied(session):

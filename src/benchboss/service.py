@@ -201,8 +201,12 @@ class Session:
         lg = self.league()
         fas = self.free_agents(pool, position)
         waiver_days = max(1, round(lg.waiver_hours / 24)) if lg.waiver_hours else 1
+        # before the season today_period is opening night, but waivers clear from the real day
+        waiver_days = max(0, self.calendar.period_of(self.today) + waiver_days - self.today_period)
         picks = trash_mod.scout(fas, lg.me, self.calendar, self.matchup_periods(),
-                                self.today_period, lg.starter_slots, waiver_days, self.now)
+                                self.today_period, lg.starter_slots, waiver_days, self.now,
+                                slot_counts=lg.slot_counts, roster_lock=lg.roster_lock_type,
+                                position_limits=lg.position_limits)
         return picks[:n]
 
     def trades(self, need: str | None = None, partner: str | None = None,

@@ -5,17 +5,26 @@ SG, SF, PF and C (a multi-position player counts a share at each position). Comp
 team with the league average shows its surplus and its needs. A suggestion pairs a player
 from a position where you are deep and they are thin with one from a position where they are
 deep and you are thin, at a similar value, and respects the league's position limits
-(for example, no more than four centers).
+(for example, no more than four centers). Players who cannot play right now (out, suspended,
+injured reserve) are left out, and so are swaps that would not change either team's positions.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from benchboss.espn.constants import IR, POSITION, POSITION_SLOTS, POSITION_TO_SLOT, SLOT
+from benchboss.espn.constants import (
+    INJURY_FACTOR,
+    IR,
+    POSITION,
+    POSITION_SLOTS,
+    POSITION_TO_SLOT,
+    SLOT,
+)
 from benchboss.espn.models import League, Player, Team
 
 POSITIONS = [SLOT[s] for s in POSITION_SLOTS]  # PG SG SF PF C
+CLOSE_IN_VALUE = 0.85  # fairness from which the pitch calls a deal close in value
 
 
 def profile(team: Team) -> dict[str, float]:
@@ -65,8 +74,10 @@ class TradeIdea:
         why = (" and ".join(reasons) + ". ") if reasons else ""
         why = why[:1].upper() + why[1:]
         mine = f"I need a {self.get_pos}. " if self.i_need_get else ""
-        return (f"Hey {owner}! {why}{mine}{self.give.name} for {self.get.name} is close in "
-                f"value and helps both of us. Interested?").replace("! . ", "! ")
+        value = ("is close in value and helps both of us" if self.fairness >= CLOSE_IN_VALUE
+                 else "could help both of us")
+        return (f"Hey {owner}! {why}{mine}{self.give.name} for {self.get.name} {value}. "
+                f"Interested?").replace("! . ", "! ")
 
     def to_dict(self) -> dict:
         return {"partner": self.partner.name, "owner": self.partner.owner_name,
@@ -79,6 +90,15 @@ class TradeIdea:
 def _primary(p: Player) -> str | None:
     slot = POSITION_TO_SLOT.get(p.position_id)
     return SLOT[slot] if slot is not None else None
+
+
+def _unavailable(p: Player) -> bool:
+    """Out, suspended or on injured reserve: his projection says nothing about now."""
+    return INJURY_FACTOR.get(p.injury_status or "", 1.0) == 0
+
+
+def _position_set(p: Player) -> set[int]:
+    return {s for s in p.eligible_slots if s in POSITION_SLOTS}
 
 
 def _count_position(team: Team, position_id: int) -> int:
@@ -105,13 +125,15 @@ def find_trades(league: League, need: str | None = None, partner_id: int | None 
         for gs in me.roster:
             give = gs.player
             gp = _primary(give)
-            if gs.slot_id == IR or not gp or mine[gp] <= 0 or theirs[gp] >= 0:
+            if gs.slot_id == IR or not gp or mine[gp] <= 0 or theirs[gp] >= 0 or _unavailable(give):
                 continue
             for ts in team.roster:
                 get = ts.player
                 tp = _primary(get)
-                if ts.slot_id == IR or not tp or tp == gp:
+                if ts.slot_id == IR or not tp or tp == gp or _unavailable(get):
                     continue
+                if _position_set(get) == _position_set(give):
+                    continue  # same eligibility: neither team's positions change
                 if need and tp != need.upper():
                     continue
                 if not need and (mine[tp] >= 0 or theirs[tp] <= 0):

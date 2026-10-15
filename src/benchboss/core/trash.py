@@ -8,19 +8,23 @@ rest of the matchup week:
   would otherwise play that day (or fill an empty slot);
 * the gain is computed for every possible pickup day, because a player picked up on
   Wednesday misses Monday and Tuesday;
-* players on waivers cannot help until their waiver period clears;
-* the suggested drop is the rostered player whose loss costs the least over the same days.
+* players on waivers cannot help until their waiver period clears, and in leagues whose
+  rosters lock at the day's first tip-off an add made after it only counts from tomorrow;
+* the suggested drop is the rostered player whose loss costs the least over the same days,
+  among those projected below the free agent (never a better player for a streamer) and
+  within the league's position limits. With an open roster spot nobody has to go.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from benchboss.core.calendar import SeasonCalendar
 from benchboss.core.lineup import day_value
 from benchboss.core.projection import not_started
-from benchboss.espn.constants import IR
+from benchboss.espn.constants import IR, ROSTER_LOCK_FIRST_GAME
 from benchboss.espn.models import Player, Team
 
 
@@ -34,6 +38,7 @@ class TrashPick:
     drop: Player | None = None
     drop_cost: float = 0.0     # points lost this week by dropping ``drop``
     on_waivers: bool = False
+    needs_drop: bool = True    # no open spot: ``drop`` None then means there is no clear drop
 
     @property
     def net(self) -> float:
@@ -47,7 +52,7 @@ class TrashPick:
                 "best_pickup_day": best, "week_gain": round(self.gain, 1),
                 "drop": self.drop.name if self.drop else None,
                 "drop_cost": round(self.drop_cost, 1), "net_gain": round(self.net, 1),
-                "on_waivers": self.on_waivers}
+                "on_waivers": self.on_waivers, "needs_drop": self.needs_drop}
 
 
 def _day_tables(team: Team, cal: SeasonCalendar, periods: list[int]) -> dict[int, list[tuple[float, int]]]:
@@ -75,12 +80,18 @@ def _contribution(pid: int, table: list[tuple[float, int]], starters: int) -> fl
     return max(0.0, vals[ids.index(pid)] - replacement)
 
 
-def weakest_link(team: Team, cal: SeasonCalendar, periods: list[int], starters: int) -> tuple[Player | None, float]:
-    """The rostered player whose loss costs the fewest points over ``periods``."""
-    tables = _day_tables(team, cal, periods)
+def weakest_link(team: Team, cal: SeasonCalendar, periods: list[int], starters: int,
+                 allowed: Callable[[Player], bool] | None = None,
+                 tables: dict[int, list[tuple[float, int]]] | None = None,
+                 ) -> tuple[Player | None, float]:
+    """The rostered player whose loss costs the fewest points over ``periods``.
+
+    ``allowed`` limits the choice (None comes back when nobody passes it).
+    """
+    tables = tables or _day_tables(team, cal, periods)
     best: tuple[float, float, Player] | None = None
     for s in team.roster:
-        if s.slot_id == IR:
+        if s.slot_id == IR or (allowed is not None and not allowed(s.player)):
             continue
         cost = sum(_contribution(s.player.id, tables[sp], starters) for sp in periods)
         key = (cost, s.player.proj)
@@ -89,44 +100,70 @@ def weakest_link(team: Team, cal: SeasonCalendar, periods: list[int], starters: 
     return (best[2], best[0]) if best else (None, 0.0)
 
 
+def roster_has_room(team: Team, slot_counts: dict[int, int]) -> bool:
+    """True when fewer players than the active spots (starters plus bench) are rostered."""
+    active = sum(1 for s in team.roster if s.slot_id != IR)
+    return active < sum(n for sl, n in slot_counts.items() if sl != IR)
+
+
+def fits_limits(team: Team, limits: dict[int, int] | None, add: Player,
+                drop: Player | None = None) -> bool:
+    """True when adding ``add`` (and releasing ``drop``) keeps the league's position limits,
+    for example at most four players whose default position is C."""
+    limit = (limits or {}).get(add.position_id, -1)
+    if limit is None or limit < 0 or (drop is not None and drop.position_id == add.position_id):
+        return True
+    return sum(1 for s in team.roster if s.player.position_id == add.position_id) < limit
+
+
 def scout(free_agents: list[Player], team: Team, cal: SeasonCalendar, periods: list[int],
           today_period: int, starters: int, waiver_days: int = 1,
-          now: dt.datetime | None = None) -> list[TrashPick]:
+          now: dt.datetime | None = None, slot_counts: dict[int, int] | None = None,
+          roster_lock: str = "", position_limits: dict[int, int] | None = None,
+          ) -> list[TrashPick]:
     """Rank free agents by net points added from their best pickup day to the end of the week.
 
     ``now`` (timezone aware) makes today count only for free agents whose game has not tipped
-    off yet. The best day maximizes gain minus drop cost; ties go to the earlier day, because
-    waiting risks losing the player to someone else.
+    off yet; with ``roster_lock`` FIRSTGAME_SCORINGPERIOD, today stops counting for everyone
+    once the day's first game has tipped off. ``slot_counts`` lets an open roster spot skip
+    the drop, and ``position_limits`` keeps the suggested drop legal. The drop is never
+    projected higher than the free agent; when nobody qualifies ``drop`` stays None. The best
+    day maximizes gain minus drop cost; ties go to the earlier day, because waiting risks
+    losing the player to someone else.
     """
     remaining = [p for p in periods if p >= today_period]
     tables = _day_tables(team, cal, remaining)
-    drop, _ = weakest_link(team, cal, remaining, starters)
-    drop_cost = {d: sum(_contribution(drop.id, tables[sp], starters) for sp in remaining if sp >= d)
-                 for d in remaining} if drop else {}
+    tip = cal.first_tip(today_period)
+    locked_today = (roster_lock == ROSTER_LOCK_FIRST_GAME and now is not None
+                    and tip is not None and now >= tip)
+    full = slot_counts is None or not roster_has_room(team, slot_counts)
     picks = []
     for fa in free_agents:
         on_waivers = fa.status == "WAIVERS"
-        first = today_period + (waiver_days if on_waivers else 0)
-        gains: dict[int, float] = {}
-        for d in [p for p in remaining if p >= first]:
-            g = 0.0
-            for sp in [p for p in remaining if p >= d]:
-                if not cal.plays(fa.pro_team_id, sp):
-                    continue
-                if sp == today_period and not not_started(cal, fa.pro_team_id, sp, now):
-                    continue
-                cut = _cutoff(tables[sp], starters, skip=drop.id if drop else None)
-                g += max(0.0, day_value(fa, sp, cal) - cut)
-            gains[d] = g
-        playable = [sp for sp in remaining if sp >= first and cal.plays(fa.pro_team_id, sp)
+        first = today_period + max(waiver_days if on_waivers else 0, 1 if locked_today else 0)
+        days = [p for p in remaining if p >= first]
+        needs_drop = full or not fits_limits(team, position_limits, fa)
+        drop = None
+        if needs_drop:
+            drop, _ = weakest_link(
+                team, cal, days, starters, tables=tables,
+                allowed=lambda y, fa=fa: (y.proj < fa.proj
+                                          and fits_limits(team, position_limits, fa, y)))
+        skip = drop.id if drop else None
+        playable = [sp for sp in days if cal.plays(fa.pro_team_id, sp)
                     and (sp != today_period or not_started(cal, fa.pro_team_id, sp, now))]
-        pick = TrashPick(fa, len(playable), gains, on_waivers=on_waivers)
+        added = {sp: max(0.0, day_value(fa, sp, cal) - _cutoff(tables[sp], starters, skip))
+                 for sp in playable}
+        lost = {sp: _contribution(drop.id, tables[sp], starters) for sp in days} if drop else {}
+        gains = {d: sum((v for sp, v in added.items() if sp >= d), 0.0) for d in days}
+        drop_cost = {d: sum((v for sp, v in lost.items() if sp >= d), 0.0) for d in days}
+        pick = TrashPick(fa, len(playable), gains, on_waivers=on_waivers, needs_drop=needs_drop)
         if gains:
             pick.best_day = max(gains, key=lambda d: (gains[d] - drop_cost.get(d, 0.0), -d))
             pick.gain = gains[pick.best_day]
-            if drop:
-                pick.drop = drop
-                pick.drop_cost = drop_cost.get(pick.best_day, 0.0)
+            pick.games_left = sum(1 for sp in playable if sp >= pick.best_day)
+            pick.drop = drop
+            pick.drop_cost = drop_cost.get(pick.best_day, 0.0)
         picks.append(pick)
     picks.sort(key=lambda p: (-p.net, -p.player.proj))
     return picks
