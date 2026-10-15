@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Email the maintainer
+    url: mailto:k1lldeer@proton.me
+    about: Questions, ideas, or anything you would rather not post publicly.

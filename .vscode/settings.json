@@ -1,0 +1,12 @@
+{
+  // Let Copilot's agent run benchboss read commands without asking each time.
+  // Writes (optimize, add, drop, trade, chat with text) still require your approval,
+  // and anything with --yes always asks.
+  "chat.tools.terminal.autoApprove": {
+    "/^benchboss (status|doctor|dash|matchup|roster|activity|trash|fa|trending|news|trades|alerts|standings)\\b/": true,
+    "/^benchboss optimize .*--dry-run/": true,
+    "/--yes\\b/": false,
+    "/^benchboss (login|logout|setup)\\b/": false
+  },
+  "files.exclude": { "**/__pycache__": true, "**/.pytest_cache": true, "**/.ruff_cache": true }
+}

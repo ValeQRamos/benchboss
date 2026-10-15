@@ -1,0 +1,190 @@
+"""League chat, direct messages and alerts (trade offers, accepted trades, waiver claims).
+
+ESPN's in-app chat lives on lm-api-communication. The league chat is one topic of type
+CHAT_ALL_MEMBERS (the older CHAT type is a legacy topic the app never shows); each direct
+message thread is a CHAT_DIRECT_MESSAGE topic whose ``viewableBy`` lists the two member ids. Sending is POST topics/{id}/messages/ with {author, content, messageTypeId: 0};
+a brand-new DM is POST topics/ with {messages, subject, type, viewableBy}.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from dataclasses import dataclass
+
+from benchboss.errors import BenchbossError
+from benchboss.text import norm
+
+DM = "CHAT_DIRECT_MESSAGE"
+LEAGUE_CHAT = "CHAT_ALL_MEMBERS"
+MESSAGE_KIND = {188: "[lineup move]", 239: "[roster drop]", 259: "[sticker]", 260: "[GIF]",
+                264: "[player added]", 265: "[player dropped]", 266: "[add and drop]",
+                267: "[weekly recap]", 268: "[weekly recap]", 269: "[weekly recap]",
+                271: "[trade proposal]", 272: "[trade accepted]", 273: "[waiver report]",
+                279: "[video]", 281: "[league recap]", 283: "[image]"}
+
+
+@dataclass
+class Alert:
+    kind: str       # trade_offer, trade_sent, trade_accepted, waiver, dm
+    text: str
+    urgent: bool = False
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind, "text": self.text, "urgent": self.urgent}
+
+
+def people(session) -> dict[str, str]:
+    """member id -> 'First Last (Team)'."""
+    lg = session.league()
+    team_of = {o: t.name for t in lg.teams.values() for o in t.owner_ids}
+    return {mid: name + (f" ({team_of[mid]})" if mid in team_of else "")
+            for mid, name in lg.members.items()}
+
+
+def topics(session) -> list[dict]:
+    flt = {"topics": {"filterType": {"value": [LEAGUE_CHAT, DM]}}}
+    return session.client.comm(params=[("view", "chat_conversations")],
+                                fantasy_filter=flt).get("topics", [])
+
+
+def messages(session, topic_id: str, n: int = 15) -> list[dict]:
+    flt = {"limit": n, "offset": 0, "sortDate": {"sortAsc": False, "sortPriority": 1}}
+    r = session.client.comm(f"topics/{topic_id}", params=[("view", "chat_conversation")],
+                            fantasy_filter=flt)
+    return sorted(r.get("messages") or [], key=lambda m: m.get("date", 0))
+
+
+def resolve_member(session, query: str) -> str:
+    me = session.client.swid
+    ppl = people(session)
+    q = norm(query)
+    hits = [mid for mid, name in ppl.items() if mid != me and q in norm(name)]
+    if len(hits) != 1:
+        raise BenchbossError(f"'{query}' " + ("is nobody in this league" if not hits else
+                                              "matches several people: " + ", ".join(ppl[h] for h in hits)))
+    return hits[0]
+
+
+def thread(session, with_member: str | None) -> tuple[str | None, str]:
+    """(topic id or None, label) for the league chat or the DM with a member id."""
+    me = session.client.swid
+    ts = topics(session)
+    if with_member:
+        tid = next((t["id"] for t in ts if t.get("type") == DM
+                    and set(t.get("viewableBy") or []) == {me, with_member}), None)
+        return tid, f"DM with {people(session).get(with_member, with_member)}"
+    tid = next((t["id"] for t in ts if t.get("type") == LEAGUE_CHAT), None)
+    if not tid:
+        raise BenchbossError("this league has no chat topic yet")
+    return tid, "league chat"
+
+
+def _card(m: dict, session) -> str:
+    """Readable text for ESPN bot cards (trades, waiver reports) from their ``attributes``.
+
+    Keys look like team1addP1: side 1 or 2, add or drop, P = player id, then an index.
+    """
+    attrs = m.get("attributes") or {}
+    kind = m.get("messageTypeId")
+    label = MESSAGE_KIND.get(kind, f"[message type {kind}]")
+    if not attrs or session is None:
+        return label
+    lg = session.league()
+    names = {s.player.id: s.player.name for t in lg.teams.values() for s in t.roster}
+    sides = []
+    for side in ("1", "2"):
+        tid = attrs.get(f"team{side}")
+        if not tid:
+            continue
+        team = lg.teams.get(int(tid)).name if tid.isdigit() and int(tid) in lg.teams else f"team {tid}"
+        adds = [names.get(int(v), f"player {v}") for k, v in sorted(attrs.items())
+                if k.startswith(f"team{side}addP") and str(v).isdigit()]
+        drops = [names.get(int(v), f"player {v}") for k, v in sorted(attrs.items())
+                 if k.startswith(f"team{side}dropP") and str(v).isdigit()]
+        part = team
+        if adds:
+            part += " gets " + ", ".join(adds)
+        if drops:
+            part += (" and" if adds else "") + " drops " + ", ".join(drops)
+        sides.append(part)
+    return f"{label} " + "; ".join(sides) if sides else label
+
+
+def iso_date(m: dict) -> str:
+    return dt.datetime.fromtimestamp(m.get("date", 0) / 1000, tz=dt.timezone.utc).isoformat()
+
+
+def format_message(m: dict, ppl: dict[str, str], session=None) -> tuple[str, str, str]:
+    """(when, who, text)"""
+    t = dt.datetime.fromtimestamp(m.get("date", 0) / 1000)
+    when = t.strftime("%a %b %d %I:%M %p").replace(" 0", " ")
+    kind = m.get("messageTypeId")
+    text = m.get("content") if kind in (0, 270, 280) else _card(m, session)
+    who = "ESPN" if m.get("author") == "LM" else ppl.get(m.get("author"), "someone")
+    return when, who, text or ""
+
+
+def send(session, text: str, to_member: str | None = None) -> str:
+    me = session.client.swid
+    tid, label = thread(session, to_member)
+    msg = {"author": me, "content": text.strip(), "messageTypeId": 0}
+    if tid:
+        r = session.client.comm(f"topics/{tid}/messages/", body=msg)
+        r = r[0] if isinstance(r, list) and r else r
+        return f"sent to {label} (message {r.get('id', '?')})"
+    r = session.client.comm("topics/", body={"messages": [msg], "subject": "DM", "type": DM,
+                                             "viewableBy": [to_member, me]})
+    return f"sent, new {label} (topic {r.get('id', '?')})"
+
+
+def pending_transactions(session) -> list[dict]:
+    """Pending trades and claims that involve my team (view mPendingTransactions)."""
+    me = session.league().my_team_id
+    raw = session.client.league("mPendingTransactions")
+    txs = raw.get("pendingTransactions")
+    if txs is None:  # the key is absent when nothing is pending; older payloads nest it per team
+        txs = next((t.get("pendingTransactions") or [] for t in raw.get("teams") or []
+                    if t.get("id") == me), [])
+    return [tx for tx in txs if tx.get("teamId") == me or any(
+        me in (i.get("fromTeamId"), i.get("toTeamId")) for i in tx.get("items") or [])]
+
+
+def alerts(session, include_chat: bool = True) -> list[Alert]:
+    lg = session.league()
+    me = lg.my_team_id
+    pending = pending_transactions(session)
+    names = {}
+    for t in lg.teams.values():
+        for s in t.roster:
+            names[s.player.id] = s.player.name
+    out: list[Alert] = []
+    for tx in pending:
+        kind, status = tx.get("type", ""), tx.get("status", "")
+        items = tx.get("items") or []
+        give = [names.get(i["playerId"], str(i["playerId"])) for i in items if i.get("fromTeamId") == me]
+        get = [names.get(i["playerId"], str(i["playerId"])) for i in items if i.get("toTeamId") == me]
+        other = next((i.get("toTeamId") if i.get("fromTeamId") == me else i.get("fromTeamId")
+                      for i in items if me in (i.get("fromTeamId"), i.get("toTeamId"))), None)
+        partner = lg.teams[other].name if other in lg.teams else "another team"
+        deal = f"you give {', '.join(give) or 'nothing'}, you get {', '.join(get) or 'nothing'}"
+        if kind == "TRADE_PROPOSAL" and tx.get("teamId") != me:
+            out.append(Alert("trade_offer", f"Trade offer from {partner}: {deal}", urgent=True))
+        elif kind == "TRADE_PROPOSAL":
+            out.append(Alert("trade_sent", f"Your offer to {partner} is waiting: {deal}"))
+        elif kind == "TRADE_ACCEPT" and status == "PENDING":
+            when = dt.datetime.fromtimestamp((tx.get("processDate") or 0) / 1000)
+            out.append(Alert("trade_accepted",
+                             f"Trade with {partner} accepted, processes {when:%a %b %d %I:%M %p}: {deal}"))
+        elif kind in ("WAIVER", "FREEAGENT"):
+            out.append(Alert("waiver", f"Pending claim: {', '.join(get) or '?'}"
+                             + (f" (drop {', '.join(give)})" if give else "")))
+    if include_chat:
+        ppl = people(session)
+        swid = session.client.swid
+        for t in topics(session):
+            unread = t.get("unreadMessageCount") or 0
+            if t.get("type") == DM and unread:
+                who = ", ".join(ppl.get(x, "someone") for x in t.get("viewableBy") or [] if x != swid)
+                out.append(Alert("dm", f"{unread} unread message{'s' * (unread > 1)} from {who}",
+                                 urgent=True))
+    return out

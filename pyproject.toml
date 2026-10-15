@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "benchboss"
+dynamic = ["version"]
+description = "Run your ESPN Fantasy Basketball team from the terminal: live matchup dashboard, one-key lineup optimizer, waiver scout, trade finder and player news."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Vale Quiroga", email = "k1lldeer@proton.me" }]
+keywords = ["espn", "fantasy-basketball", "nba", "cli", "tui", "textual", "fantasy-sports"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Games/Entertainment",
+]
+dependencies = [
+  "rich>=13.7",
+  "textual>=1.0",
+  "keyring>=24",
+  "certifi>=2024.2.2",
+  "cryptography>=42; sys_platform == 'darwin'",
+  "tzdata; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/ValeQRamos/benchboss"
+Documentation = "https://github.com/ValeQRamos/benchboss#readme"
+Issues = "https://github.com/ValeQRamos/benchboss/issues"
+Changelog = "https://github.com/ValeQRamos/benchboss/blob/main/CHANGELOG.md"
+
+[project.scripts]
+benchboss = "benchboss.cli:main"
+
+[tool.hatch.version]
+path = "src/benchboss/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/benchboss"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/benchboss", "tests", "README.md", "LICENSE", "CHANGELOG.md"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

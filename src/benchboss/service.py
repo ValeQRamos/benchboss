@@ -1,0 +1,290 @@
+"""High-level facade used by the CLI and the TUI.
+
+A ``Session`` knows the league, caches what ESPN sends (in memory, and on disk for the NBA
+schedule) and exposes every feature as a method that returns plain Python objects.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import time
+from dataclasses import dataclass
+from functools import cached_property
+from pathlib import Path
+
+from benchboss import config as config_mod
+from benchboss import credentials
+from benchboss.core import activity as activity_mod
+from benchboss.core import trades as trades_mod
+from benchboss.core import trash as trash_mod
+from benchboss.core.calendar import SeasonCalendar
+from benchboss.core.lineup import DayPlan, plan_day
+from benchboss.core.projection import MatchupOutlook, matchup_outlook
+from benchboss.errors import BenchbossError
+from benchboss.espn.client import Client
+from benchboss.espn.constants import SLOT_ID
+from benchboss.espn.models import League, Player, parse_league, parse_player, parse_team
+
+LEAGUE_VIEWS = ("mRoster", "mTeam", "mSettings", "mMatchupScore", "mStatus")
+
+
+def eastern() -> dt.tzinfo:
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo("America/New_York")
+    except Exception:  # no tz database (rare on Windows): standard time is close enough
+        return dt.timezone(dt.timedelta(hours=-5))
+
+
+class DiskCache:
+    def __init__(self, folder: Path):
+        self.folder = folder
+
+    def get(self, name: str, ttl: float):
+        path = self.folder / f"{name}.json"
+        try:
+            if time.time() - path.stat().st_mtime < ttl:
+                return json.loads(path.read_text())
+        except (OSError, ValueError):
+            pass
+        return None
+
+    def put(self, name: str, data) -> None:
+        try:
+            self.folder.mkdir(parents=True, exist_ok=True)
+            tmp = self.folder / f"{name}.json.tmp"
+            tmp.write_text(json.dumps(data))
+            tmp.replace(self.folder / f"{name}.json")
+        except OSError:
+            pass
+
+
+@dataclass
+class OptimizeResult:
+    plan: DayPlan
+    status: str = ""        # ESPN status, e.g. EXECUTED; "" when nothing was sent
+    error: str = ""
+
+
+class Session:
+    def __init__(self, cfg: config_mod.Config | None = None, client: Client | None = None,
+                 today: dt.date | None = None, now: dt.datetime | None = None):
+        self.cfg = cfg or config_mod.load()
+        if client is None:
+            self.cfg.require_league()
+            client = Client(self.cfg.league_id, self.cfg.effective_season, credentials.require())
+        self.client = client
+        self._today = today
+        self._now = now
+        self.cache = DiskCache(config_mod.cache_dir() / f"{client.league_id}-{client.season}")
+        self._league: League | None = None
+        self._league_raw: dict | None = None
+
+    @property
+    def demo(self) -> bool:
+        return False
+
+    # --- time ----------------------------------------------------------------------------------
+
+    @property
+    def now(self) -> dt.datetime:
+        """Current time, timezone aware."""
+        return self._now or dt.datetime.now().astimezone()
+
+    @property
+    def today(self) -> dt.date:
+        """ESPN's fantasy day, which runs from 3 am to 3 am US Eastern, wherever you are."""
+        if self._today:
+            return self._today
+        return (self.now.astimezone(eastern()) - dt.timedelta(hours=3)).date()
+
+    @property
+    def today_period(self) -> int:
+        """Today's scoring period, clamped to the season (opening day before the season)."""
+        return self.calendar.today_period(self.today)
+
+    @property
+    def in_season(self) -> bool:
+        return 1 <= self.calendar.period_of(self.today) <= self.calendar.final_period
+
+    def current_period(self) -> int:
+        """ESPN's current scoring period, read fresh (it decides ROSTER versus FUTURE_ROSTER)."""
+        status = self.client.league("mStatus").get("status") or {}
+        return status.get("latestScoringPeriod") or self.league().scoring_period
+
+    # --- data ----------------------------------------------------------------------------------
+
+    @cached_property
+    def calendar(self) -> SeasonCalendar:
+        raw = self.cache.get("nba-schedule", 86400)
+        if raw is None:
+            raw = self.client.season_data("proTeamSchedules_wl")
+            self.cache.put("nba-schedule", raw)
+        return SeasonCalendar.from_raw(raw)
+
+    def league(self, refresh: bool = False) -> League:
+        if self._league is None or refresh:
+            raw = self.client.league(*LEAGUE_VIEWS)
+            self._league_raw = raw
+            swid = self.client.cookies[1] if self.client.cookies else None
+            self._league = parse_league(raw, self.cfg.team_id, swid)
+        return self._league
+
+    @property
+    def league_raw(self) -> dict:
+        self.league()
+        return self._league_raw or {}
+
+    def roster_on(self, period: int):
+        """My roster as it stands on a given day (future days carry pending lineup moves)."""
+        raw = self.client.league("mRoster", "mTeam", scoring_period=period)
+        lg = self.league()
+        for t in raw.get("teams") or []:
+            if t["id"] == lg.my_team_id:
+                return parse_team(t, lg.season, lg.members).roster
+        raise BenchbossError(f"team {lg.my_team_id} not found in league {lg.id}")
+
+    def free_agents(self, n: int = 50, position: str | None = None,
+                    sort: str = "sortPercOwned") -> list[Player]:
+        lg = self.league()
+        flt: dict = {"filterStatus": {"value": ["FREEAGENT", "WAIVERS"]}, "limit": n,
+                     sort: {"sortPriority": 1, "sortAsc": False},
+                     "filterStatsForTopScoringPeriodIds": {
+                         "value": 2, "additionalValue": [f"00{lg.season}", f"10{lg.season}",
+                                                         f"02{lg.season}", f"00{lg.season - 1}"]}}
+        if position:
+            pos = position.upper()
+            if pos not in SLOT_ID:
+                raise BenchbossError(f"unknown position '{position}' (PG SG SF PF C G F UT)")
+            flt["filterSlotIds"] = {"value": [SLOT_ID[pos]]}
+        return [parse_player(x, lg.season) for x in self.client.players(flt, lg.scoring_period)]
+
+    def trending(self, n: int = 10) -> list[Player]:
+        return self.free_agents(n, sort="sortPercChanged")
+
+    def find_player(self, name: str) -> Player:
+        """A player on any roster in the league, or else in the free-agent pool."""
+        from benchboss.text import match_one
+
+        lg = self.league()
+        rostered = [sp.player for t in lg.teams.values() for sp in t.roster]
+        try:
+            return match_one(rostered, name, lambda p: p.name, where="any roster")
+        except BenchbossError:
+            hits = self.client.players({"filterName": {"value": name}, "limit": 10,
+                                        "sortPercOwned": {"sortPriority": 1, "sortAsc": False}},
+                                       lg.scoring_period)
+            pool = [parse_player(x, lg.season) for x in hits]
+            return match_one(pool, name, lambda p: p.name, where="your league or free agency")
+
+    def news(self, player_ids: list[int], days: int = 5):
+        from benchboss import news
+
+        return news.fetch(player_ids, days)
+
+    # --- features ------------------------------------------------------------------------------
+
+    def matchup_periods(self) -> list[int]:
+        lg = self.league()
+        return self.calendar.matchup_periods(lg.current_matchup, lg.matchup_periods)
+
+    def outlook(self) -> MatchupOutlook:
+        return matchup_outlook(self.league(), self.calendar, self.today_period, self.now)
+
+    def activity(self) -> list[activity_mod.Activity]:
+        return activity_mod.roster_activity(self.league().me, self.calendar,
+                                            self.matchup_periods(), self.today_period)
+
+    def trash(self, n: int = 10, position: str | None = None, pool: int = 60) -> list[trash_mod.TrashPick]:
+        lg = self.league()
+        fas = self.free_agents(pool, position)
+        waiver_days = max(1, round(lg.waiver_hours / 24)) if lg.waiver_hours else 1
+        picks = trash_mod.scout(fas, lg.me, self.calendar, self.matchup_periods(),
+                                self.today_period, lg.starter_slots, waiver_days, self.now)
+        return picks[:n]
+
+    def trades(self, need: str | None = None, partner: str | None = None,
+               n: int = 10) -> list[trades_mod.TradeIdea]:
+        lg = self.league()
+        pid = None
+        if partner:
+            from benchboss.text import match_one
+
+            pid = match_one(lg.teams.values(), partner,
+                            lambda t: f"{t.name} {t.owner_name}", where="this league").id
+        return trades_mod.find_trades(lg, need=need, partner_id=pid, limit=n)
+
+    def plan_days(self, periods: list[int]) -> list[DayPlan]:
+        """Preview: the best lineup for each day as it stands now (sends nothing)."""
+        lg = self.league()
+        current = lg.scoring_period
+        plans = []
+        for sp in periods:
+            roster = lg.me.roster if sp == current else self.roster_on(sp)
+            plans.append(plan_day(roster, lg.slot_counts, sp, self.calendar))
+        return plans
+
+    def apply_days(self, periods: list[int]) -> list[OptimizeResult]:
+        """Send the best lineup for every day in order.
+
+        Every day is re-read right before it is planned, because moves on one day carry
+        forward to the next ones: a day that looked fine in the preview can need moves after
+        an earlier day changes, and the other way around.
+        """
+        current = self.current_period()
+        return [self.apply_plan(sp, current) for sp in sorted(periods)]
+
+    def apply_plan(self, period: int, current: int | None = None) -> OptimizeResult:
+        """Re-read one day and send what it still needs."""
+        lg = self.league()
+        current = current or self.current_period()
+        roster = self.roster_on(period)
+        plan = plan_day(roster, lg.slot_counts, period, self.calendar)
+        if period < current:
+            return OptimizeResult(plan, error="that day is already over on ESPN")
+        if not plan.changed:
+            return OptimizeResult(plan, status="ALREADY_OPTIMAL")
+        kind = "ROSTER" if period == current else "FUTURE_ROSTER"
+        from benchboss.actions import send
+
+        try:
+            status = send(self, kind, plan.items(), period)
+        except BenchbossError as e:
+            return OptimizeResult(plan, error=str(e))
+        if status.startswith("FAILED"):
+            return OptimizeResult(plan, status=status, error=f"ESPN answered {status}")
+        return OptimizeResult(plan, status=status)
+
+
+def periods_for(session: Session, when: str) -> list[int]:
+    """'today', 'tomorrow', 'week' (rest of the matchup week), 'MM-DD' or 'YYYY-MM-DD'."""
+    cal = session.calendar
+    today = session.today_period
+    w = (when or "today").lower()
+    if w in ("today", "tomorrow"):
+        day = session.today + dt.timedelta(days=0 if w == "today" else 1)
+        sp = cal.period_of(day)
+        if sp < 1:
+            start = cal.date_of(1)
+            raise BenchbossError(f"{w} is before the season, which starts {start:%a %b} "
+                                 f"{start.day}: use `week` or a date like {start:%m-%d}")
+        if sp > cal.final_period:
+            raise BenchbossError(f"{w} is after the end of the fantasy season")
+        return [sp]
+    if w in ("week", "rest-of-week"):
+        return [p for p in session.matchup_periods() if p >= today]
+    try:
+        if w.count("-") == 2:
+            day = dt.date.fromisoformat(w)
+        else:
+            mo, da = (int(x) for x in w.split("-"))
+            season = session.league().season
+            day = dt.date(season - 1 if mo >= 8 else season, mo, da)
+    except ValueError as e:
+        raise BenchbossError(f"'{when}' is not a day: use today, tomorrow, week, 11-04 or 2026-11-04") from e
+    sp = cal.period_of(day)
+    if sp < 1 or sp > cal.final_period:
+        raise BenchbossError(f"{day.isoformat()} is outside the fantasy season")
+    return [sp]

@@ -1,0 +1,61 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "benchboss: app",
+      "detail": "Menu, dashboard and one-key actions",
+      "type": "shell",
+      "command": "benchboss",
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "focus": true, "reveal": "always", "clear": true }
+    },
+    {
+      "label": "benchboss: dashboard (side panel)",
+      "detail": "Live dashboard that refreshes every 60 seconds",
+      "type": "shell",
+      "command": "benchboss dash --watch",
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "group": "benchboss", "reveal": "always", "clear": true }
+    },
+    {
+      "label": "benchboss: optimize today",
+      "detail": "Shows today's best lineup and asks before sending",
+      "type": "shell",
+      "command": "benchboss optimize today",
+      "problemMatcher": [],
+      "presentation": { "panel": "shared", "focus": true, "reveal": "always", "clear": true }
+    },
+    {
+      "label": "benchboss: optimize week",
+      "detail": "Best lineup for every day left in the matchup week, asks before sending",
+      "type": "shell",
+      "command": "benchboss optimize week",
+      "problemMatcher": [],
+      "presentation": { "panel": "shared", "focus": true, "reveal": "always", "clear": true }
+    },
+    {
+      "label": "benchboss: best trash",
+      "detail": "Free agents ranked by points added this week",
+      "type": "shell",
+      "command": "benchboss trash",
+      "problemMatcher": [],
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true }
+    },
+    {
+      "label": "benchboss: news",
+      "detail": "News and spins on your players, last 5 days",
+      "type": "shell",
+      "command": "benchboss news --days 5",
+      "problemMatcher": [],
+      "presentation": { "panel": "shared", "reveal": "always", "clear": true }
+    },
+    {
+      "label": "benchboss: demo",
+      "detail": "The app with a fictional league, no ESPN account needed",
+      "type": "shell",
+      "command": "benchboss --demo",
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "focus": true, "reveal": "always", "clear": true }
+    }
+  ]
+}
