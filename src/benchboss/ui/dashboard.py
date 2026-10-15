@@ -253,9 +253,9 @@ def trash_card(d: Dashboard, pal: Palette) -> Panel | None:
         p = pick.player
         label = f"{p.short_name} {p.pro_team}" + (" (W)" if pick.on_waivers else "")
         t.add_row(Text(label, style=pal.text),
-                  Text.assemble((f"+{pick.net:.0f}", f"bold {pal.good}" if pick.net > 0 else pal.dim),
-                                (f" · {pick.games_left}g", pal.dim)))
-    return _panel(t, "BEST TRASH THIS WEEK", pal, "pts added")
+                  Text.assemble((f"+{pick.net:.0f} pts", f"bold {pal.good}" if pick.net > 0 else pal.dim),
+                                (f" · {pick.games_left} game{'' if pick.games_left == 1 else 's'}", pal.dim)))
+    return _panel(t, "BEST TRASH THIS WEEK", pal, "points added if you grab him")
 
 
 def trending_card(d: Dashboard, pal: Palette) -> Panel | None:
