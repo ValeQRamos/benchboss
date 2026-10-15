@@ -139,6 +139,7 @@ Inside the app every screen has a single key:
 | `a` | Workload | `s` | Standings |
 | `f` | Best trash | `o` | Roster |
 | `r` | Refresh | `ctrl+t` | Light or dark |
+| `m` | Show or hide the menu (it hides itself below 110 columns) | `q` | Quit |
 
 ## Using it from VS Code
 

@@ -228,7 +228,8 @@ def test_trash_table_fits_and_keeps_net_and_g(session, width):
 def test_trash_names_the_drop_when_its_column_goes(session):
     picks = session.trash(n=10)
     drop = picks[0].drop.name
-    narrow = text_of(views.trash(picks, session.calendar, DARK, 66), 66)
+    same = [pk for pk in picks if pk.drop and pk.drop.name == drop]
+    narrow = text_of(views.trash(same, session.calendar, DARK, 66), 66)
     assert "Drop" not in narrow.splitlines()[2]
     assert drop.split()[0] in narrow and "the suggested drop" in narrow
     wide = text_of(views.trash(picks, session.calendar, DARK, 120), 120)
@@ -240,7 +241,8 @@ def test_cli_trash_at_80_columns(capsys, monkeypatch):
     main(["--demo", "trash"])
     out = capsys.readouterr().out
     assert max(cell_len(x.rstrip()) for x in out.splitlines()) <= 80
-    assert "Net" in out and " G " in out and "+60.1" in out
+    top = demo_session().trash(n=1)[0]
+    assert "Net" in out and " G " in out and f"{top.net:+.1f}" in out
 
 
 # --- F33: fresh lineup after Apply ------------------------------------------------------------

@@ -43,9 +43,10 @@ All notable changes to this project are documented here. The format follows
   not count for you.
 - No drop is charged when you have an open roster spot, for example right after moving
   someone to IR.
-- The suggested drop is never a player who projects better for the season than the free
-  agent, so a star who is out for a few days, or a solid starter, is no longer suggested as
-  the drop for a streamer.
+- The suggested drop comes from the players who project lower for the season than the free
+  agent, so a star who is out for a few days is no longer suggested as the drop. When nobody
+  projects lower, the drop is your lowest projected player and the pick is marked `*` as a
+  one-week stream instead of an upgrade.
 - The games count (G) starts on the suggested pickup day, so it matches the points shown.
 - Before the season, players on waivers no longer lose their opening night game.
 - Late on the last day of a matchup week, the dashboard no longer lists free agents as
@@ -148,8 +149,10 @@ All notable changes to this project are documented here. The format follows
   `null`, or run `benchboss setup` again, so benchboss switches to the 2028 season by itself
   on August 1, 2027.
 - With `--json`, the write commands print a JSON result instead of text.
-- `trash --json` has a new `needs_drop` field, and `drop` can be null when nobody on your
-  roster projects lower than the free agent.
+- `trash --json` has new `needs_drop` and `drop_projects_higher` fields. The suggested drop
+  is the cheapest player this week among those projected lower than the free agent; when
+  nobody projects lower it is your lowest projected player and the pick is flagged as a
+  one-week stream (marked `*` in the table). `drop` is null only when you have an open spot.
 
 ## [1.0.0] - 2026-10-15
 

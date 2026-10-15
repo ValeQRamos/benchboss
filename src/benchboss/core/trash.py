@@ -38,7 +38,8 @@ class TrashPick:
     drop: Player | None = None
     drop_cost: float = 0.0     # points lost this week by dropping ``drop``
     on_waivers: bool = False
-    needs_drop: bool = True    # no open spot: ``drop`` None then means there is no clear drop
+    needs_drop: bool = True    # no open spot, so someone has to go
+    drop_projects_higher: bool = False  # the drop scores more per game: a one-week stream
 
     @property
     def net(self) -> float:
@@ -52,7 +53,8 @@ class TrashPick:
                 "best_pickup_day": best, "week_gain": round(self.gain, 1),
                 "drop": self.drop.name if self.drop else None,
                 "drop_cost": round(self.drop_cost, 1), "net_gain": round(self.net, 1),
-                "on_waivers": self.on_waivers, "needs_drop": self.needs_drop}
+                "on_waivers": self.on_waivers, "needs_drop": self.needs_drop,
+                "drop_projects_higher": self.drop_projects_higher}
 
 
 def _day_tables(team: Team, cal: SeasonCalendar, periods: list[int]) -> dict[int, list[tuple[float, int]]]:
@@ -126,10 +128,12 @@ def scout(free_agents: list[Player], team: Team, cal: SeasonCalendar, periods: l
     ``now`` (timezone aware) makes today count only for free agents whose game has not tipped
     off yet; with ``roster_lock`` FIRSTGAME_SCORINGPERIOD, today stops counting for everyone
     once the day's first game has tipped off. ``slot_counts`` lets an open roster spot skip
-    the drop, and ``position_limits`` keeps the suggested drop legal. The drop is never
-    projected higher than the free agent; when nobody qualifies ``drop`` stays None. The best
-    day maximizes gain minus drop cost; ties go to the earlier day, because waiting risks
-    losing the player to someone else.
+    the drop, and ``position_limits`` keeps the suggested drop legal. The drop is the
+    cheapest one this week among players projected lower than the free agent; when nobody
+    projects lower it is the lowest projected player who can legally go, and the pick is
+    flagged ``drop_projects_higher`` (a one-week stream, not an upgrade). The best day
+    maximizes gain minus drop cost; ties go to the earlier day, because waiting risks losing
+    the player to someone else.
     """
     remaining = [p for p in periods if p >= today_period]
     tables = _day_tables(team, cal, remaining)
@@ -143,12 +147,17 @@ def scout(free_agents: list[Player], team: Team, cal: SeasonCalendar, periods: l
         first = today_period + max(waiver_days if on_waivers else 0, 1 if locked_today else 0)
         days = [p for p in remaining if p >= first]
         needs_drop = full or not fits_limits(team, position_limits, fa)
-        drop = None
+        drop, higher = None, False
         if needs_drop:
             drop, _ = weakest_link(
                 team, cal, days, starters, tables=tables,
                 allowed=lambda y, fa=fa: (y.proj < fa.proj
                                           and fits_limits(team, position_limits, fa, y)))
+            if drop is None:
+                legal = [s.player for s in team.roster if s.slot_id != IR
+                         and fits_limits(team, position_limits, fa, s.player)]
+                drop = min(legal, key=lambda y: y.proj, default=None)
+                higher = drop is not None
         skip = drop.id if drop else None
         playable = [sp for sp in days if cal.plays(fa.pro_team_id, sp)
                     and (sp != today_period or not_started(cal, fa.pro_team_id, sp, now))]
@@ -157,7 +166,8 @@ def scout(free_agents: list[Player], team: Team, cal: SeasonCalendar, periods: l
         lost = {sp: _contribution(drop.id, tables[sp], starters) for sp in days} if drop else {}
         gains = {d: sum((v for sp, v in added.items() if sp >= d), 0.0) for d in days}
         drop_cost = {d: sum((v for sp, v in lost.items() if sp >= d), 0.0) for d in days}
-        pick = TrashPick(fa, len(playable), gains, on_waivers=on_waivers, needs_drop=needs_drop)
+        pick = TrashPick(fa, len(playable), gains, on_waivers=on_waivers, needs_drop=needs_drop,
+                         drop_projects_higher=higher)
         if gains:
             pick.best_day = max(gains, key=lambda d: (gains[d] - drop_cost.get(d, 0.0), -d))
             pick.gain = gains[pick.best_day]

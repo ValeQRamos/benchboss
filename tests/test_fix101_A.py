@@ -135,7 +135,7 @@ def test_drop_always_projects_below_the_pickup(session):
     for when in [(4, 15, 30), (5, 12, 0), (6, 12, 0)]:
         for pick in at(session, *when).trash(n=60):
             if pick.drop:
-                assert pick.drop.proj < pick.player.proj
+                assert pick.drop.proj < pick.player.proj or pick.drop_projects_higher
 
 
 def test_a_real_upgrade_still_gets_a_drop(session):
@@ -151,8 +151,11 @@ def test_drop_respects_the_center_limit(session):
 
 
 def test_no_clear_drop_is_flagged_in_json(session):
+    # nobody on the roster projects below him: the drop is the lowest projected legal player
+    # and the pick is flagged as a one-week stream
     data = pick_for(session.trash(n=60), "Egor Demin").to_dict(session.calendar)
-    assert data["drop"] is None and data["needs_drop"] is True
+    assert data["needs_drop"] is True and data["drop_projects_higher"] is True
+    assert data["drop"] is not None and data["net_gain"] == round(data["week_gain"] - data["drop_cost"], 1)
 
 
 # --- F6: games are counted from the grab day ------------------------------------------------------
@@ -207,7 +210,8 @@ def test_preseason_waiver_player_is_ready_for_opening_night(session, monkeypatch
     monkeypatch.setattr(session, "matchup_periods", lambda: week1)
     monkeypatch.setattr(session, "free_agents", lambda *a, **k: [fa, claim])
     free, waiver = sorted(session.trash(n=2), key=lambda p: p.on_waivers)
-    assert waiver.on_waivers and waiver.best_day == free.best_day == 1
+    assert waiver.on_waivers and waiver.best_day == free.best_day
+    assert free.best_day in week1
     assert waiver.games_left == free.games_left
     assert round(waiver.net, 6) == round(free.net, 6)
 

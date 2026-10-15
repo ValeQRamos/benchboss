@@ -156,7 +156,8 @@ def trash(picks: list[TrashPick], cal: SeasonCalendar, pal: Palette,
         cols["Grab"] = ({}, [grab(pk, False) for pk in picks])
         cols["+Pts"] = (num, [f"{pk.gain:.1f}" for pk in picks])
         cols["Drop"] = ({"overflow": "ellipsis"},
-                        [Text(pk.drop.name if pk.drop else "-", style=pal.dim) for pk in picks])
+                        [Text((pk.drop.name + ("*" if pk.drop_projects_higher else ""))
+                              if pk.drop else "-", style=pal.dim) for pk in picks])
         cols["Net"] = (num, [Text(f"{pk.net:+.1f}", style=f"bold {pal.good}" if pk.net > 0 else pal.dim)
                              for pk in picks])
         if not compact:
@@ -200,7 +201,12 @@ def trash(picks: list[TrashPick], cal: SeasonCalendar, pal: Palette,
         caption = f"+Pts = {gain}. Net subtracts what {who} would have scored."
     else:
         caption = f"Net = {gain}, minus what {who} would have scored."
-    t.caption = caption + " G = games he can still play for you."
+    caption += " G = games he can still play for you."
+    if any(pk.drop_projects_higher for pk in picks):
+        caption += (" * = the drop scores more per game than the pickup: a one-week stream, not an upgrade."
+                    if "Drop" in cols else
+                    " Some picks mean dropping a player who scores more per game: one-week streams.")
+    t.caption = caption
     return t
 
 
