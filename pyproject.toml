@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -13,7 +13,7 @@ requires-python = ">=3.10"
 authors = [{ name = "Vale Quiroga", email = "k1lldeer@proton.me" }]
 keywords = ["espn", "fantasy-basketball", "nba", "cli", "tui", "textual", "fantasy-sports"]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: End Users/Desktop",
   "Operating System :: OS Independent",

@@ -11,7 +11,10 @@ are in [AGENTS.md](../AGENTS.md); these rules are the non-negotiable part.
   plan first with `--dry-run`, wait for the user's explicit yes in chat, then run the same
   command with `--yes` and quote the `ESPN: ...` line. One approval covers one action.
 - Never run a write command without `--yes` or `--dry-run`: it waits for keyboard input and
-  hangs the agent terminal.
+  hangs the agent terminal. For the same reason never run `benchboss` with no command,
+  `benchboss app` or `dash --watch` (they are interactive and never exit).
+- `news --ai` calls the Anthropic API with the user's key and costs money: run it only when
+  the user asks for the AI briefing.
 - Never ask for, print or pass ESPN cookies. If `benchboss` exits with code 3, ask the user to
   run `benchboss login` themselves.
 - For "latest news" requests, start with `benchboss news --json --days 5`, then use web search

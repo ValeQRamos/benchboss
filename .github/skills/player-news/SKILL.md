@@ -21,3 +21,4 @@ argument-hint: optional player names and number of days (default 5)
    lineup: `benchboss optimize today --dry-run`.
 
 If `ANTHROPIC_API_KEY` is set, `benchboss news --ai` produces a similar briefing on its own.
+It is a paid call with the user's key, so run it only when the user asks for it.
