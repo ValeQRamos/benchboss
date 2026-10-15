@@ -272,7 +272,7 @@ def cmd_trades(c: Ctx):
     ideas = trades_mod.find_trades(lg, need=c.args.need, limit=c.args.n,
                                    min_fairness=c.args.fairness,
                                    partner_id=_partner(s, c.args.partner))
-    c.emit(views.trades(ideas, c.pal, c.args.need), [t.to_dict() for t in ideas])
+    c.emit(views.trades(ideas, c.pal, c.args.need, lg), [t.to_dict() for t in ideas])
 
 
 def _partner(s, q):

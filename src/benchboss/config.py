@@ -101,3 +101,27 @@ def save(cfg: Config) -> Path:
     tmp.write_text(json.dumps(asdict(cfg), indent=2) + "\n")
     tmp.replace(path)
     return path
+
+
+def save_theme(theme: str) -> Path | None:
+    """Store only the theme and leave every other saved setting as it is on disk.
+
+    The app calls this instead of ``save`` so values that came from BENCHBOSS_* environment
+    variables for one run never end up in config.json. A file that is not a JSON object is
+    left alone (returns None) for the user or ``benchboss setup`` to fix.
+    """
+    path = config_dir() / "config.json"
+    raw: dict = {}
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text())
+        except ValueError:
+            return None
+        if not isinstance(raw, dict):
+            return None
+    raw["theme"] = theme
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(raw, indent=2) + "\n")
+    tmp.replace(path)
+    return path
