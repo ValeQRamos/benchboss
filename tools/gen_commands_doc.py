@@ -22,7 +22,9 @@ def main() -> None:
     lines = ["# Command reference", "",
              "Generated from the CLI by `python tools/gen_commands_doc.py`. Every command also",
              "accepts the global flags `--json`, `--demo`, `--theme dark|light` and `--yes`.", "",
-             "Running `benchboss` with no command opens the interactive app.", ""]
+             "Running `benchboss` with no command opens the interactive app (it needs a terminal).",
+             "With `--json`, write commands print one JSON result as well; without `--yes` they",
+             "send nothing and exit with code 10.", ""]
     for title, names in GROUPS:
         lines += [f"## {title}", ""]
         for name in names:

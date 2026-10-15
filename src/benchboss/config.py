@@ -74,12 +74,21 @@ def load() -> Config:
             raw = json.loads(path.read_text())
         except ValueError as e:
             raise ConfigError(f"{path} is not valid JSON ({e}); fix it or run `benchboss setup`") from e
+        if not isinstance(raw, dict):
+            raise ConfigError(f"{path} must hold a JSON object; fix it or run `benchboss setup`")
         known = {f.name for f in fields(Config)}
         cfg = Config(**{k: v for k, v in raw.items() if k in known})
     for name, var in _ENV.items():
         value = os.environ.get(var)
-        if value:
-            setattr(cfg, name, value if name == "theme" else int(value))
+        if not value:
+            continue
+        if name == "theme":
+            cfg.theme = value
+            continue
+        try:
+            setattr(cfg, name, int(value))
+        except ValueError:
+            raise ConfigError(f"{var} must be a whole number, got {value!r}") from None
     if cfg.theme not in THEMES:
         cfg.theme = "dark"
     return cfg
