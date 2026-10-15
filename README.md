@@ -47,7 +47,7 @@ uvx --from git+https://github.com/ValeQRamos/benchboss benchboss --demo
 
 ## Features
 
-| | |
+| Feature | What it does |
 |---|---|
 | **Matchup dashboard** | Live score, a projected final for both sides, games left this week, your roster with who plays today, standings, alerts. Works full screen or as a narrow side panel that refreshes itself. |
 | **Optimize today / Optimize week** | One key sets the best lineup for today or for every day left in the matchup week. Benches players who rest, are OUT or project less; doubtful and day-to-day players are discounted. Shows the plan, waits for **Apply**, then tells you *"Your week is set"*. |
