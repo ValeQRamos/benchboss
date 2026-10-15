@@ -129,7 +129,13 @@ class Session:
             raw = self.client.league(*LEAGUE_VIEWS)
             self._league_raw = raw
             swid = self.client.cookies[1] if self.client.cookies else None
-            self._league = parse_league(raw, self.cfg.team_id, swid)
+            lg = parse_league(raw, self.cfg.team_id, swid)
+            if lg.teams and lg.my_team_id not in lg.teams:
+                from benchboss.errors import ConfigError
+
+                raise ConfigError(f"team {lg.my_team_id} is not in this league: fix "
+                                  "BENCHBOSS_TEAM_ID or run `benchboss setup`")
+            self._league = lg
         return self._league
 
     @property

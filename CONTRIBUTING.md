@@ -31,9 +31,13 @@ pytest
 
 ## Reporting bugs
 
-Open an issue with the command you ran, what you expected, what happened, and the output of
-`benchboss status --offline`. Never paste your cookies. If ESPN returned an error, the
-`ESPN 409: ...` line is very helpful.
+Open an issue with the command you ran, what you expected, what happened, the output of
+`benchboss --version`, your OS and terminal, and whether `benchboss status --offline` says
+the cookies were found. If ESPN returned an error, the `ESPN 409: ...` line is very helpful.
+
+Issues are public. Never paste your cookies, and do not paste the full `status` output: it
+shows your league id, your league and team names and your home folder path. Replace those
+with placeholders in anything you paste.
 
 ## Ideas
 

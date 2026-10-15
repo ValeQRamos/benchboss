@@ -4,7 +4,10 @@ labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: "Thanks for reporting. Never paste your ESPN cookies (espn_s2, SWID) here."
+      value: >-
+        Thanks for reporting. Issues are public: never paste your ESPN cookies (espn_s2, SWID),
+        and remove your league id, league and team names, manager names and your home folder
+        path from anything you paste.
   - type: input
     id: command
     attributes:
@@ -22,15 +25,29 @@ body:
     id: output
     attributes:
       label: Output
-      description: Paste the output, including any `ESPN 4xx` line.
+      description: >-
+        Paste the output, including any `ESPN 4xx` line. Replace your league id and names
+        with placeholders first.
       render: text
-  - type: textarea
-    id: status
+  - type: input
+    id: version
     attributes:
-      label: benchboss status --offline
-      render: text
+      label: benchboss version
+      description: The output of `benchboss --version`.
+      placeholder: benchboss 1.0.1
+    validations:
+      required: true
+  - type: dropdown
+    id: cookies
+    attributes:
+      label: Does `benchboss status --offline` say the cookies were found?
+      description: Only answer here. Do not paste the status output, it shows your league id and names.
+      options:
+        - "found"
+        - "missing"
+        - "did not check"
   - type: input
     id: env
     attributes:
-      label: OS and terminal
-      placeholder: macOS 15, VS Code terminal
+      label: OS, terminal and Python version
+      placeholder: macOS 15, VS Code terminal, Python 3.12

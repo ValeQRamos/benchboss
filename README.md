@@ -24,10 +24,10 @@ that matters this week on one screen, and turns the chores that decide close mat
 single key: set the best lineup for today or the whole week, find the free agent who adds the
 most points before Sunday, and spot fair trades that fix a positional hole on both sides.
 
-Try it in ten seconds, no ESPN account needed:
+Try it in ten seconds, no ESPN account needed (with [uv](https://docs.astral.sh/uv/) installed):
 
 ```bash
-uvx --from git+https://github.com/ValeQRamos/benchboss benchboss --demo
+uvx --from "benchboss @ https://github.com/ValeQRamos/benchboss/archive/refs/heads/main.zip" benchboss --demo
 ```
 
 ## Contents
@@ -80,17 +80,20 @@ curl -LsSf https://raw.githubusercontent.com/ValeQRamos/benchboss/main/install.s
 **Already have uv or pipx?**
 
 ```bash
-uv tool install git+https://github.com/ValeQRamos/benchboss
+uv tool install "benchboss @ https://github.com/ValeQRamos/benchboss/archive/refs/heads/main.zip"
 # or
-pipx install git+https://github.com/ValeQRamos/benchboss
+pipx install https://github.com/ValeQRamos/benchboss/archive/refs/heads/main.zip
 ```
 
 **Windows** (PowerShell):
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-uv tool install git+https://github.com/ValeQRamos/benchboss
+$env:Path = "$HOME\.local\bin;$env:Path"   # lets this window find uv; new windows find it on their own
+uv tool install "benchboss @ https://github.com/ValeQRamos/benchboss/archive/refs/heads/main.zip"
 ```
+
+None of these need git: they download the source as a zip file.
 
 **From a clone** (for hacking on it):
 

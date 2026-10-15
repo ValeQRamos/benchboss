@@ -38,6 +38,10 @@ Every read command supports `--json` and prints stable keys, ISO dates and names
 | Standings | `benchboss standings --json` |
 | League chat or a DM (read) | `benchboss chat --json [--to TEAM]` |
 
+Do not run `benchboss` with no command, `benchboss app` or `benchboss dash --watch`: they
+are interactive and never exit. Run `benchboss news --ai` only when the user asks for the AI
+briefing: it calls the Anthropic API with their key and costs money.
+
 ### Writes need the user's explicit yes, every time
 
 Write commands change the real league on ESPN. Protocol:
