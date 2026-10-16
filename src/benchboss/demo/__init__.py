@@ -38,6 +38,14 @@ def _fold(s: str) -> str:
                    if not unicodedata.combining(c)).lower()
 
 
+def _name_matches(player: dict, query: str) -> bool:
+    """ESPN's ``filterName``: the start of the first, last or full name, case and accent
+    insensitive ("jok", "nik", "nikola jok", "Jokić"); never the middle of a name ("okic"
+    finds nobody, "alexander" finds Alexander-Walker but not Gilgeous-Alexander)."""
+    return any(_fold(player.get(k) or "").startswith(query)
+               for k in ("firstName", "lastName", "fullName"))
+
+
 def _values(flt: dict, key: str) -> list | None:
     """``{"value": [...]}`` or ``{"value": x}`` as a list; None when the filter is absent."""
     f = flt.get(key)
@@ -104,8 +112,8 @@ class DemoClient:
 
     def players(self, flt: dict, scoring_period=None) -> list:
         """kona_player_info. Filters: ``filterStatus`` (any of FREEAGENT, WAIVERS, ONTEAM;
-        absent = everyone), ``filterIds``, ``filterName`` (case and accent insensitive
-        substring), ``filterSlotIds``. Sorts by ``sortPriority``: ``sortPercOwned``,
+        absent = everyone), ``filterIds``, ``filterName`` (the start of a first, last or full
+        name), ``filterSlotIds``. Sorts by ``sortPriority``: ``sortPercOwned``,
         ``sortPercChanged``, ``sortAppliedStatAverage`` and ``sortAppliedStatTotal`` with
         ``value`` a split id such as "002027" (descending unless ``sortAsc``; players without
         the value go last). ``limit`` (0 = all) and ``offset`` page the result."""
@@ -117,16 +125,12 @@ class DemoClient:
         statuses = _values(flt, "filterStatus")
         ids = _values(flt, "filterIds")
         ids = None if ids is None else set(ids)
-        if "sortPercChanged" in flt and not ids and "ONTEAM" not in (statuses or ()):
-            pool = self.data["trending"]  # the risers ESPN reported when the demo was built
-        else:
-            pool = self.pool()
         name = _fold(str((flt.get("filterName") or {}).get("value") or ""))
         slots = set(_values(flt, "filterSlotIds") or ())
-        out = [x for x in pool
+        out = [x for x in self.pool()
                if (statuses is None or x.get("status") in statuses)
                and (ids is None or x["id"] in ids)
-               and (not name or name in _fold(x["player"].get("fullName", "")))
+               and (not name or _name_matches(x["player"], name))
                and (not slots or slots & set(x["player"].get("eligibleSlots") or []))]
         for sort, spec in reversed(sorts):  # stable sorts, the main one (priority 1) last
             value = _sort_value(sort, spec)

@@ -461,10 +461,10 @@ def test_no_hits_on_everyone_does_not_suggest_everyone(capsys):
     data = finder.FinderData([], "all", query="zzqx")
     app_tip, cli_tip = (finder.empty_message(data, DARK, app=True).plain,
                         finder.empty_message(data, DARK).plain)
-    assert "Press 4" not in app_tip and "escape" in app_tip and "shorter name" in app_tip
+    assert "press 4" not in app_tip.lower() and "escape" in app_tip and "shorter name" in app_tip
     assert "--from all" not in cli_tip and "shorter name" in cli_tip
     fa = finder.empty_message(finder.FinderData([], "fa", query="zzqx"), DARK, app=True).plain
-    assert "Press 4 to search everyone" in fa  # from a narrower pool, 4 still helps
+    assert "press 4 to search everyone" in fa.lower()  # from a narrower pool, 4 still helps
     main(["--demo", "players", "--from", "all", "zzqx"])
     out = capsys.readouterr().out
     assert 'No players match "zzqx" in Everyone' in out and "--from all" not in out

@@ -153,8 +153,9 @@ class Client:
                     cookies=self.cookies)
 
     def update_team(self, team_id: int, body: dict) -> dict:
-        """Change fields of a team, for example {"watchList": [player ids]}. ESPN answers with
-        the whole team. Only the fields in ``body`` change (the web app sends one at a time)."""
+        """Change fields of a team, for example {"watchList": [player ids]} (docs/api/04,
+        section 13). Only the fields in ``body`` change (the web app sends one at a time).
+        What ESPN answers is unverified; callers read the team from it when it is one."""
         return http(WRITES + self._league_path() + f"/teams/{team_id}", body=body,
                     cookies=self.cookies)
 

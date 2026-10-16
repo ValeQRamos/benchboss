@@ -36,7 +36,7 @@ Bundles were fetched as data and searched as text; they were never executed.
 | POST | `{WRITES}/teams/{teamId}/recommendations?lineupScoringPeriodId=&recommendationTypeId=LINEUP&restOfWeek=` | ESPN "Quick Lineup" (server sets the optimal lineup) | espn_s2 + SWID | VERIFIED (bundle) |
 | GET | `{READS}/teams/{teamId}/recommendations?recommendationTypeId=LINEUP&view=recommend` | Read ESPN's suggested lineup (no write) | espn_s2 + SWID | VERIFIED (live) |
 | POST | `{WRITES}/teams?scoringPeriodId=0` | LM: set waiver order, transaction counters, team fields | LM cookies | VERIFIED (bundle) |
-| POST | `{WRITES}/teams/{teamId}` body `{"watchList": [ids]}` | Replace your watch list | espn_s2 + SWID | VERIFIED (live write) |
+| POST | `{WRITES}/teams/{teamId}` body `{"watchList": [ids]}` | Replace your watch list (the star on a player), at most 50 players | espn_s2 + SWID | VERIFIED (live write) |
 | GET | `{READS}?view=mPendingTransactions` | Pending trades and claims (source of truth for alerts) | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{READS}?view=mTransactions2` (+ `X-Fantasy-Filter: {"transactions":{...}}`) | Transaction log, filterable by type | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{COMM}/communication/?view=kona_league_communication` (+ filter) | Recent Activity topics (`ACTIVITY_TRANSACTIONS`, etc.) | espn_s2 + SWID | VERIFIED (live) |
@@ -735,6 +735,12 @@ Content-Type: application/json
 
 **How benchboss uses it:** `Session.set_watched` (read `mTeam`, change the list, `Client.update_team`). The command line asks first (`benchboss watch add|remove`, `--dry-run`, `--yes`). The app's Player finder sends it on a key press without a confirmation step, because the list is private to the caller and the same key undoes it; a failed write puts the star back and shows the error.
 
+**From the web bundle** (`team.watchPlayer` in the kona main bundle, VERIFIED (bundle)):
+
+- `watchPlayer(playerId)` toggles one id (out of the list when present, appended otherwise) and posts the whole list the same way.
+- The list is capped at `maxWatchListPlayers`, a constant `50`. At the cap the web app refuses the add without sending anything (`{error: "tooManyPlayers"}`) and shows "The Watch List is capped at {max} players. To add another player to your Watch List, please first remove a player." Whether the server enforces the cap too is UNVERIFIED. benchboss refuses the 51st add the same way.
+- If the POST fails, the web app puts the star back and shows "Oops! Something went wrong, please try again". On success it only looks for an `error` key in the answer.
+
 ---
 
 ## Open questions
@@ -749,3 +755,4 @@ Content-Type: application/json
 8. Which parameter, if any, narrows `mTransactions2` by team? (`scoringPeriodId` narrows it by day on the completed 2026 season, but not in the 2027 preseason.)
 9. Origin and purpose of the legacy `CHAT` topic, and whether the server still notifies members about messages posted there.
 10. Whether `X-Fantasy-Platform` accepts arbitrary values (for example an app identifier) or only known clients.
+11. What `POST {WRITES}/teams/{teamId}` with `{"watchList": [...]}` answers on success (the team, or nothing), and whether the server itself refuses a 51st player.

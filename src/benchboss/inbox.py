@@ -245,11 +245,11 @@ def alerts(session, include_chat: bool = True, include_spins: bool = True) -> li
 
 # --- watch list spins -----------------------------------------------------------------------------
 
-SEEN_FILE = "seen-news.json"  # {"<league id>": [news ids]}, oldest first
-TOASTED_FILE = "toasted-news.json"  # the same shape: the spins the app already toasted
+SEEN_FILE = "seen-news.json"  # {"<league id>": {"news": [ids, oldest first], "players": [ids]}}
+TOASTED_FILE = "toasted-news.json"  # {"<league id>": [ids, oldest first]}: what the app toasted
 SEEN_KEEP = 500               # news ids remembered per league
 SPIN_DAYS = 3                 # how far back watch_spins looks
-FIRST_RUN_HOURS = 24          # on the first check of a league, older news counts as seen
+FIRST_RUN_HOURS = 24          # for a player new to the watch list, older news counts as seen
 
 _seen_lock = threading.Lock()  # the app checks in a worker thread while screens read
 
@@ -287,11 +287,13 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
     """News ("spins") on your watch-list players that you have not seen yet, newest first,
     as (player name, NewsItem).
 
-    What you have seen is kept per league in ``seen-news.json`` in the config folder (the
-    newest ``SEEN_KEEP`` ids). The first time a league is checked, news older than
-    ``FIRST_RUN_HOURS`` counts as seen, so a new install is not flooded. ``mark_seen=True``
-    records what this call returns (on that first check, the older news too). ESPN errors
-    propagate as BenchbossError.
+    What you have seen is kept per league in ``seen-news.json`` in the config folder: the
+    newest ``SEEN_KEEP`` news ids, and the watch list as it was at the last recorded check.
+    News on a player new to the list (every player, the first time a league is checked)
+    older than ``FIRST_RUN_HOURS`` counts as seen, so neither a new install nor a player
+    you just starred brings days of old news. Anything else not seen yet is new, however
+    old (say the app was closed for two days). ``mark_seen=True`` records what this call
+    returns, that older news and the list. ESPN errors propagate as BenchbossError.
     """
     watched = list(session.watch_list())
     if not watched:
@@ -301,18 +303,26 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
     with _seen_lock:
         book = _read_seen()
         entry = book.get(key)
-        first = not isinstance(entry, list)
-        known = [] if first else list(entry)
-        if first:
+        if isinstance(entry, list):  # the first format kept only the news ids
+            entry = {"news": entry, "players": watched}
+        if not isinstance(entry, dict):
+            entry = {}
+        news, players = entry.get("news"), entry.get("players")
+        known = list(news) if isinstance(news, list) else []
+        before = {x for x in players if isinstance(x, int)} if isinstance(players, list) else set()
+        added = set(watched) - before
+        if added:  # their older news counts as seen, unless it is on a player watched before
             cutoff = session.now - dt.timedelta(hours=FIRST_RUN_HOURS)
-            known += [i.id for i in sorted(items, key=lambda i: i.published) if i.published < cutoff]
+            known += [i.id for i in sorted(items, key=lambda i: i.published)
+                      if i.published < cutoff and i.player_ids & set(watched) <= added]
         seen = {str(x) for x in known}
         new = sorted((i for i in items if str(i.id) not in seen),
                      key=lambda i: i.published, reverse=True)
-        if mark_seen and (new or first):
+        if mark_seen and (new or set(watched) != before):
             # oldest first, so the cap drops the oldest; ids compare as text, kept as given
             record = known + [i.id for i in reversed(new)]
-            book[key] = list({str(x): x for x in record}.values())[-SEEN_KEEP:]
+            book[key] = {"news": list({str(x): x for x in record}.values())[-SEEN_KEEP:],
+                         "players": watched}
             _write_seen(book)
     if not new:
         return []

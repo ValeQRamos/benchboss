@@ -334,7 +334,7 @@ def test_filter_ids_name_and_slots(client):
     assert {x["id"] for x in client.players({"filterIds": {"value": [mine, fa, 999]}})} == {mine, fa}
     hits = client.players({"filterName": {"value": "JOKIC"}})
     assert [x["player"]["fullName"] for x in hits] == ["Nikola Jokic"]
-    assert client.players({"filterName": {"value": "ntetokoun"}})
+    assert client.players({"filterName": {"value": "antetok"}})
     centers = client.players({"filterSlotIds": {"value": [4]}, "filterStatus": {"value": ["ONTEAM"]}})
     assert centers and all(4 in x["player"]["eligibleSlots"] for x in centers)
 

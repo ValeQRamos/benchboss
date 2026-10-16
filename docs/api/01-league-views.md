@@ -441,6 +441,7 @@ VERIFIED (live). `deadlineDate` is Fri Feb 26, 2027 11:00 CT. `revisionHours: 24
 | `teams[].watchList` | [int] | `[4432194, 4683634]` | Player ids on the caller's watch list (the star in the ESPN app). Only the caller's own team carries the key (1 of 10 teams on 2026-10-16); it is an empty list when nothing is watched. VERIFIED (live). Changed with `POST {WRITES}/teams/{teamId}`, see [04 §13](04-writes-transactions.md#13-watch-list-post-teamsteamid) |
 | `teams[].pendingTransactions[]` | [transaction] | see section 12 | Only on teams involved, only while pending; key absent otherwise |
 | `teams[].draftStrategy` | object | `{keeperPlayerIds: []}` for other teams | The caller's own team also gets `draftList[{playerId, auctionValue}]` (1,095 rows), `excludedPlayerIds`, `futureKeeperPlayerIds` |
+| `teams[].watchList` | [int] | `[4278073, 3112335]` | The caller's watch list (player ids); only on the caller's own team, the key is absent on the others. VERIFIED (live, 2026-10-16). Written with `POST {WRITES}/teams/{teamId}`, see [04 §13](04-writes-transactions.md#13-watch-list-post-teamsteamid) |
 
 **How the app should use it:** standings table, waiver order, trade block, transaction counters, and the owner-to-team map. Combine `mTeam` with `mRoster` and `forTeamId` for a single-team page. It does not include rosters.
 

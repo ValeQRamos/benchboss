@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from functools import cached_property
 from pathlib import Path
@@ -31,6 +32,11 @@ LEAGUE_VIEWS = ("mRoster", "mTeam", "mSettings", "mMatchupScore", "mStatus", "mS
 
 # The player finder's pools (kona_player_info filterStatus; "watch" is your watch list)
 POOLS = {"fa": ["FREEAGENT", "WAIVERS"], "rostered": ["ONTEAM"], "all": None, "watch": None}
+
+# ESPN's web app refuses a 51st watch-list player (maxWatchListPlayers in its bundle)
+WATCH_LIST_MAX = 50
+WATCH_LIST_FULL = (f"your watch list is full (ESPN allows {WATCH_LIST_MAX} players): "
+                   "take one off first")
 
 
 def eastern() -> dt.tzinfo:
@@ -173,21 +179,23 @@ class Session:
             "value": 2, "additionalValue": split_ids(self.league().season)}}
 
     def player_pool(self, source: str = "fa", position: str | None = None, n: int = 100,
-                    sort: str = "proj", query: str | None = None) -> list[Player]:
+                    sort: str = "proj", query: str | None = None,
+                    watched: Iterable[int] | None = None) -> list[Player]:
         """Players for the finder, with every stat split.
 
         ``source``: "fa" (free agents and waivers), "rostered" (on a team in this league),
         "all", or "watch" (your ESPN watch list). ``sort`` picks which ``n`` players ESPN sends:
         a split key (proj, season, l7, l15, l30, last) ranks by fantasy points per game in
         that split, "own" by % rostered, "change" by the change in % rostered. Callers sort
-        the result again however they like.
+        the result again however they like. ``watched`` replaces the saved watch list for
+        "watch": the finder passes its stars, some of them still on their way to ESPN.
         """
         if source not in POOLS:
             raise BenchbossError(f"unknown player pool '{source}' (fa, rostered, all, watch)")
         lg = self.league()
         flt: dict = {"limit": n, **self._with_stats()}
         if source == "watch":
-            ids = list(self.watch_list())
+            ids = list(self.watch_list() if watched is None else watched)
             if not ids:
                 return []
             flt["filterIds"] = {"value": ids}
@@ -219,7 +227,8 @@ class Session:
         """Add a player to your ESPN watch list or take him off; returns the new list.
 
         The list is read fresh first (it may have changed in the ESPN app) and ESPN gets the
-        whole new list, which is how its web app does it.
+        whole new list, which is how its web app does it. Like the web app, an add to a full
+        list (``WATCH_LIST_MAX``) is refused without sending anything.
         """
         lg = self.league()
         raw = self.client.league("mTeam")
@@ -228,6 +237,9 @@ class Session:
         if watched == (player_id in ids):
             lg.me.watch_list = tuple(ids)
             return lg.me.watch_list
+        if watched and len(ids) >= WATCH_LIST_MAX:
+            lg.me.watch_list = tuple(ids)
+            raise BenchbossError(WATCH_LIST_FULL)
         ids = ids + [player_id] if watched else [x for x in ids if x != player_id]
         team = self.client.update_team(lg.my_team_id, {"watchList": ids})
         got = team.get("watchList") if isinstance(team, dict) else None
