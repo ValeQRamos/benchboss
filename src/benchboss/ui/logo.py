@@ -87,7 +87,7 @@ def ball(pal: Palette) -> Text:
 
 
 def mark(pal: Palette) -> Text:
-    """The top bar mark: 3 cells wide, 1 row tall."""
+    """The top bar mark: 4 cells wide, 1 row tall."""
     return draw(MARK, pal)
 
 

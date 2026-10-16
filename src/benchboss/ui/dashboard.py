@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass, field
+from itertools import product
 
 from rich import box
 from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
 from rich.measure import Measurement
 from rich.panel import Panel
+from rich.segment import Segment
 from rich.table import Table
 from rich.text import Text
 
@@ -61,6 +63,11 @@ class Dashboard:
         return next((i + 1 for i, t in enumerate(self.league.standings())
                      if t.id == self.league.my_team_id), None)
 
+    def watched(self, item) -> bool:
+        """A news item about a watch-list player and none of yours (it gets the star)."""
+        mine = {s.player.id for s in self.league.me.roster}
+        return bool(item.player_ids & self.watch) and not item.player_ids & mine
+
     def to_dict(self) -> dict:
         me = self.league.me
         names = {**self.names, **{s.player.id: s.player.name for s in me.roster}}
@@ -76,8 +83,7 @@ class Dashboard:
             "trash": [t.to_dict(self.calendar) for t in self.trash],
             "trending": [p.to_dict() for p in self.trending],
             "alerts": [a.to_dict() for a in self.alerts],
-            "news": [{**n.to_dict(names), "watch_list": bool(n.player_ids & self.watch)}
-                     for n in self.news],
+            "news": [{**n.to_dict(names), "watch_list": self.watched(n)} for n in self.news],
             "standings": [{"rank": i + 1, "team": t.name, "record": t.record,
                            "points_for": round(t.points_for, 1)}
                           for i, t in enumerate(self.league.standings())],
@@ -145,10 +151,6 @@ def _panel(body: RenderableType, title: str, pal: Palette, note: str = "") -> Pa
                  box=box.ROUNDED, border_style=pal.border, padding=(0, 1), expand=True)
 
 
-def _short_date(d: dt.date) -> str:
-    return day_label(d)
-
-
 def _ordinal(n) -> str:
     if not isinstance(n, int):
         return str(n)
@@ -166,14 +168,15 @@ def header(d: Dashboard, pal: Palette, width: int = 120) -> RenderableType:
     teams = len(d.league.teams)
     place = d.place()
     clock = f"{d.now:%I:%M %p}".lstrip("0").lower()
-    info = Table.grid(expand=True)
+    info = Table.grid(expand=True, padding=(0, 2))
     info.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
     info.add_column(justify="right", no_wrap=True)
     info.add_row(Text(me.name.upper(), style=f"bold {pal.accent}"), Text(clock, style=f"bold {pal.text}"))
     info.add_row(Text(d.league.name, style=pal.dim), Text(day_label(d.today), style=pal.dim))
-    # the clock column sits on the right of every row, so this line gets what is left
+    # the clock column (and the 2 spaces before it) sits on the right of every row, so this
+    # line gets what is left
     room = (width - (logo.BALL_WIDTH + 2 if width >= LOGO_MIN else 0)
-            - max(len(clock), len(day_label(d.today))))
+            - max(len(clock), len(day_label(d.today))) - 2)
     dot = _dot(pal) if room >= 60 else (" · ", pal.border)
     line = Text(me.record, style=pal.text)
     extras = [(f"{_ordinal(place)} of {teams}", pal.text) if place else None,
@@ -188,7 +191,7 @@ def header(d: Dashboard, pal: Palette, width: int = 120) -> RenderableType:
     if me.playoff_pct is not None:
         odds = me.playoff_pct
         color = pal.good if odds >= 0.6 else pal.warn if odds >= 0.3 else pal.bad
-        info.add_row(Text.assemble((pct(odds), f"{color}"), (" playoff odds  ", pal.dim),
+        info.add_row(Text.assemble((pct(odds), color), (" playoff odds  ", pal.dim),
                                    meter(odds, 12, pal, color)), "")
     if width < LOGO_MIN:
         return info
@@ -202,7 +205,7 @@ def header(d: Dashboard, pal: Palette, width: int = 120) -> RenderableType:
 def matchup_card(d: Dashboard, pal: Palette) -> Panel:
     rows: list[RenderableType] = []
     o = d.outlook
-    note = f"{_short_date(d.week[0])} to {_short_date(d.week[1])}" if d.week else ""
+    note = f"{day_label(d.week[0])} to {day_label(d.week[1])}" if d.week else ""
     if d.days_to_start:
         rows.append(Text(f"Season tips off in {d.days_to_start} day{'s' * (d.days_to_start != 1)}",
                          style=pal.accent))
@@ -412,10 +415,9 @@ def news_card(d: Dashboard, pal: Palette, hint: str = "benchboss news for more",
     Headlines wrap to two lines at most; ``spin_lines`` > 0 adds the analysis under each."""
     if not d.news:
         return None
-    mine = {s.player.id: s.player.name for s in d.league.me.roster}
-    names = {**d.names, **mine}
+    names = {**d.names, **{s.player.id: s.player.name for s in d.league.me.roster}}
     items = d.news[:limit]
-    starred = any(n.player_ids & d.watch and not n.player_ids & set(mine) for n in items)
+    starred = any(d.watched(n) for n in items)
     t = Table.grid(expand=True, padding=(0, 1))
     t.add_column(no_wrap=True, justify="right", width=3)
     if starred:
@@ -428,7 +430,7 @@ def news_card(d: Dashboard, pal: Palette, hint: str = "benchboss news for more",
         headline = n.headline.strip()
         # RotoWire headlines start with the last name; only prefix when it is missing
         if who and not any(x in headline[:60] for x in last):
-            line = Text.assemble((", ".join(who), f"bold {pal.text}"), (" ", pal.text), (headline, pal.text))
+            line = Text.assemble((", ".join(who), "bold"), " ", headline, style=pal.text)
         else:
             line = Text(headline, style=pal.text)
             if last and headline.startswith(last[0]):
@@ -437,10 +439,9 @@ def news_card(d: Dashboard, pal: Palette, hint: str = "benchboss news for more",
         spin = " ".join((n.spin or "").split())
         if spin_lines and spin:
             body = Group(body, Clamp(Text(spin, style=pal.dim), spin_lines))
-        watched = bool(n.player_ids & d.watch) and not n.player_ids & set(mine)
         cells: list[RenderableType] = [Text(_ago(now, n.published), style=pal.dim)]
         if starred:
-            cells.append(Text("★" if watched else " ", style=pal.dim))
+            cells.append(Text("★" if d.watched(n) else " ", style=pal.dim))
         t.add_row(*cells, body)
     note = f"last {NEWS_DAYS} days · {hint}" if hint else f"last {NEWS_DAYS} days"
     return _panel(t, "LATEST NEWS", pal, note)
@@ -469,8 +470,6 @@ class Columns:
         return out
 
     def split(self, console: Console, options: ConsoleOptions) -> list[list[RenderableType]]:
-        from itertools import product
-
         widths = self.widths(options.max_width)
 
         def tall(card, w: int) -> int:
@@ -495,8 +494,6 @@ class Columns:
         return cols
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
-        from rich.segment import Segment
-
         widths = self.widths(options.max_width)
         cols = self.split(console, options)
         rendered = [console.render_lines(Group(*col), options.update(width=w, height=None), pad=True)
@@ -521,7 +518,8 @@ def render(d: Dashboard, pal: Palette, width: int,
            news_hint: str = "benchboss news for more") -> RenderableType:
     """``news_hint`` is the subtitle of the news card: the app passes its own key for it."""
     wide = width >= WIDE
-    news = news_card(d, pal, news_hint, limit=news_limit(width),
+    limit = news_limit(width)
+    news = news_card(d, pal, news_hint, limit=limit,
                      spin_lines=(2 if width >= 130 else 1) if wide else 0)
     left = [matchup_card(d, pal), roster_card(d, pal)]
     right = [c for c in (alerts_card(d, pal), activity_card(d, pal), None if wide else news,
@@ -536,7 +534,7 @@ def render(d: Dashboard, pal: Palette, width: int,
             parts.append(news)
     for e in d.errors:
         parts.append(Text(e, style=pal.dim))
-    starred = news is not None and any(n.player_ids & d.watch for n in d.news[:news_limit(width)])
+    starred = news is not None and any(d.watched(n) for n in d.news[:limit])
     parts.append(_footer(pal, width, starred))
     return Group(*parts)
 

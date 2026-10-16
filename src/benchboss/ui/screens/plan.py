@@ -3,8 +3,8 @@
 Each day reads top to bottom: a header (the date, who plays, the projected points), the
 moves, the lineup they leave, then the bench and why each player sits there, with the
 injury math spelled out when he is hurt (constants.INJURY_FACTOR: DTD and Q count 75%,
-D 25%, OUT nothing). When several days are shown, a day with nothing to change folds into
-one quiet line.
+D 25%, OUT nothing). When several days are shown, a summary goes on top and a day with
+nothing to change folds into one quiet line.
 """
 
 from __future__ import annotations
@@ -47,18 +47,24 @@ class _Fit:
 
 
 def draw(plans: list[DayPlan], cal: SeasonCalendar, pal: Palette, width: int) -> RenderableType:
+    # one name column for the moves of every day, so the arrows line up down the week
+    name_w = max((len(m.player.name) for p in plans for m in p.moves), default=0)
+    if len(plans) == 1:  # the day header already says everything a summary would
+        p = plans[0]
+        if not playing(p, cal):
+            return day_header(p, cal, pal, width)
+        return Group(day_header(p, cal, pal, width), day_body(p, cal, pal, width, name_w))
     parts: list[RenderableType] = [summary(plans, cal, pal, width)]
-    fold = len(plans) > 1
     quiet = False
     for p in plans:
-        if fold and not p.changed:
+        if not p.changed:
             if not quiet:
                 parts.append(Text(""))
             parts.append(quiet_day(p, cal, pal, width))
             quiet = True
             continue
         quiet = False
-        parts += [Text(""), day_header(p, cal, pal, width), day_body(p, cal, pal, width)]
+        parts += [Text(""), day_header(p, cal, pal, width), day_body(p, cal, pal, width, name_w)]
     return Group(*parts)
 
 
@@ -94,6 +100,13 @@ def _sep(pal: Palette, width: int) -> tuple[str, str]:
 
 def _pts(v: float) -> str:
     return f"{v:,.1f}"
+
+
+def _shown(pl: Player, value: float) -> float:
+    """The number printed for ``pl`` on a day. A hurt player's comes from his rounded
+    projection, so "32.9 × 75% = 24.7" adds up and he shows 24.7 everywhere that day."""
+    factor = INJURY_FACTOR.get(pl.injury_status or "", 1.0)
+    return round(round(pl.proj, 1) * factor, 1) if value and factor < 1 else value
 
 
 # --- the summary and the day headers ------------------------------------------------------------
@@ -164,15 +177,17 @@ def _surname(name: str) -> str:
     return parts[-1] if parts else name
 
 
-def day_body(p: DayPlan, cal: SeasonCalendar, pal: Palette, width: int) -> RenderableType:
-    """Moves, lineup and bench of one day, under labels in their own column when it fits."""
+def day_body(p: DayPlan, cal: SeasonCalendar, pal: Palette, width: int,
+             name_w: int = 0) -> RenderableType:
+    """Moves, lineup and bench of one day, under labels in their own column when it fits.
+    ``name_w`` is the width of the movers' names (the longest of every day shown)."""
     wide = width >= WIDE
     inner = width - (LABEL_W + 1 if wide else 2)
     sections: list[tuple[str, RenderableType]] = []
     if p.moves:
-        sections.append(("Moves", moves(p, pal, inner)))
+        sections.append(("Moves", moves(p, pal, inner, name_w)))
     if p.starters:
-        sections.append(("Lineup", lineup(p, pal, inner)))
+        sections.append(("Lineup", lineup(p, cal, pal, inner)))
     if p.bench:
         sections.append(("Bench", bench(p, cal, pal, inner)))
     grid = Table.grid()
@@ -180,9 +195,7 @@ def day_body(p: DayPlan, cal: SeasonCalendar, pal: Palette, width: int) -> Rende
         grid.add_column(width=LABEL_W, no_wrap=True)
         grid.add_column(width=1)
         grid.add_column(max_width=inner)
-        for i, (label, body) in enumerate(sections):
-            if i:
-                grid.add_row("", "", "")
+        for label, body in sections:
             grid.add_row(Text(f" {label}", style=pal.dim), "", body)
         return grid
     grid.add_column(width=2)
@@ -203,49 +216,67 @@ def _order(m: Move) -> tuple[int, str]:
     return 1, m.player.name
 
 
-def moves(p: DayPlan, pal: Palette, width: int) -> Table:
+def _swaps(ordered: list[Move]) -> list[tuple[Move | None, Move | None]]:
+    """Rows of (move into a slot, move to the bench): each player going to the bench sits
+    next to the one who takes his slot."""
+    benched = [m for m in ordered if m.to_slot in (BENCH, IR)]
+    rows: list[tuple[Move | None, Move | None]] = []
+    for m in ordered:
+        if m.to_slot in (BENCH, IR):
+            continue
+        partner = next((o for o in benched if o.from_slot == m.to_slot), None)
+        if partner is not None:
+            benched.remove(partner)
+        rows.append((m, partner))
+    return rows + [(None, o) for o in benched]
+
+
+def moves(p: DayPlan, pal: Palette, width: int, name_w: int = 0) -> Table:
     """ "Pascal Siakam   BE → PF   41.1": who moves, from which slot to which, and what he
-    projects in his new slot. When the width allows, the players going to the bench get a
-    column of their own on the right, so each row reads like a swap."""
-    narrow = width < 44
+    projects in his new slot. When the width allows, each player going to the bench sits on
+    the right of the one who takes his slot, so the row reads as the swap it is."""
     values = {pl.id: v for pl, _, v in p.starters}
     ordered = sorted(p.moves, key=_order)
+    # a row is the name, "   BE → PF" (10) and "   41.1" (7); short names when full ones
+    # leave no room for that, and a name that still does not fit is cut, never the slots
+    full = max([len(m.player.name) for m in ordered] + [name_w])
+    short = full + 17 > width
+    longest = max(len(m.player.short_name) for m in ordered) if short else full
+    name_col = max(1, min(longest, width - 17))
 
     def cells(m: Move | None) -> list[Text]:
         if m is None:
             return [Text(""), Text(""), Text("")]
-        coming = m.to_slot not in (BENCH, IR)
-        value = values.get(m.player.id) if coming else None
-        name = m.player.short_name if narrow else m.player.name
+        value = values.get(m.player.id) if m.to_slot not in (BENCH, IR) else None
+        name = m.player.short_name if short else m.player.name
         return [Text(name, style=pal.text),
                 Text.assemble(("   ", ""), (f"{SLOT.get(m.from_slot, '?'):<2}", pal.info),
                               (" → ", pal.dim), (f"{SLOT.get(m.to_slot, '?'):<2}", pal.info)),
-                Text(f"   {value:.1f}" if value is not None else "", style=pal.dim)]
+                Text(f"   {_shown(m.player, value):.1f}" if value is not None else "",
+                     style=pal.dim)]
 
-    out = [m for m in ordered if m.to_slot in (BENCH, IR)]
-    stay = [m for m in ordered if m.to_slot not in (BENCH, IR)]
-    longest = max((len(m.player.name) for m in ordered), default=0)
-    pair = bool(out and stay) and 2 * longest + 2 * 10 + 7 + 5 <= width
+    rows = _swaps(ordered)
+    # the right side has no points and starts 5 spaces after the left one
+    pair = any(a and b for a, b in rows) and (longest + 17) + 5 + (longest + 10) <= width
     t = Table.grid()
-    for _ in range(2 if pair else 1):
-        t.add_column(no_wrap=True, overflow="ellipsis")
+    for col in ([name_col, name_col + 5] if pair else [name_col]):
+        t.add_column(no_wrap=True, overflow="ellipsis", width=col)
         t.add_column(no_wrap=True)
         t.add_column(no_wrap=True)
     if not pair:
         for m in ordered:
             t.add_row(*cells(m))
         return t
-    for i in range(max(len(stay), len(out))):
-        left = cells(stay[i] if i < len(stay) else None)
-        right = cells(out[i] if i < len(out) else None)
+    for into, benched in rows:
+        right = cells(benched)
         right[0] = Text.assemble(("     ", ""), right[0])
-        t.add_row(*left, *right)
+        t.add_row(*cells(into), *right)
     return t
 
 
-def lineup(p: DayPlan, pal: Palette, width: int) -> Table:
+def lineup(p: DayPlan, cal: SeasonCalendar, pal: Palette, width: int) -> Table:
     """The starters as a grid of "PG  L. Ball  46.4" cells, as many across as fit. A starter
-    with no game that day (he cannot be moved out) shows dim with a dash."""
+    with no game that day (nobody better could take his slot) shows dim with a dash."""
     starters = sorted(p.starters, key=lambda x: (x[1], -x[2]))
     narrow = width < 60
     names = [_surname(pl.name) if narrow else pl.short_name for pl, _, _ in starters]
@@ -263,35 +294,36 @@ def lineup(p: DayPlan, pal: Palette, width: int) -> Table:
         cells: list[Text] = []
         for i, ((pl, slot, value), name) in enumerate(zip(starters[start:start + across],
                                                          names[start:start + across], strict=True)):
-            idle = not value
+            idle = not cal.plays(pl.pro_team_id, p.period)
             color = pal.dim if idle else pal.info if pl.id in moved_in else pal.text
             cells += [Text(f"{' ' * gap if i else ''}{SLOT.get(slot, '?'):<2} ", style=pal.dim),
                       Text(f"{name:<{name_w}} ", style=color),
-                      Text("  -" if idle else f"{value:.1f}", style=pal.dim)]
+                      Text("  -" if idle else f"{_shown(pl, value):.1f}", style=pal.dim)]
         cells += [Text("")] * (3 * across - len(cells))
         t.add_row(*cells)
     return t
 
 
 def bench(p: DayPlan, cal: SeasonCalendar, pal: Palette, width: int) -> Table:
-    """Who sits and why. Players with no game go on one line at the end."""
+    """Who sits and why. Players with no game go on one line at the end. When one reason is
+    too long for the width, every comparison moves to its own line, so the rows keep one
+    rhythm."""
     narrow = width < 60
     t = Table.grid()
     t.add_column(no_wrap=True)
     t.add_column(ratio=1)
-    idle: list[str] = []
+
+    def name(pl: Player) -> str:
+        return pl.short_name if narrow else pl.name
+
     sitting = [(pl, why) for pl, why in p.bench if why != "no game"]
-    name_w = max((len(pl.short_name if narrow else pl.name) for pl, _ in sitting), default=0) + 2
-    for pl, why in p.bench:
-        name = pl.short_name if narrow else pl.name
-        if why == "no game":
-            idle.append(name)
-            continue
-        line = reason(pl, why, p, cal, pal, narrow)
-        compared = any(w in line.plain for w in (", below ", ", same as "))
-        if compared and name_w + line.cell_len > width:
-            line = reason(pl, why, p, cal, pal, narrow, split=True)
-        t.add_row(Text(f"{name}  ", style=pal.text), line)
+    idle = [name(pl) for pl, why in p.bench if why == "no game"]
+    name_w = max((len(name(pl)) for pl, _ in sitting), default=0) + 2
+    lines = [reason(pl, why, p, cal, pal, narrow) for pl, why in sitting]
+    if any(name_w + line.cell_len > width for line in lines):
+        lines = [reason(pl, why, p, cal, pal, narrow, split=True) for pl, why in sitting]
+    for (pl, _), line in zip(sitting, lines, strict=True):
+        t.add_row(Text(f"{name(pl)}  ", style=pal.text), line)
     if idle:
         t.add_row(Text("No game  ", style=pal.dim), Text(", ".join(idle), style=pal.dim))
     return t
@@ -307,27 +339,29 @@ def reason(pl: Player, why: str, p: DayPlan, cal: SeasonCalendar, pal: Palette,
     factor = INJURY_FACTOR.get(pl.injury_status or "", 1.0)
     if factor == 0:
         return Text(pl.injury or "out", style=pal.bad)
-    proj = round(pl.proj, 1)
-    value = round(proj * factor, 1)
+    value = _shown(pl, pl.proj)
     out = Text()
     if factor < 1:
         out.append(pl.injury or "hurt", style=pal.warn)
-        out.append(f": {proj:.1f} × {factor:.0%} = {value:.1f}", style=pal.dim)
+        out.append(f": {pl.proj:.1f} × {factor:.0%} = {value:.1f}", style=pal.dim)
     else:
         out.append(f"proj {value:.1f}", style=pal.dim)
     rival = _weakest_starter(pl, p)
     if rival is not None:
         other, other_value = rival
         name = other.short_name if narrow else other.name
-        word = "below" if value < round(other_value, 1) else "same as"
-        out.append(f"{chr(10) if split else ', '}{word} {name} {other_value:.1f}", style=pal.dim)
+        shown = round(_shown(other, other_value), 1)
+        word = "below" if round(value, 1) < shown else "same as"
+        out.append(f"{chr(10) if split else ', '}{word} {name} {shown:.1f}", style=pal.dim)
     return out
 
 
 def _weakest_starter(pl: Player, p: DayPlan) -> tuple[Player, float] | None:
-    """The starter with the lowest projection in a slot ``pl`` could fill."""
+    """The starter with the lowest projection in a slot ``pl`` could fill. Locked starters
+    do not count: they keep their slot whatever they project."""
     slots = set(pl.eligible_slots)
-    fits = [(other, v) for other, slot, v in p.starters if slot in slots and v]
+    fits = [(other, v) for other, slot, v in p.starters
+            if slot in slots and v and not other.locked]
     return min(fits, key=lambda x: x[1]) if fits else None
 
 
