@@ -50,9 +50,9 @@ sends (`proj`, `season`, `l7`, `l15`, `l30`, `last`, `own`, `change`), and witho
 Do not run `benchboss` with no command, `benchboss app` or `benchboss dash --watch`: they
 are interactive and never exit. Run `benchboss news --ai` only when the user asks for the AI
 briefing: it calls the Anthropic API with their key and costs money.
-`benchboss alerts --mark-read` writes nothing to ESPN, but the watch-list items it lists then
-never come back in `alerts` or in the app's toasts. Run it only when the user says they have
-read them.
+Run `benchboss alerts --mark-read` only when the user asks (they say they read the news). It
+writes nothing to ESPN, but the watch-list items it lists then never come back in `alerts` or
+in the app's toasts.
 
 ### Writes need the user's explicit yes, every time
 

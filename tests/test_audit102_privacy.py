@@ -98,10 +98,12 @@ def test_demo_alerts_mark_read_says_it_is_not_saved(capsys):
 
 
 def test_a_real_session_still_saves_what_was_seen(session, monkeypatch):
-    monkeypatch.setattr(type(session), "demo", False)  # the demo data, kept like a real league
+    session.seen_news = None  # the demo data, kept on disk like a real league
     assert len(inbox.watch_spins(session, mark_seen=True)) == 2
-    assert len(json.loads(seen_file().read_text())[str(session.client.league_id)]) == 2
-    assert inbox.watch_spins(demo_session()) == []  # the next run reads the file
+    assert len(json.loads(seen_file().read_text())[str(session.client.league_id)]["news"]) == 2
+    again = demo_session()
+    again.seen_news = None
+    assert inbox.watch_spins(again) == []  # the next run reads the file
 
 
 # --- privacy-5: `--demo watch add/remove --yes` is refused like every other demo write -----------
@@ -159,18 +161,18 @@ def test_a_51st_watch_list_player_is_refused_before_anything_is_sent(monkeypatch
 
 def test_espn_web_app_cap_is_the_one_documented():
     text = repo_text("docs/api/04-writes-transactions.md")
-    assert f"maxWatchListPlayers: {WATCH_LIST_MAX}" in text
+    assert "maxWatchListPlayers" in text and f"`{WATCH_LIST_MAX}`" in text
 
 
 # --- hygiene-2: the new endpoint and field are documented ------------------------------------------
 
 def test_watch_list_endpoint_is_in_the_api_reference():
     writes = repo_text("docs/api/04-writes-transactions.md")
-    assert "## 13. Team fields: the watch list" in writes
-    assert '`POST {WRITES}/teams/{teamId}`' in writes and '{"watchList": [' in writes
+    assert "## 13. Watch list" in writes
+    assert "{WRITES}/teams/{teamId}" in writes and '{"watchList": [' in writes
     index = repo_text("docs/api/README.md")
-    assert '`{W}/teams/{teamId}` with `{"watchList": [playerIds]}`' in index
-    assert "04-writes-transactions.md#13-team-fields-the-watch-list" in index
+    assert '`{W}/teams/{teamId}` with `{"watchList": [ids]}`' in index
+    assert "04-writes-transactions.md#13-watch-list-post-teamsteamid" in index
     assert "`teams[].watchList`" in repo_text("docs/api/01-league-views.md")
 
 

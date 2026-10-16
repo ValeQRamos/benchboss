@@ -23,6 +23,14 @@ from benchboss.ui.screens import trash as trash_screen
 from benchboss.ui.theme import DARK
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def repo_file(rel: str) -> Path:
+    """A file from the repository; tests that need one skip when run from an sdist."""
+    path = ROOT / rel
+    if not path.exists():
+        pytest.skip(f"{rel} is not part of this checkout")
+    return path
 ET = dt.timezone(dt.timedelta(hours=-5))
 
 
@@ -231,8 +239,8 @@ ACCOUNT = {"app", "setup", "login", "logout", "status", "doctor"}
 def test_agent_docs_list_every_league_command():
     sub = next(a for a in build_parser()._actions if isinstance(a, argparse._SubParsersAction))
     commands = [name for name in sub.choices if name not in ACCOUNT]
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    copilot = (ROOT / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
+    agents = repo_file("AGENTS.md").read_text(encoding="utf-8")
+    copilot = repo_file(".github/copilot-instructions.md").read_text(encoding="utf-8")
     assert [c for c in commands if f"benchboss {c}" not in agents] == []
     assert [c for c in commands if f"`{c}" not in copilot] == []
     writes = agents.split("### Writes need")[1].split("### Exit codes")[0]
@@ -242,7 +250,7 @@ def test_agent_docs_list_every_league_command():
 
 
 def test_the_watch_list_endpoint_is_documented():
-    writes = (ROOT / "docs" / "api" / "04-writes-transactions.md").read_text(encoding="utf-8")
+    writes = repo_file("docs/api/04-writes-transactions.md").read_text(encoding="utf-8")
     assert '{"watchList": [' in writes and "maxWatchListPlayers" in writes
-    views = (ROOT / "docs" / "api" / "01-league-views.md").read_text(encoding="utf-8")
+    views = repo_file("docs/api/01-league-views.md").read_text(encoding="utf-8")
     assert "`teams[].watchList`" in views

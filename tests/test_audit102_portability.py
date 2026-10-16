@@ -202,7 +202,7 @@ def auto_approved(cmd: str) -> bool:
     ('benchboss playoffs --json --pick "Monstars>Tune Squad@5"', True),
     ("benchboss watch", True),
     ("benchboss watch list --json", True),
-    ("benchboss alerts --json --mark-read", True),
+    ("benchboss alerts --json --mark-read", False),
     ('benchboss watch add "Egor Demin" --dry-run', True),
     ('benchboss watch remove "Egor Demin" --dry-run --json', True),
     ('benchboss watch add "Egor Demin"', False),

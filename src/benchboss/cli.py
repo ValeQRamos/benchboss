@@ -272,7 +272,7 @@ def cmd_watch(c: Ctx):
                else f"Take {p.name} ({p.pro_team}) off your ESPN watch list")
 
     def send() -> str:
-        if a.demo:
+        if s.demo:
             # the demo client takes watch-list edits in memory, for the app's star; a command
             # would report a change that dies with it, so refuse like every other demo write
             from benchboss.demo import REFUSED

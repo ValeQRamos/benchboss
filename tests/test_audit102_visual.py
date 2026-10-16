@@ -21,6 +21,14 @@ from benchboss.ui.theme import DARK, LIGHT
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def repo_file(rel: str) -> Path:
+    """A file from the repository; tests that need one skip when run from an sdist."""
+    path = ROOT / rel
+    if not path.exists():
+        pytest.skip(f"{rel} is not part of this checkout")
+    return path
+
+
 def text_of(renderable, width: int = 160) -> str:
     console = Console(width=width, record=True, file=io.StringIO())
     console.print(renderable)
@@ -104,10 +112,10 @@ def test_readme_shows_the_logo_and_the_new_screens():
     readme = (ROOT / "README.md").read_text()
     assert "docs/images/logo.png" in readme and "🏀" not in readme
     for shot in ("players.png", "playoffs.png"):
-        assert f"docs/images/{shot}" in readme and (ROOT / "docs" / "images" / shot).exists()
+        assert f"docs/images/{shot}" in readme and (repo_file("docs/images") / shot).exists()
     for feature in ("Player finder", "Playoff race", "watch list"):
         assert feature.lower() in readme.lower()
-    shots = (ROOT / "tools" / "screenshots.py").read_text()
+    shots = repo_file("tools/screenshots.py").read_text()
     assert '"players"' in shots and '"playoffs"' in shots
 
 

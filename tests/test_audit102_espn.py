@@ -14,7 +14,7 @@ from benchboss import config as config_mod
 from benchboss import inbox
 from benchboss.cli import main
 from benchboss.config import Config
-from benchboss.demo import DemoClient, demo_session, load
+from benchboss.demo import DemoClient, DemoSession, demo_session, load
 from benchboss.errors import BenchbossError
 from benchboss.news import NewsItem
 from benchboss.service import WATCH_LIST_MAX, Session
@@ -250,6 +250,8 @@ def test_watch_add_says_the_list_is_full_before_asking(capsys, monkeypatch):
 
 
 def test_watch_add_checks_the_list_espn_sends_back(capsys, monkeypatch):
+    # the demo refuses CLI writes; here its client stands in for ESPN
+    monkeypatch.setattr(DemoSession, "demo", property(lambda self: False))
     main(["--demo", "watch", "add", BUTLER, "--yes"])
     assert "ESPN: watch list has 5 players" in capsys.readouterr().out
 

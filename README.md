@@ -289,11 +289,15 @@ More in [docs/configuration.md](docs/configuration.md).
 - Your cookies stay on your machine (keychain) and are only sent to ESPN. benchboss never
   prints them, logs them or puts them in `--json` output.
 - Nothing changes in your league without a confirmation: every write shows the exact moves and
-  asks first. `--dry-run` shows the plan and sends nothing. Demo mode cannot write at all.
+  asks first. `--dry-run` shows the plan and sends nothing. Demo mode sends nothing to ESPN and
+  saves nothing on your computer.
 - One exception. In the app's Player finder, space adds a player to your ESPN watch list (or
   takes him off) right away, like the star in the ESPN app. Nobody else in the league sees your
-  watch list and the same key undoes it. From the command line, `benchboss watch add` and
-  `watch remove` ask first like every other write.
+  watch list and the same key undoes it. From the command line, `benchboss watch add|remove`
+  asks first like every other write.
+- What stays on your computer: your config, the cookies (in the keychain), and two small files
+  with the watch-list news you have already seen (`seen-news.json`) and the ones the app already
+  popped up (`toasted-news.json`). Nothing in them leaves your machine.
 - Player news comes from ESPN's public feed and needs no cookies. The optional AI briefing sends
   only your players' names, NBA teams and positions to the Anthropic API, and only when you ask for it.
 - benchboss is not affiliated with, endorsed by or supported by ESPN. It uses the same
