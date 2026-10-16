@@ -39,6 +39,7 @@ TABS = ("fa", "rostered", "watch", "all")       # keys 1 2 3 4 in the app
 POSITIONS = (None, "PG", "SG", "SF", "PF", "C", "G", "F")
 DEFAULT_SPLIT = "proj"
 POOL_SIZE = 150                                 # players fetched per pool in the app
+SEARCH_WIDTH = 28                               # the app's search box (less on a narrow window)
 NEWS_DAYS = 7
 RECENT = ("l7", "l15", "l30")                   # colored hot or cold against the season
 
@@ -68,6 +69,7 @@ BOX: tuple[tuple[str, str, Callable[[StatLine], float | None], Callable[[float],
 )
 BOX_KEYS = tuple(k for k, *_ in BOX)
 _BOX = {k: (head, value, fmt) for k, head, value, fmt in BOX}
+COUNTS = ("pts", "reb", "ast", "stl", "blk", "tpm", "to")
 
 # Every column of the app's table, left to right (also the order < and > walk through).
 COLUMNS = ("star", "name", "pos", "owner", "own", "start", *SPLIT_KEYS, *BOX_KEYS)
@@ -75,8 +77,8 @@ HEADERS = {"star": "★", "name": "Player", "pos": "Pos", "owner": "Owner", "own
            "start": "Start%", **{k: SPLIT_SHORT[k] for k in SPLIT_KEYS},
            **{k: head for k, (head, _, _) in _BOX.items()}}
 TEXT_COLUMNS = ("name", "pos", "owner")         # sorted A to Z first; the rest highest first
-# Sort keys the CLI takes (--sort) besides the splits: % rostered and its change.
-SORT_LABEL = {**HEADERS, "own": "Rost%", "change": "Rost% change", "star": "watch list"}
+# What the title says for each sort key: every column, plus the change in % rostered (--sort).
+SORT_LABEL = {**HEADERS, "change": "Rost% change", "star": "watch list"}
 
 
 @dataclass
@@ -119,13 +121,21 @@ def owner_name(p: Player, data: FinderData) -> str | None:
     return team[1] if team else None
 
 
+def box_value(line: StatLine | None, key: str) -> float | None:
+    """One box score number of a split. ESPN leaves out the stats that are zero (a center's
+    3PM in his projection), so in a split with a box score a missing count is 0."""
+    if line is None:
+        return None
+    v = _BOX[key][1](line)
+    return 0.0 if v is None and key in COUNTS and line.avg else v
+
+
 def sort_value(p: Player, key: str, split: str, data: FinderData, watch: Iterable[int] = ()):
     """What column ``key`` sorts by for player ``p`` (None sorts last either way)."""
     if key in SPLITS:
         return p.fpts(key)
     if key in _BOX:
-        line = p.split(split)
-        return _BOX[key][1](line) if line else None
+        return box_value(p.split(split), key)
     return {"own": lambda: p.owned, "change": lambda: p.owned_change, "start": lambda: p.started,
             "star": lambda: 1.0 if p.id in watch else 0.0, "name": lambda: p.name.lower(),
             "pos": lambda: p.positions or None, "owner": lambda: owner_label(p, data)}[key]()
@@ -134,7 +144,7 @@ def sort_value(p: Player, key: str, split: str, data: FinderData, watch: Iterabl
 def ordered(players: list[Player], key: str, desc: bool, split: str, data: FinderData,
             watch: Iterable[int] = ()) -> list[Player]:
     """Players sorted by one column; ties keep ESPN's order, missing values go last."""
-    if key not in SORT_LABEL and key not in SPLITS:
+    if key not in SORT_LABEL:
         key = DEFAULT_SPLIT
     watch = set(watch)
     vals = [(sort_value(p, key, split, data, watch), i, p) for i, p in enumerate(players)]
@@ -152,17 +162,17 @@ def _own(v: float) -> str:
     return f"{v:.0f}" if v >= 9.95 else f"{v:.1f}"
 
 
-def rost_cell(p: Player, pal: Palette, change: bool = True) -> Text:
-    """ "46 ▲1.7": % of ESPN leagues that roster him, and the change (fixed width, so the
-    numbers line up)."""
-    out = Text(_own(p.owned), style=pal.text, justify="right")
-    if change:
-        ch = p.owned_change
-        if abs(ch) >= 0.05:
-            mag = f"{abs(ch):.1f}" if abs(ch) < 9.95 else f"{abs(ch):.0f}"
-            out.append(f" {'▲' if ch > 0 else '▼'}{mag}".rjust(5), style=pal.good if ch > 0 else pal.bad)
-        else:
-            out.append(" " * 5)
+def rost_cell(p: Player, pal: Palette) -> Text:
+    """ "46 ▲1.7": % of ESPN leagues that roster him, and the change. Always 8 cells, left
+    justified: a right-justified cell drops trailing blanks, which would push a number with
+    no change under the arrows of the others."""
+    out = Text(_own(p.owned).rjust(3), style=pal.text, justify="left")
+    ch = p.owned_change
+    if abs(ch) >= 0.05:
+        mag = f"{abs(ch):.1f}" if abs(ch) < 9.95 else f"{abs(ch):.0f}"
+        out.append(f" {'▲' if ch > 0 else '▼'}{mag}".rjust(5), style=pal.good if ch > 0 else pal.bad)
+    else:
+        out.append(" " * 5)
     return out
 
 
@@ -208,12 +218,10 @@ def split_cell(p: Player, key: str, selected: str, pal: Palette) -> Text:
 
 
 def box_cell(p: Player, key: str, split: str, pal: Palette) -> Text:
-    line = p.split(split)
-    _, value, fmt = _BOX[key]
-    v = value(line) if line else None
+    v = box_value(p.split(split), key)
     if v is None:
         return Text("-", style=pal.border, justify="right")
-    return Text(fmt(v), style=pal.text, justify="right")
+    return Text(_BOX[key][2](v), style=pal.text, justify="right")
 
 
 def cell(p: Player, key: str, split: str, data: FinderData, watch, pal: Palette) -> Text:
@@ -300,12 +308,14 @@ def _static_columns(rows, data, split, sort, watch, width, pal) -> tuple[list[st
     """The columns that fit ``width``, and whether names go short ("J. Butler").
 
     An Owner column that only says FA goes first, then the box score (from the right),
-    Start%, the splits other than the selected one, Avg and Proj, Pos and Avg. Names are
-    shortened, then cut, only when nothing else is left to drop."""
+    Start%, Prev, L30, L15, L7, Pos and Avg. Then names go short, then Rost% and Owner (the
+    one that says less in this pool first) and the star; names go back to full length as
+    soon as a drop makes room. The selected split and the sort column always stay."""
     sel = {split, sort}
     owners = {owner_label(p, data) for p in rows}
-    cols = [c for c in COLUMNS if (c != "star" or watch & {p.id for p in rows})
-            and (c != "owner" or owners != {"FA"})]
+    # the star says nothing on the watch list itself, nor Owner when everyone is a free agent
+    starred = data.source != "watch" and watch & {p.id for p in rows}
+    cols = [c for c in COLUMNS if (c != "star" or starred) and (c != "owner" or owners != {"FA"})]
     # a split nobody has data for (the preseason: only Proj and Prev) is only noise
     cols = [c for c in cols if c not in SPLITS or c in sel or has_split(rows, c)]
     # on a team, who has him says more than % rostered (nearly 100 for most); in free
@@ -316,22 +326,20 @@ def _static_columns(rows, data, split, sort, watch, width, pal) -> tuple[list[st
     # measure on the rows with the widest cells (long names, injury tags, dual positions)
     widest = sorted(rows, key=lambda p: -(len(p.name) + len(p.injury) * 2 + len(p.positions)))
     sample = list({p.id: p for p in rows[:20] + widest[:20]}.values())
-    short = False
 
-    def fits() -> bool:
+    def fits(short: bool) -> bool:
         return _fits(_static_table(sample, cols, data, split, watch, pal, short), width)
 
-    if fits():
-        return cols, short
-    for c in drops:
+    short = False
+    for c in (None, *drops):
         if c == "short":
             short = True
-        elif c in sel or c not in cols:
-            continue
-        else:
+        elif c in cols and c not in sel:
             cols.remove(c)
-        if fits():
-            break
+        if fits(False):
+            return cols, False
+        if short and fits(True):
+            return cols, True
     return cols, short
 
 
@@ -344,7 +352,7 @@ def _static_table(rows, cols, data, split, watch, pal, short: bool = False) -> T
             t.add_column(head, no_wrap=True, overflow="ellipsis", min_width=8)
         elif c == "star":
             t.add_column(head, header_style=pal.accent, no_wrap=True, width=1)
-        elif c in TEXT_COLUMNS:
+        elif c in TEXT_COLUMNS or c == "own":  # Rost% heads its number, not the change after it
             t.add_column(head, no_wrap=True)
         elif c == split:
             t.add_column(head, justify="right", no_wrap=True, header_style=f"bold {pal.accent}")
@@ -442,19 +450,18 @@ def detail(p: Player, data: FinderData, split: str, watched: bool, pal: Palette,
     t.show_edge = False
     t.add_column("Split", no_wrap=True)
     t.add_column("FPTS", justify="right", no_wrap=True)
-    box = list(BOX)
-    for _key, h, _, _ in box:
+    for _key, h, _, _ in BOX:
         t.add_column(h, justify="right", no_wrap=True)
     for k in SPLIT_KEYS:
         line = p.split(k)
         sel = k == split
         label = Text(SPLIT_LABEL[k], style=f"bold {pal.accent}" if sel else pal.dim)
         if line is None:
-            t.add_row(label, Text("-", style=pal.border), *(Text("-", style=pal.border) for _ in box))
+            t.add_row(label, Text("-", style=pal.border), *(Text("-", style=pal.border) for _ in BOX))
             continue
         cells = []
-        for _key, _h, value, fmt in box:
-            v = value(line)
+        for key, _h, _, fmt in BOX:
+            v = box_value(line, key)
             cells.append(Text("-", style=pal.border) if v is None else
                          Text(fmt(v), style=pal.text if sel else pal.dim))
         t.add_row(label, Text(f"{line.fpts:.1f}", style=f"bold {pal.text}" if sel else pal.text),
@@ -495,26 +502,29 @@ _MEMORY: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 _ON_ACCENT = {"dark": "#141518", "light": "#ffffff"}
 
 
+Region = tuple[int, int, int, str, str]  # (line, start, end, kind, value), in cells
+
+
 class _Bar(Static):
-    """A header line whose labels can be clicked (tabs, positions, splits)."""
+    """Header lines whose labels can be clicked (tabs, positions, splits)."""
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.regions: list[tuple[int, int, str, str]] = []  # (start, end, kind, value) in cells
+        self.regions: list[Region] = []
 
-    def show(self, text: Text, regions: list[tuple[int, int, str, str]]) -> None:
+    def show(self, text: Text, regions: list[Region]) -> None:
         self.regions = regions
         self.update(text)
 
     def on_click(self, event) -> None:
         offset = event.get_content_offset(self)
-        if offset is None or offset.y != 0:
+        if offset is None:
             return
-        hit = next((r for r in self.regions if r[0] <= offset.x < r[1]), None)
+        hit = next((r for r in self.regions if r[0] == offset.y and r[1] <= offset.x < r[2]), None)
         finder = next((a for a in self.ancestors if isinstance(a, FinderView)), None)
         if hit is not None and finder is not None:
             event.stop()
-            finder.pick(hit[2], hit[3])
+            finder.pick(hit[3], hit[4])
 
 
 class _Detail(VerticalScroll, can_focus=False):
@@ -533,7 +543,7 @@ class FinderView(Vertical):
     FinderView #finder-search { width: 28; height: 1; border: none; padding: 0 1;
                                 background: $surface; color: $foreground; }
     FinderView #finder-search:focus { border: none; background: $panel; }
-    FinderView #finder-filters { height: 1; margin-top: 1; }
+    FinderView #finder-filters { height: auto; margin-top: 1; }
     FinderView #finder-message { height: auto; margin-top: 1; display: none; }
     FinderView #finder-message.visible { display: block; }
     FinderView DataTable { height: 1fr; margin-top: 1; background: $background; }
@@ -617,6 +627,8 @@ class FinderView(Vertical):
         else:
             self._render_header()
             self._render_table(show=self.split)
+            if self._fetch_sort() != self.data.sort:  # the pool came ranked by another sort
+                self._maybe_refetch_sorted()
 
     def focus(self, scroll_visible: bool = True):
         self.query_one(DataTable).focus(scroll_visible)
@@ -674,7 +686,10 @@ class FinderView(Vertical):
             pal, width, SOURCES[self.source], self.position, self.query_text,
             f"{SORT_LABEL.get(self.sort_key, self.sort_key)} {order}", count,
             "Loading..." if self.loading else ""))
-        self.query_one("#finder-tabs", _Bar).show(*self._tabs(pal, width - 30))
+        tabs, regions = self._tabs(pal, width)
+        self.query_one("#finder-tabs", _Bar).show(tabs, regions)
+        self.query_one("#finder-search", Input).styles.width = max(10, min(SEARCH_WIDTH,
+                                                                           width - tabs.cell_len))
         self.query_one("#finder-filters", _Bar).show(*self._filters(pal, width))
         self._render_hint()
 
@@ -682,49 +697,69 @@ class FinderView(Vertical):
         width = max(20, self.size.width or 100)
         self.query_one("#finder-hint", Static).update(self._hint(self.pal, width))
 
-    def _tabs(self, pal: Palette, width: int) -> tuple[Text, list]:
-        """ "1 Free agents  2 On a team  3 Watch list  4 Everyone", the current one a pill."""
+    def _tabs(self, pal: Palette, width: int) -> tuple[Text, list[Region]]:
+        """ "1 Free agents  2 On a team  3 Watch list  4 Everyone", the current one a pill;
+        short names when the long ones and the search box do not fit."""
         short = {"fa": "FA", "rostered": "Teams", "watch": "Watch", "all": "All"}
-        names = SOURCES if width >= 56 else short
-        out, regions = Text(), []
-        for i, key in enumerate(TABS):
-            start = len(out)
-            if key == self.source:
-                out.append(f" {i + 1} {names[key]} ",
-                           style=f"bold {_ON_ACCENT.get(pal.name, '#ffffff')} on {pal.accent}")
-            else:
-                out.append(f" {i + 1}", style=f"bold {pal.dim}")
-                out.append(f" {names[key]} ", style=pal.text)
-            regions.append((start, len(out), "pool", key))
-            out.append(" ")
+        for names in (SOURCES, short):
+            out, regions = Text(), []
+            for i, key in enumerate(TABS):
+                start = out.cell_len
+                if key == self.source:
+                    out.append(f" {i + 1} {names[key]} ",
+                               style=f"bold {_ON_ACCENT.get(pal.name, '#ffffff')} on {pal.accent}")
+                else:
+                    out.append(f" {i + 1}", style=f"bold {pal.dim}")
+                    out.append(f" {names[key]} ", style=pal.text)
+                regions.append((0, start, out.cell_len, "pool", key))
+                out.append(" ")
+            if out.cell_len + SEARCH_WIDTH <= width:
+                break
         return out, regions
 
-    def _filters(self, pal: Palette, width: int) -> tuple[Text, list]:
-        """ "Pos All PG SG ...    Stats Season L7 ...", the current ones in accent."""
-        out, regions = Text(), []
-        out.append("Pos ", style=f"bold {pal.dim}")
-        for pos in POSITIONS:
-            label = pos or "All"
-            start = len(out)
-            out.append(f" {label} ", style=f"bold {pal.accent}" if pos == self.position else pal.dim)
-            regions.append((start, len(out), "pos", label))
-        if width >= 64:
-            out.append(" [ ]", style=pal.border)
-        out.append("    Stats ", style=f"bold {pal.dim}")
-        for k in SPLIT_KEYS:
-            start = len(out)
-            out.append(f" {SPLIT_PICK[k]} ", style=f"bold {pal.accent}" if k == self.split else pal.dim)
-            regions.append((start, len(out), "split", k))
-        if width >= 70:
-            out.append(" v", style=pal.border)
-        return out, regions
+    def _filters(self, pal: Palette, width: int) -> tuple[Text, list[Region]]:
+        """ "Pos All PG SG ...    Stats Season L7 ...", the current ones in accent. On a narrow
+        window the splits go on a second line."""
+        def part(head: str, options: list[tuple[str, str, str]], kind: str):
+            out, regions = Text(), []
+            out.append(head, style=f"bold {pal.dim}")
+            for value, label, style in options:
+                start = out.cell_len
+                out.append(f" {label} ", style=style)
+                regions.append((start, out.cell_len, kind, value))
+            return out, regions
+
+        def look(on: bool, empty: bool = False) -> str:
+            return f"bold {pal.accent}" if on else (pal.border if empty else pal.dim)
+
+        positions = [(p or "All", p or "All", look(p == self.position)) for p in POSITIONS]
+        # a split nobody has numbers for yet (the preseason) is drawn faint
+        splits = [(k, SPLIT_PICK[k], look(k == self.split, bool(self.players)
+                                          and not has_split(self.players, k)))
+                  for k in SPLIT_KEYS]
+        pos, pos_at = part("Pos ", positions, "pos")
+        stats, stats_at = part("Stats ", splits, "split")
+        gap = " " * 4
+        if pos.cell_len + len(gap) + stats.cell_len <= width:
+            hints = pos.cell_len + len(gap) + stats.cell_len + 6 <= width
+            if hints:
+                pos.append(" [ ]", style=pal.border)
+                stats.append(" v", style=pal.border)
+            shift = pos.cell_len + len(gap)
+            return (Text.assemble(pos, gap, stats),
+                    [(0, *r) for r in pos_at] + [(0, a + shift, b + shift, k, v) for a, b, k, v in stats_at])
+        pos, pos_at = part("Pos   ", positions, "pos")  # lined up with "Stats "
+        for line, hint in ((pos, " [ ]"), (stats, " v")):
+            if line.cell_len + len(hint) <= width:
+                line.append(hint, style=pal.border)
+        return Text.assemble(pos, "\n", stats), [(0, *r) for r in pos_at] + [(1, *r) for r in stats_at]
 
     def _hint(self, pal: Palette, width: int) -> Text:
         current = self._current()
         watched = current is not None and current.id in self.watched
-        items = [("space", "unwatch" if watched else "watch"), ("enter", "details"),
-                 ("/", "search"), ("1-4", "pool"), ("[ ]", "position"), ("v", "stats"),
-                 ("< >", "sort")]
+        card = ("esc", "close card") if self.detail_id is not None else ("enter", "details")
+        items = [("space", "unwatch" if watched else "watch"), card, ("/", "search"),
+                 ("1-4", "pool"), ("[ ]", "position"), ("v", "stats"), ("< >", "sort")]
         out = Text()
         for i in range(len(items), 0, -1):
             out = legend(pal, *items[:i])
@@ -747,17 +782,18 @@ class FinderView(Vertical):
         data = self._view_data()
         scroll_x = t.scroll_x
         t.clear(columns=True)
-        for c in self._columns():
+        t.show_header = bool(self.players)  # an empty pool shows its message, not bare headers
+        cols = self._columns()
+        for c in cols:
             label = HEADERS[c]
             style = f"bold {pal.accent}" if c == self.split else ""
             if c == self.sort_key:
                 label = f"{label} {'▼' if self.sort_desc else '▲'}"
                 style = style or f"bold {pal.text}"
-            justify = "left" if c in TEXT_COLUMNS or c == "star" else "right"
+            justify = "left" if c in TEXT_COLUMNS or c in ("star", "own") else "right"
             t.add_column(Text(label, style=style, justify=justify), key=c)
         rows = ordered(self.players, self.sort_key, self.sort_desc, self.split, data, self.watched)
         seen: set[int] = set()
-        cols = self._columns()
         for p in rows:
             if p.id in seen:
                 continue
@@ -782,32 +818,34 @@ class FinderView(Vertical):
 
     def _scroll_columns(self, scroll_x: float, show: str | None) -> None:
         """Put the horizontal scroll back, then bring column ``show`` into view (the fixed
-        columns, star and Player, never scroll)."""
+        columns, star and Player, never scroll). The scrolled part starts on a whole column,
+        so no stray half of one sits next to the names."""
         if not self.is_attached:
             return
         t = self.query_one(DataTable)
         x = scroll_x
         keys = [c.key.value for c in t.ordered_columns]
+        widths = [c.get_render_width(t) for c in t.ordered_columns]
+        fixed = sum(widths[:t.fixed_columns])
         if show in keys:
-            widths = [c.get_render_width(t) for c in t.ordered_columns]
             i = keys.index(show)
             left, right = sum(widths[:i]), sum(widths[:i + 1])
-            fixed = sum(widths[:t.fixed_columns])
             view = t.scrollable_content_region.width
             if right > x + view:
                 x = right - view
             if left < x + fixed:
                 x = left - fixed
+        starts = [sum(widths[:j]) - fixed for j in range(t.fixed_columns, len(widths))]
+        x = next((s for s in starts if s >= x), x)
         t.scroll_to(x=max(0, x), animate=False)
 
     def _render_detail(self) -> None:
-        box = self.query_one("#finder-detail")
         p = self._player(self.detail_id)
+        self.detail_id = p.id if p else None
+        self.query_one("#finder-detail").set_class(p is not None, "open")
+        self._render_hint()  # enter details, or esc close card
         if p is None:
-            box.remove_class("open")
-            self.detail_id = None
             return
-        box.add_class("open")
         width = max(30, (self.size.width or 100) - 4)
         now = getattr(self.session, "now", None)
         card = detail(p, self._view_data(), self.split, p.id in self.watched, self.pal, width,
@@ -990,7 +1028,7 @@ class FinderView(Vertical):
         verb = "Added" if on else "Removed"
         self.app.notify(f"{verb} {p.name} {'to' if on else 'from'} your watch list",
                         title="Watch list", timeout=4)
-        self._send_watch(p.id, p.name, on, self.app)
+        self._send_watch(p.id, self.app)
 
     def _set_star(self, pid: int, on: bool) -> None:
         if on:
@@ -1007,9 +1045,12 @@ class FinderView(Vertical):
             self._render_detail()
 
     @work(thread=True, group="finder-watch")
-    def _send_watch(self, pid: int, name: str, on: bool, app) -> None:
+    def _send_watch(self, pid: int, app) -> None:
+        # ESPN gets the whole list, so one change at a time; and the star as it is now, not
+        # as it was at the key press, so quick presses end where the star ends
         try:
-            with self._watch_lock:  # ESPN gets the whole list: one change at a time
+            with self._watch_lock:
+                on = pid in self.watched
                 ids = self.session.set_watched(pid, on)
         except Exception as e:  # roll back the star and say why
             msg = str(e) if isinstance(e, BenchbossError) else f"{type(e).__name__}: {e}"

@@ -540,3 +540,93 @@ def test_preseason_v_skips_splits_without_numbers():
             assert view.split == "l7"
             assert "No Last 7 stats yet" in plain(view.query_one("#finder-message"))
     asyncio.run(run())
+
+
+# --- review fixes ---------------------------------------------------------------------------------
+
+def test_rost_cells_line_up_with_or_without_a_change():
+    data = finder.load(demo_session(), source="rostered", n=40)
+    cells = [finder.rost_cell(p, DARK) for p in data.players]
+    assert {c.cell_len for c in cells} == {8}
+    assert any(abs(p.owned_change) < 0.05 for p in data.players)  # some have no arrow at all
+    out = text_of(finder.draw(data, DARK, 120, view_index(finder, "proj")), 120)
+    col = header_of(out).index("Rost%")
+    shown = [line[col:col + 3] for line in out.splitlines()
+             if any(p.name in line for p in data.players)]
+    assert len(shown) == len(data.players)
+    assert all(s[-1].isdigit() for s in shown)  # every number ends in the same column
+    assert {s.strip() for s in shown} >= {"100", "97"}
+
+
+def test_a_count_missing_from_a_box_score_is_zero():
+    session = demo_session()
+    center = next(p for p in session.player_pool("fa", "C", 40, "proj", None)
+                  if p.split("proj") and p.split("proj").tpm is None)
+    assert finder.box_value(center.split("proj"), "tpm") == 0.0
+    assert finder.box_cell(center, "tpm", "proj", DARK).plain == "0.0"
+    assert finder.box_value(None, "tpm") is None
+
+
+def test_cli_names_stay_full_when_a_later_drop_makes_room():
+    data = finder.load(demo_session(), source="all", n=8)
+    out = text_of(finder.draw(data, DARK, 46, view_index(finder, "proj")), 46)
+    assert "Shai Gilgeous-Alexander OKC" in out and "S. Gilgeous" not in out
+    assert max(len(line) for line in out.splitlines()) <= 46
+
+
+def test_watch_pool_in_the_cli_has_no_star_column():
+    out = text_of(finder.draw(finder.load(demo_session(), source="watch"), DARK, 100), 100)
+    assert "★" not in out
+
+
+def test_narrow_window_keeps_every_tab_and_split_and_scrolls_by_whole_columns():
+    async def scenario(pilot, app, view):
+        await pilot.pause(0.3)
+        tabs = view.query_one("#finder-tabs")
+        search = view.query_one("#finder-search", Input)
+        assert [r[4] for r in tabs.regions] == list(finder.TABS)
+        assert tabs.regions[-1][2] <= search.region.x - tabs.region.x  # 4 All is not covered
+        filters = view.query_one("#finder-filters")
+        assert filters.size.height == 2  # Pos on one line, Stats on the next
+        assert {r[0] for r in filters.regions if r[3] == "split"} == {1}
+        t = view.query_one(DataTable)
+        widths = [c.get_render_width(t) for c in t.ordered_columns]
+        fixed = sum(widths[:t.fixed_columns])
+        starts = {sum(widths[:j]) - fixed for j in range(t.fixed_columns, len(widths))}
+        assert t.scroll_x > 0 and t.scroll_x in starts
+        last = next(r for r in filters.regions if r[3] == "split" and r[4] == "last")
+        await pilot.click("#finder-filters", offset=(last[1] + 1, 1))
+        await pilot.pause()
+        assert view.split == "last"
+
+    drive(scenario, size=(60, 34))
+
+
+def test_an_empty_pool_hides_the_table_header():
+    app = Benchboss(Config(), demo=True)
+
+    async def scenario(pilot, app, view):
+        app.session.league().me.watch_list = ()
+        await pilot.press("3")
+        await settle(pilot)
+        assert not view.query_one(DataTable).show_header
+        await pilot.press("1")
+        await settle(pilot)
+        assert view.query_one(DataTable).show_header
+
+    drive(scenario, app=app)
+
+
+def test_quick_presses_on_the_star_end_where_the_star_ends():
+    async def scenario(pilot, app, view):
+        pid = view._current_id()
+        before = pid in view.watched
+        await pilot.press("space", "space", "space")
+        await settle(pilot)
+        assert (pid in view.watched) != before
+        assert (pid in app.session.watch_list()) == (pid in view.watched)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "close card" in plain(view.query_one("#finder-hint"))
+
+    drive(scenario)
