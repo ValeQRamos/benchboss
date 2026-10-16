@@ -14,7 +14,7 @@ from benchboss import config as config_mod
 from benchboss import inbox
 from benchboss.cli import main
 from benchboss.config import Config
-from benchboss.demo import DemoClient, load
+from benchboss.demo import DemoClient, demo_session, load
 from benchboss.errors import BenchbossError
 from benchboss.news import NewsItem
 from benchboss.service import WATCH_LIST_MAX, Session
@@ -31,6 +31,14 @@ async def settle(pilot):
     await pilot.pause()
     await pilot.app.workers.wait_for_complete()
     await pilot.pause()
+
+
+@pytest.fixture
+def session():
+    """A demo session that keeps the news seen on disk, like a real league."""
+    s = demo_session()
+    s.seen_news = None
+    return s
 
 
 def rows(view) -> list:

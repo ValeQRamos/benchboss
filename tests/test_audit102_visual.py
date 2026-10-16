@@ -103,12 +103,12 @@ def test_finder_and_dashboard_use_the_same_rost_cell(session):
 def test_readme_shows_the_logo_and_the_new_screens():
     readme = (ROOT / "README.md").read_text()
     assert "docs/images/logo.png" in readme and "🏀" not in readme
-    for shot in ("finder.png", "playoffs.png"):
+    for shot in ("players.png", "playoffs.png"):
         assert f"docs/images/{shot}" in readme and (ROOT / "docs" / "images" / shot).exists()
     for feature in ("Player finder", "Playoff race", "watch list"):
         assert feature.lower() in readme.lower()
     shots = (ROOT / "tools" / "screenshots.py").read_text()
-    assert '"finder"' in shots and '"playoffs"' in shots
+    assert '"players"' in shots and '"playoffs"' in shots
 
 
 def test_changelog_describes_1_0_2():
