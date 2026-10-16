@@ -11,7 +11,7 @@ from rich.text import Text
 
 from benchboss.core.calendar import SeasonCalendar
 from benchboss.core.trash import TrashPick
-from benchboss.ui.common import day_label, num, player_cell, table, title
+from benchboss.ui.common import day_label, num, player_cell, rost_cell, table, title
 from benchboss.ui.theme import Palette
 
 TITLE = "Best trash"
@@ -135,14 +135,6 @@ def _drop(pk: TrashPick, pal: Palette, short: bool) -> Text:
     return out
 
 
-def _owned(pk: TrashPick, pal: Palette, digits: int) -> Text:
-    """ "12.8 ▲": % rostered with a small arrow when it moved. Left justified and padded by
-    hand, so the numbers line up whether or not a row has an arrow."""
-    change = pk.player.owned_change
-    arrow = (" ▲", pal.good) if change >= 0.1 else (" ▼", pal.bad) if change <= -0.1 else ("  ", "")
-    return Text.assemble((f"{pk.player.owned:>{digits}.1f}", pal.dim), arrow, justify="left")
-
-
 def _net(pk: TrashPick, pal: Palette) -> Text:
     return Text(f"{pk.net:+.1f}", style=f"bold {pal.good}" if pk.net > 0 else pal.dim)
 
@@ -177,8 +169,8 @@ def _caption(items: list[tuple[str | Text, Meaning]], pal: Palette, width: int) 
 
 # --- the table ---------------------------------------------------------------------------------
 
-COLUMNS = ("#", "Player", "Pos", "Games", "G", "Grab", "+Pts", "Drop", "Net", "Proj", "Own%")
-RIGHT = ("#", "Games", "G", "+Pts", "Net", "Proj", "Own%")   # the strip ends on Sunday
+COLUMNS = ("#", "Player", "Pos", "Games", "G", "Grab", "+Pts", "Drop", "Net", "Proj", "Rost%")
+RIGHT = ("#", "Games", "G", "+Pts", "Net", "Proj")   # the strip ends on Sunday
 
 
 class _Layout:
@@ -189,7 +181,6 @@ class _Layout:
         self.keys = list(COLUMNS)
         self.short_grab = self.short_drop = False
         self.spaced = True   # the games strip, one space between days
-        self.digits = max(len(f"{pk.player.owned:.1f}") for pk in picks)
         self._made: dict[tuple, tuple[list, int]] = {}
 
     def header(self, key: str) -> str:
@@ -224,7 +215,7 @@ class _Layout:
             return [_net(pk, pal) for pk in picks]
         if key == "Proj":
             return [Text(num(pk.player.proj), style=pal.dim) for pk in picks]
-        return [_owned(pk, pal, self.digits) for pk in picks]  # Own%
+        return [rost_cell(pk.player, pal) for pk in picks]  # Rost%
 
     def names(self, short: bool, room: int = 0) -> list[Text]:
         return [_name(pk, self.pal, short, "Grab" not in self.keys, room) for pk in self.picks]
@@ -276,7 +267,7 @@ def trash(picks: list[TrashPick], cal: SeasonCalendar, pal: Palette,
     lay = _Layout(picks, span, cal, pal)
     drops = {pk.drop.name for pk in picks if pk.drop}
     if width < WIDE or lay.need(lay.widest(False)) > width:
-        lay.keys = [k for k in lay.keys if k not in ("Pos", "Own%")]
+        lay.keys = [k for k in lay.keys if k not in ("Pos", "Rost%")]
     # secondary columns go before any name gets shorter
     for step in ("compact strip", "short grab", "same drop", "Proj", "+Pts"):
         if lay.need(lay.widest(False)) <= width:

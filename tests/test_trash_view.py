@@ -14,6 +14,7 @@ from textual.widgets import Static
 from benchboss.config import Config
 from benchboss.ui import views
 from benchboss.ui.app import Benchboss
+from benchboss.ui.common import rost_cell
 from benchboss.ui.screens import trash as screen
 from benchboss.ui.theme import DARK, LIGHT
 
@@ -116,13 +117,13 @@ def test_wide_shows_every_column_and_narrow_shortens_names(session):
     data = screen.load(session)
     wide, _ = render(screen.draw(data, DARK, 160), 160)
     head = header_of(wide)
-    for col in ("#", "Pos", "G", "Grab", "+Pts", "Drop", "Net", "Proj", "Own%"):
+    for col in ("#", "Pos", "G", "Grab", "+Pts", "Drop", "Net", "Proj", "Rost%"):
         assert f" {col} " in f"{head} "
     assert "Mitchell Robinson BOS" in wide and "Sat Nov 7" in wide
     assert "points added if you grab him" in wide.splitlines()[0]
     narrow, _ = render(screen.draw(data, DARK, 46), 46)
     assert "M. Robinson BOS" in narrow and "Mitchell Robinson" not in narrow
-    assert "Own%" not in narrow and "Pos" not in header_of(narrow)
+    assert "Rost%" not in narrow and "Pos" not in header_of(narrow)
 
 
 def test_one_long_name_is_cut_and_the_strip_stays(session):
@@ -152,8 +153,8 @@ def test_ownership_arrows_follow_the_change(session):
     for pk in data.picks:
         row = next(x for x in out.splitlines() if pk.player.name in x)
         change = pk.player.owned_change
-        assert ("▲" in row) == (change >= 0.1) and ("▼" in row) == (change <= -0.1)
-        assert f"{pk.player.owned:.1f}" in row
+        assert ("▲" in row) == (change >= 0.05) and ("▼" in row) == (change <= -0.05)
+        assert rost_cell(pk.player, DARK).plain in row
 
 
 def test_the_caption_explains_the_columns_briefly(session):

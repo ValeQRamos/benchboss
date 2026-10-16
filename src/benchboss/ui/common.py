@@ -3,10 +3,13 @@
 The look, in short (every screen follows it, so the app reads as one thing):
 
 - One title line per screen: the screen name in bold accent, then dim context after a
-  middle dot ("Roster · Monstars 2-0 · Last 7 days"). See ``title``.
+  middle dot ("Roster · Monstars 2-0 · Last 7 days"), shortened to fit. See ``fit_title``.
 - Tables use ``table``: no outer box, a thin rule under a dim bold header, numbers right
   aligned, one decimal for fantasy points, percentages with no decimals unless they are
   small. Secondary columns are dim; the number the screen is about is bold.
+- The same number looks the same on every screen: % rostered is a "Rost%" column of
+  ``rost_cell`` ("46 ▲1.7"), shooting is ``shooting_pct`` (".454"), playoff odds are colored
+  by ``odds_color``.
 - Color means something: accent = you and headings, good/bad = better or worse than the
   rest, warn = injuries and risk, dim = context. No color just for decoration.
 - A player is "Name TEAM INJ" (``player_cell``): the name in text color, the NBA team dim,
@@ -49,6 +52,16 @@ def title(text: str, pal: Palette, *context: str) -> Text:
     return out
 
 
+def fit_title(text: str, pal: Palette, width: int, *tries: tuple[str, ...]) -> Text:
+    """The title line with the first context in ``tries`` (longest first) that fits ``width``
+    on one line, else the screen name alone: a title never wraps to a second line."""
+    for context in (*tries, ()):
+        out = title(text, pal, *context)
+        if out.cell_len <= width:
+            return out
+    return out
+
+
 def day_label(d: dt.date) -> str:
     return f"{d:%a} {d:%b} {d.day}"
 
@@ -60,6 +73,39 @@ def num(v, fmt="{:.1f}") -> str:
 def pct(v: float | None, digits: int = 0) -> str:
     """A fraction as a percentage: 0.463 -> "46%" (or "46.3%" with digits=1)."""
     return "-" if v is None else f"{v * 100:.{digits}f}%"
+
+
+def rostered(v: float) -> str:
+    """% rostered (or started): no decimals, except below 10 where the decimal still says
+    something."""
+    return f"{v:.0f}" if v >= 9.95 else f"{v:.1f}"
+
+
+def rost_cell(p: Player, pal: Palette) -> Text:
+    """ "46 ▲1.7": % of ESPN leagues that roster him, and the change in a week. Always 8
+    cells, left justified (head the column with a left-justified "Rost%"): a right-justified
+    cell drops trailing blanks, which would push a number with no change under the arrows of
+    the others."""
+    out = Text(rostered(p.owned).rjust(3), style=pal.text, justify="left")
+    ch = p.owned_change
+    if abs(ch) >= 0.05:
+        mag = f"{abs(ch):.1f}" if abs(ch) < 9.95 else f"{abs(ch):.0f}"
+        out.append(f" {'▲' if ch > 0 else '▼'}{mag}".rjust(5), style=pal.good if ch > 0 else pal.bad)
+    else:
+        out.append(" " * 5)
+    return out
+
+
+def shooting_pct(v: float) -> str:
+    """A shooting percentage the way the box score shows it: .454, 1.000."""
+    s = f"{v:.3f}"
+    return s[1:] if s.startswith("0") else s
+
+
+def odds_color(v: float, pal: Palette) -> str:
+    """Playoff (or division title) odds: good from 60%, bad below 20% (a long shot), warn
+    in between."""
+    return pal.good if v >= 0.6 else pal.bad if v < 0.2 else pal.warn
 
 
 def injury(p: Player, pal: Palette) -> Text:

@@ -8,6 +8,7 @@ for older callers.
 from __future__ import annotations
 
 from rich.console import Group, RenderableType
+from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
 
@@ -15,6 +16,7 @@ from benchboss.core.trades import TradeIdea
 from benchboss.espn.constants import POSITION
 from benchboss.espn.models import League, Player
 from benchboss.inbox import Alert
+from benchboss.ui.common import fit_title, rost_cell
 from benchboss.ui.common import injury as _inj
 from benchboss.ui.common import num as _num
 from benchboss.ui.common import table as _table
@@ -67,12 +69,14 @@ def trades(ideas: list[TradeIdea], pal: Palette, need: str | None = None,
     for i, t in enumerate(ideas, 1):
         parts.append(Text.assemble((f"{i}. {t.partner.name}", f"bold {pal.accent}"),
                                    (f"  ({t.partner.owner_name})" if t.partner.owner_name else "", pal.dim)))
-        parts.append(Text.assemble(("   give ", pal.dim), (f"{t.give.name} ", pal.text),
-                                   (f"{t.give_pos} {t.give.proj:.1f}", pal.dim),
-                                   ("   get ", pal.dim), (f"{t.get.name} ", pal.text),
-                                   (f"{t.get_pos} {t.get.proj:.1f}", pal.dim),
-                                   (f"   fairness {t.fairness:.0%}", pal.good)))
-        parts.append(Text(f"   \"{t.message()}\"", style=pal.dim))
+        deal = Text.assemble(("give ", pal.dim), (f"{t.give.name} ", pal.text),
+                             (f"{t.give_pos} {t.give.proj:.1f}", pal.dim),
+                             ("   get ", pal.dim), (f"{t.get.name} ", pal.text),
+                             (f"{t.get_pos} {t.get.proj:.1f}", pal.dim),
+                             (f"   fairness {t.fairness:.0%}", pal.good))
+        # the deal and the message wrap under their own indent, not back at column 0
+        for line in (deal, Text(f"\"{t.message()}\"", style=pal.dim)):
+            parts.append(Padding(line, (0, 0, 0, 3), expand=False))
     return Group(*parts)
 
 
@@ -86,17 +90,31 @@ def _at_position_limit(league: League, need: str) -> tuple[int, int] | None:
     return (count, limit) if count >= limit else None
 
 
-def needs(balance: dict[str, dict[str, float]], my_team: str, pal: Palette) -> RenderableType:
+def needs(balance: dict[str, dict[str, float]], my_team: str, pal: Palette,
+          width: int = 120) -> RenderableType:
     positions = ["PG", "SG", "SF", "PF", "C"]
-    t = _table(pal, "Positional balance vs league average (proj. pts per game)")
-    t.add_column("Team")
+    head = fit_title("Positional balance", pal, width,
+                     ("vs league average", "proj. pts per game"), ("vs league average",))
+    shown = {p: [_signed(b[p]) for b in balance.values()] for p in positions}
+    # what the numbers take: their widths, one edge space on each side, 3 between columns
+    numbers = sum(max([len(p)] + [len(v) for v in shown[p]]) for p in positions)
+    t = _table(pal)
+    # a long team name is cut, never wrapped onto a second row, and never cuts the numbers
+    t.add_column("Team", no_wrap=True, overflow="ellipsis",
+                 max_width=max(6, width - numbers - 2 - 3 * len(positions)))
     for p in positions:
-        t.add_column(p, justify="right")
+        t.add_column(p, justify="right", no_wrap=True)
     for team, b in balance.items():
-        cells = [Text(f"{b[p]:+.0f}", style=pal.good if b[p] > 5 else pal.bad if b[p] < -5 else pal.dim)
+        cells = [Text(_signed(b[p]), style=pal.good if b[p] > 5 else pal.bad if b[p] < -5 else pal.dim)
                  for p in positions]
         t.add_row(Text(team, style=f"bold {pal.accent}" if team == my_team else pal.text), *cells)
-    return t
+    return Group(head, t)
+
+
+def _signed(v: float) -> str:
+    """ "+9", "-17", and "0" for anything that rounds to zero (never "-0")."""
+    r = round(v)
+    return f"{r:+d}" if r else "0"
 
 
 def alerts(items: list[Alert], pal: Palette) -> RenderableType:
@@ -121,14 +139,12 @@ def alerts(items: list[Alert], pal: Palette) -> RenderableType:
 
 def free_agents(players: list[Player], pal: Palette, title: str) -> RenderableType:
     t = _table(pal, title)
-    for col, kw in (("Player", {}), ("Pos", {}), ("Team", {}), ("Inj", {}),
-                    ("Own%", {"justify": "right"}), ("Δ%", {"justify": "right"}),
+    for col, kw in (("Player", {}), ("Pos", {}), ("Team", {}), ("Inj", {}), ("Rost%", {}),
                     ("Avg", {"justify": "right"}), ("L15", {"justify": "right"}),
                     ("Proj", {"justify": "right"}), ("", {})):
         t.add_column(col, **kw)
     for p in players:
-        t.add_row(p.name, p.positions, p.pro_team, _inj(p, pal), f"{p.owned:.1f}",
-                  Text(f"{p.owned_change:+.1f}", style=pal.good if p.owned_change > 0 else pal.dim),
+        t.add_row(p.name, p.positions, p.pro_team, _inj(p, pal), rost_cell(p, pal),
                   _num(p.avg) + ("*" if p.avg_is_last_season else ""), _num(p.last15), _num(p.proj),
                   Text("waivers", style=pal.warn) if p.status == "WAIVERS" else "")
     return t

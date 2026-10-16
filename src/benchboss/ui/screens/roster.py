@@ -19,7 +19,7 @@ from rich.text import Text
 
 from benchboss.espn.constants import AST, BENCH, BLK, IR, PTS, REB, SLOT, SPLIT_SHORT, STL, TO, TPM
 from benchboss.espn.models import League, Player, RosterSpot, StatLine, Team
-from benchboss.ui.common import legend, num, pct, player_cell, scale, title
+from benchboss.ui.common import legend, num, player_cell, rost_cell, scale, shooting_pct, title
 from benchboss.ui.theme import Palette
 
 TITLE = "Roster"
@@ -37,7 +37,7 @@ TREND = 0.10   # L7 is "clearly" above or below the season average past 10% (and
 # What goes first when the screen is too narrow, in order. "splits" is every split column
 # but the selected one, Avg and Proj; "base" is Avg (or Prev before any game is played).
 DROPS: tuple[tuple[str, ...], ...] = (
-    ("rost", "chg"),
+    ("rost",),
     ("fg", "ft", "to", "3pm"),
     ("gp", "min", "stl", "blk"),
     ("splits",),
@@ -224,12 +224,11 @@ def _columns(rows: list[_Row], data: RosterData, lay: _Layout, pal: Palette) -> 
     stat("min", "MIN", lambda s: s.mpg)
     for key, header, stat_id, lead in BOX_STATS:
         stat(key, header, _count(stat_id), lead=lead)
-    stat("fg", "FG%", lambda s: s.fg_pct, pct)
-    stat("ft", "FT%", lambda s: s.ft_pct, pct)
+    stat("fg", "FG%", lambda s: s.fg_pct, shooting_pct)
+    stat("ft", "FT%", lambda s: s.ft_pct, shooting_pct)
 
-    # ownership across ESPN leagues
-    add("rost", "Rost%", "own", each(lambda p: Text(num(p.owned), style=pal.dim)))
-    add("chg", "+/-", "own", each(lambda p: _change(p.owned_change, pal)))
+    # ownership across ESPN leagues, the same cell as every other screen ("46 ▲1.7")
+    add("rost", "Rost%", "own", each(lambda p: rost_cell(p, pal)), justify="left")
     return cols
 
 
@@ -256,13 +255,6 @@ def _today(p: Player, data: RosterData, pal: Palette) -> Text:
     if not opp:
         return Text("·", style=pal.border)
     return Text(opp, style=pal.dim if p.injury in ("OUT", "SUSP", "IR") else pal.text)
-
-
-def _change(v: float, pal: Palette) -> Text:
-    """Change in % rostered: colored only when it moves a full point or more."""
-    if abs(v) < 0.05:
-        return Text("0.0", style=pal.dim)
-    return Text(f"{v:+.1f}", style=pal.good if v >= 1 else pal.bad if v <= -1 else pal.dim)
 
 
 def _widths(cols: list[_Col]) -> list[int]:
@@ -366,7 +358,7 @@ def _legend(cols: list[_Col], pal: Palette, width: int) -> Text:
         week = "L7" if "fp_l7" in keys else "last 7 days"
         items.append((4, "▲▼", f"{week} well above or below Avg"))
     if "rost" in keys:
-        items.append((3, "Rost% +/-", "of ESPN leagues, change in a week"))
+        items.append((3, "Rost%", "of ESPN leagues, ▲▼ change in a week"))
     while items and legend(pal, *[i[1:] for i in items]).cell_len > width:
         items.remove(min(items))
     return legend(pal, *[i[1:] for i in items])

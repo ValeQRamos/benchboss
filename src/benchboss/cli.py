@@ -330,7 +330,7 @@ def cmd_trades(c: Ctx):
     lg = s.league()
     if c.args.needs:
         bal = trades_mod.describe_needs(lg)
-        c.emit(views.needs(bal, lg.me.name, c.pal), bal)
+        c.emit(views.needs(bal, lg.me.name, c.pal, c.out.width), bal)
         return
     ideas = trades_mod.find_trades(lg, need=c.args.need, limit=c.args.n,
                                    min_fairness=c.args.fairness,

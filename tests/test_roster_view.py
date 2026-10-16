@@ -16,6 +16,7 @@ from benchboss.config import Config
 from benchboss.espn.constants import IR, SPLIT_SHORT
 from benchboss.ui import views
 from benchboss.ui.app import Benchboss
+from benchboss.ui.common import shooting_pct
 from benchboss.ui.screens import roster
 from benchboss.ui.theme import DARK, LIGHT
 
@@ -93,7 +94,7 @@ def test_the_selected_column_follows_the_view(data, view):
     # every split sits side by side at full width, then the box score and ownership
     assert headers(table) == ["Slot", "Player", "Pos", "Today", "Avg", "L7", "L15", "L30", "Proj",
                               "Prev", "GP", "MIN", "PTS", "REB", "AST", "STL", "BLK", "3PM", "TO",
-                              "FG%", "FT%", "Rost%", "+/-"]
+                              "FG%", "FT%", "Rost%"]
 
 
 def test_the_box_score_is_the_selected_split(data):
@@ -103,7 +104,7 @@ def test_the_box_score_is_the_selected_split(data):
         table = roster.draw(data, DARK, 160, view)
         cells = {h: column(table, h)[0].plain for h in ("GP", "PTS", "REB", "FG%")}
         assert cells == {"GP": str(line.gp), "PTS": f"{line.pts:.1f}", "REB": f"{line.reb:.1f}",
-                         "FG%": f"{line.fg_pct * 100:.0f}%"}
+                         "FG%": shooting_pct(line.fg_pct)}
 
 
 def test_cli_view_flag(capsys):
@@ -167,7 +168,7 @@ def test_the_trend_arrow_keeps_the_decimal_points_in_line(data, width, value):
 def test_the_legend_explains_what_is_on_screen(data):
     wide = render(data, 160).splitlines()[-1]
     for part in ("Avg this season", "L7 L15 L30", "Prev last season", "▲▼",
-                 "Rost% +/- of ESPN leagues, change in a week"):
+                 "Rost% of ESPN leagues, ▲▼ change in a week"):
         assert part in wide
     narrow = render(data, 46).splitlines()[-1]
     assert narrow.startswith("▲▼") and len(narrow) <= 46  # the arrows are kept the longest
@@ -254,13 +255,13 @@ def test_narrow_screens_drop_columns_in_order(data):
     for width in range(200, 39, -1):
         table = roster.draw(data, DARK, width, 0)
         hs = headers(table)
-        for h in ("Rost%", "+/-", "FG%", "FT%", "TO", "3PM", "GP", "MIN", "STL", "BLK", "L7", "L15",
+        for h in ("Rost%", "FG%", "FT%", "TO", "3PM", "GP", "MIN", "STL", "BLK", "L7", "L15",
                   "L30", "Prev"):
             if h not in hs:
                 gone.setdefault(h, width)
         if "L15" in hs:  # the names stay whole while a secondary column is left
             assert "Anthony Edwards MIN" in [c.plain for c in column(table, "Player")]
-    assert gone["Rost%"] == gone["+/-"] > gone["FG%"] == gone["FT%"] == gone["TO"] == gone["3PM"]
+    assert gone["Rost%"] > gone["FG%"] == gone["FT%"] == gone["TO"] == gone["3PM"]
     assert gone["3PM"] > gone["GP"] == gone["MIN"] == gone["STL"] == gone["BLK"]
     assert gone["BLK"] > gone["L7"] == gone["L15"] == gone["L30"] == gone["Prev"]
 
