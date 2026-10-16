@@ -68,12 +68,6 @@ def load(session) -> WorkloadData:
                         lineups is not None, error)
 
 
-def activity(acts: list[Activity], cal: SeasonCalendar, periods: list[int], today_period: int,
-             pal: Palette, width: int = 120) -> RenderableType:
-    """The older entry point (views.activity). Without lineups no game is marked as benched."""
-    return draw(WorkloadData(acts, cal, periods, today_period), pal, width)
-
-
 def to_json(data: WorkloadData) -> list[dict]:
     out = []
     for a in _ordered(data.acts, grouped=True):
@@ -102,10 +96,14 @@ class _Layout:
     team: bool = True       # the NBA team after the name
     glyphs: bool = False    # day cells as ● ○ · instead of opponents
     gap: int = 3            # columns between columns: 3, 2 or 1
+    snug: bool = False      # with gap 1: one space after the names instead of two
+    strip: bool = False     # every day in one column, one glyph per day, no daily counts
 
 
 # Widest first. Pos goes first, then Slot, then long names, then the NBA team after the
-# name; only then do the opponents turn into dots. The day columns, G, In and Left always show.
+# name; only then do the opponents turn into dots. When even the dots do not fit (the
+# two-week All-Star matchup, or a very narrow screen) the days fold into one strip.
+# G, In and Left always show.
 _LAYOUTS = (
     _Layout(),
     _Layout(gap=2),
@@ -117,10 +115,16 @@ _LAYOUTS = (
     _Layout(pos=False, slot=False, short=True, glyphs=True, gap=2),
     _Layout(pos=False, slot=False, short=True, glyphs=True, gap=1),
     _Layout(pos=False, slot=False, short=True, team=False, glyphs=True, gap=1),
+    _Layout(pos=False, slot=False, short=True, team=False, glyphs=True, gap=1, snug=True),
+    _Layout(pos=False, slot=False, short=True, glyphs=True, gap=2, strip=True),
+    _Layout(pos=False, slot=False, short=True, team=False, glyphs=True, gap=1, strip=True),
 )
 
 
 def draw(data: WorkloadData, pal: Palette, width: int = 120, view: int = 0) -> RenderableType:
+    if not data.acts:
+        return Group(_title(data, pal), Text(""),
+                     Text("No players on your roster yet.", style=pal.dim))
     grouped = view == 0
     for lay in _LAYOUTS:
         t = _table(data, pal, lay, grouped)
@@ -165,9 +169,13 @@ def _table(data: WorkloadData, pal: Palette, lay: _Layout, grouped: bool) -> Tab
     per_day = data.per_day()
     heads = [_day_head(data, sp, lay, pal) for sp in data.periods]
     feet = [_day_foot(data, per_day[i], sp, lay, pal) for i, sp in enumerate(data.periods)]
-    for sp, head, foot in zip(data.periods, heads, feet, strict=True):
-        t.add_column(head, footer=foot, justify="center" if lay.glyphs else "left", no_wrap=True,
-                     header_style=f"bold {pal.accent}" if sp == data.today else None)
+    if lay.strip:
+        t.add_column(Text("").join(heads), no_wrap=True)
+    else:
+        for sp, head, foot in zip(data.periods, heads, feet, strict=True):
+            t.add_column(head, footer=foot, justify="center" if lay.glyphs else "left",
+                         no_wrap=True,
+                         header_style=f"bold {pal.accent}" if sp == data.today else None)
     t.add_column("G", footer=str(sum(a.games for a in active)), **right)
     gin = sum(a.games_in_lineup or 0 for a in active)
     t.add_column("In", footer=Text(str(gin), style=pal.text) if data.lineups_known else "-", **right)
@@ -183,7 +191,7 @@ def _table(data: WorkloadData, pal: Palette, lay: _Layout, grouped: bool) -> Tab
         for i in range(len(data.periods)):
             least = max(cell_len(x) for x in (*heads[i].plain.split("\n"), feet[i].plain))
             _align([r[first + i] for group in rows for r in group], least)
-    if lay.gap == 1:  # keep two spaces between the names and the first day
+    if lay.gap == 1 and not lay.snug:  # keep two spaces between the names and the first day
         t.columns[0].min_width = 1 + max([len("Player"), *(r[0].cell_len for g in rows for r in g)])
     for gi, group in enumerate(rows):
         for ri, row in enumerate(group):
@@ -217,7 +225,7 @@ def _align(cells: list[Text], least: int) -> None:
 
 def _day_head(data: WorkloadData, sp: int, lay: _Layout, pal: Palette) -> Text:
     d = data.calendar.date_of(sp)
-    head = f"{d:%a}"[: 2 if lay.glyphs else 3] + f"\n{d.day}"
+    head = f"{d:%a}"[0] if lay.strip else f"{d:%a}"[: 2 if lay.glyphs else 3] + f"\n{d.day}"
     if sp == data.today:
         return Text(head, style=f"bold {pal.accent}", justify="center")
     if sp < data.today:
@@ -240,7 +248,8 @@ def _row(a: Activity, data: WorkloadData, pal: Palette, lay: _Layout) -> list:
         cells.append(Text(p.positions, style=pal.dim))
     if lay.slot:
         cells.append(Text(_slot_name(a.slot_id) or "", style=pal.text if a.is_starting else pal.dim))
-    cells += [_day_cell(a, i, sp, data, pal, lay) for i, sp in enumerate(data.periods)]
+    days = [_day_cell(a, i, sp, data, pal, lay) for i, sp in enumerate(data.periods)]
+    cells += [Text("").join(days)] if lay.strip else days
     games = pal.dim if ir else pal.good if a.games >= 4 else pal.warn if a.games <= 2 else pal.text
     cells.append(Text(str(a.games), style=games))
     gin = a.games_in_lineup if data.lineups_known else None
@@ -285,15 +294,16 @@ def _legend(data: WorkloadData, pal: Palette, lay: _Layout, width: int) -> list[
         items.append((BENCHED if lay.glyphs else "(LAC)", "on your bench", None))
     items += [("In", "games in your lineup", None), ("Left", "from today on", None)]
     spots, most = data.starter_slots, max(data.per_day(), default=0)
-    if spots and most > spots:
+    if spots and most > spots and not lay.strip:
         key = str(most) if lay.glyphs else f"{most}/{spots}"
-        items.append((key, f"more games than your {spots} spots" if lay.glyphs
+        items.append((key, f"games, more than your {spots} spots" if lay.glyphs
                       else "more games than starting spots", pal.warn))
     lines = _pack(items, pal, width)
-    if data.lineup_error:
+    if data.lineup_error:  # two lines, so a narrow screen wraps each one cleanly
         why = data.lineup_error.rstrip(".")
-        lines.append(Text(f"Bench games are not marked: your daily lineups did not load. "
-                          f"{why[:1].upper()}{why[1:]}.", style=pal.dim))
+        lines += [Text("Bench games are not marked: your daily lineups did not load.",
+                       style=pal.dim),
+                  Text(f"{why[:1].upper()}{why[1:]}.", style=pal.dim)]
     return lines
 
 

@@ -220,6 +220,33 @@ def test_fits_every_width_and_keeps_the_counts(session, width, pal, view):
     assert "…" not in out  # nothing cut at these widths
 
 
+@pytest.mark.parametrize("width", [40, 46, 60])
+def test_a_two_week_matchup_folds_the_days_into_a_strip(session, width):
+    first = session.matchup_periods()[0]
+    session.matchup_periods = lambda: list(range(first, first + 14))  # the All-Star matchup
+    data = workload.load(session)
+    out = text_of(workload.draw(data, DARK, width), width)
+    assert all(cell_len(line) <= width for line in out.splitlines())
+    assert "…" not in out
+    header = next(line for line in out.splitlines() if line.startswith("Player"))
+    assert "MTWTFSSMTWTFSS" in header and header.split()[-3:] == ["G", "In", "Left"]
+    ball = next(a for a in data.acts if a.player.name == "LaMelo Ball")
+    row = player_lines(out, ["L. Ball"])[0]
+    assert row.split()[-3:] == [str(ball.games), str(ball.games_in_lineup), str(ball.games_left)]
+
+
+def test_an_empty_roster_says_so(session):
+    data = workload.load(session)
+    data.acts = []
+    out = text_of(workload.draw(data, DARK, 80), 80)
+    assert "No players on your roster yet." in out and "Games" not in out
+
+
+def test_the_dots_legend_reads_as_a_count(session):
+    out = text_of(workload.draw(workload.load(session), DARK, 46), 46)
+    assert "13 games, more than your 10 spots" in out
+
+
 def test_narrow_widths_drop_pos_then_slot_then_long_names(session):
     data = workload.load(session)
     wide = text_of(workload.draw(data, DARK, 140), 140)
@@ -274,6 +301,8 @@ def test_a_lineups_failure_falls_back_to_plain_cells(session):
     in_col = next(c for c in table.columns if c.header == "In")
     assert {c.plain for c in in_col._cells} == {"-"}
     assert "Bench games are not marked" in out and "Could not reach ESPN" in out
+    narrow = text_of(workload.draw(data, DARK, 46), 46)
+    assert "Could not reach ESPN (timed out)." in [line.strip() for line in narrow.splitlines()]
     rows = workload.to_json(data)
     assert all(r["games_in_lineup"] is None for r in rows)
     assert all(d["starting"] is None and d["slot"] is None for r in rows for d in r["schedule"])
