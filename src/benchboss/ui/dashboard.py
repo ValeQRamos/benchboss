@@ -126,7 +126,8 @@ def collect(session, with_trash: bool = True, with_alerts: bool = True,
     if with_alerts:
         from benchboss import inbox
 
-        d.alerts = _try(d, "alerts", lambda: inbox.alerts(session), [])
+        # spins stay out of the inbox card: the news card already shows them, starred
+        d.alerts = _try(d, "alerts", lambda: inbox.alerts(session, include_spins=False), [])
     return d
 
 
