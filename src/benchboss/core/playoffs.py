@@ -9,8 +9,10 @@ head-to-head record, points for, division record, points against and finally a c
 drawn around what it is expected to score that week: its points per day so far, blended
 with what its roster projects, times the days in that week, with a spread of about 12%
 (typical for weekly fantasy scores). A week that is in progress keeps the live score and
-only simulates the days left. Results you pick (``picks``: matchup id -> winning team id)
-are fixed in every simulation; that is how the scenarios work.
+only simulates what is still to come: the days left and today's games that have not tipped
+off. Two teams with nothing projected (empty rosters before the draft) play a coin flip, not
+a 0-0 tie. Results you pick (``picks``: matchup id -> winning team id) are fixed in every
+simulation; that is how the scenarios work.
 
 "Clinched" and "eliminated" are certain, not simulated: clinched means no combination of
 the results not yet picked can keep the team out, eliminated means none can get it in. Both
@@ -86,6 +88,7 @@ class Race:
     teams: list[TeamOdds]          # best projected seed first
     games: list[Game]              # regular-season games not played yet (picked ones included)
     home_win: dict[int, float]     # game id -> share of simulations the home team won
+    away_win: dict[int, float]     # game id -> share the away team won (the rest are ties)
     playoff_teams: int
     divisions: dict[int, str]
     picks: dict[int, int]
@@ -116,6 +119,7 @@ class Race:
             "games": [{"matchup": g.id, "week": g.week, "home": names.get(g.home, g.home),
                        "away": names.get(g.away, g.away),
                        "home_win": round(self.home_win.get(g.id, 0.5), 4),
+                       "away_win": round(self.away_win.get(g.id, 0.5), 4),
                        "picked_winner": names.get(g.winner) if g.picked else None,
                        "live": g.live} for g in self.games],
         }
@@ -198,14 +202,19 @@ def projected_daily(team: Team) -> float:
 
 def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, *,
          daily: dict[int, float] | None = None, days_by_week: dict[int, int] | None = None,
-         week_progress: float = 0.0, seed: int | None = 0) -> Race:
+         week_progress: float = 0.0, live_left: dict[int, float] | None = None,
+         seed: int | None = 0) -> Race:
     """Simulate the rest of the regular season.
 
     ``daily``: expected points per day for each team id over the next days, from its roster,
     the NBA schedule and today's injuries (the service builds it). It sets the level for this
     week and the next; later weeks use the roster's healthy projection, because a player out
     today is not out all season. ``days_by_week``: days in each matchup week (7 when missing);
-    ``week_progress``: the share of the current week already played (0..1).
+    ``week_progress``: the share of the current week already played (0..1), today counting
+    for the share of its games that have tipped off, since their points are in the live score.
+    ``live_left``: the points each team id is still expected to add to this week's live
+    score (the days left and today's games not tipped off yet, as the matchup projection
+    counts them). Without it the live week draws its level times the share of the week left.
 
     Each simulated season also moves every team's level a little (TEAM_SPREAD) for all the
     weeks ahead: trades, injuries and waiver luck make a team better or worse for a stretch,
@@ -258,6 +267,7 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
     wins_sum = defaultdict(float)
     losses_sum = defaultdict(float)
     home_wins = defaultdict(int)
+    away_wins = defaultdict(int)
     runs = max(1, sims)
     for _ in range(runs):
         st = {tid: list(v) for tid, v in base.items()}   # wins, losses, ties, pf, pa
@@ -267,14 +277,26 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
             rate = near_day if g.week <= last_near else per_day
             mh = rate[g.home] * days.get(g.week, 7) * level[g.home]
             ma = rate[g.away] * days.get(g.week, 7) * level[g.away]
-            left = 1 - progress if g.live else 1.0
-            hp = g.home_points + rng.gauss(mh * left, mh * SPREAD * left ** 0.5)
-            ap = g.away_points + rng.gauss(ma * left, ma * SPREAD * left ** 0.5)
+            rest_h, rest_a = mh, ma
+            if g.live:  # only what is still to come: the live score holds the rest
+                rest_h = _live_rest(g.home, mh, progress, live_left, level)
+                rest_a = _live_rest(g.away, ma, progress, live_left, level)
+            hp = g.home_points + _draw(rng, mh, rest_h)
+            ap = g.away_points + _draw(rng, ma, rest_a)
             if g.picked and (g.winner == g.home) != (hp > ap):
                 hp, ap = ap, hp  # keep the points in line with the result you picked
-            win = g.winner if g.picked else (g.home if hp > ap else g.away if ap > hp else 0)
+            if g.picked:
+                win = g.winner
+            elif hp != ap:
+                win = g.home if hp > ap else g.away
+            elif mh or ma:
+                win = 0  # a real tie
+            else:  # nothing projected for either team: no reason to favor one, nor a 0-0 tie
+                win = g.home if rng.random() < 0.5 else g.away
             if win == g.home:
                 home_wins[g.id] += 1
+            elif win == g.away:
+                away_wins[g.id] += 1
             _record(st, h2h, g.home, g.away, hp, ap, win)
         order, champs = seed_order(league, st, _merge_h2h(base_h2h(games), h2h), rng)
         for i, tid in enumerate(order[:n_seeds]):
@@ -304,8 +326,25 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
     odds.sort(key=lambda o: (o.mean_seed, -o.playoffs, -o.proj_wins, o.team.id))
     weeks_left = sorted({g.week for g in open_games})
     return Race(odds, open_games, {g.id: home_wins[g.id] / runs for g in open_games},
+                {g.id: away_wins[g.id] / runs for g in open_games},
                 n_seeds, league.divisions, picks, runs, weeks_left, league.seeding_rule,
                 me=league.my_team_id)
+
+
+def _live_rest(tid: int, week: float, progress: float, live_left: dict[int, float] | None,
+               level: dict[int, float]) -> float:
+    """Points a team is still expected to add to the live week: the matchup projection's
+    (``live_left``) when the caller has it, else the week's share that is left."""
+    if live_left is not None and tid in live_left:
+        return live_left[tid] * level[tid]
+    return week * (1 - progress)
+
+
+def _draw(rng: random.Random, week: float, rest: float) -> float:
+    """Points drawn around ``rest``, what is still to come of a week expected to bring
+    ``week``. The days score independently, so the spread grows with the square root of the
+    part left: SPREAD of the whole week, none once nothing is left."""
+    return rng.gauss(rest, SPREAD * max(0.0, week * rest) ** 0.5)
 
 
 def _standing_base(league: League, games: list[Game]) -> dict[int, list[float]]:

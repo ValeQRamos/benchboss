@@ -69,6 +69,9 @@ def load(session) -> WorkloadData:
 
 
 def to_json(data: WorkloadData) -> list[dict]:
+    """One row per player, IR included (slot "IR"). The keys ``activity --json`` always had
+    stay as they were (player, team, games, games_left, and schedule as "vs MIL", "@ HOU" or
+    ""); the positions, slots and daily lineups come under new keys."""
     out = []
     for a in _ordered(data.acts, grouped=True):
         days = []
@@ -78,11 +81,10 @@ def to_json(data: WorkloadData) -> list[dict]:
                          "opponent": _short(a.schedule[i]) if i < len(a.schedule) else "",
                          "slot": _slot_name(slot),
                          "starting": a.starting(i) if data.lineups_known else None})
-        out.append({"name": a.player.name, "team": a.player.pro_team,
-                    "positions": a.player.positions, "slot": _slot_name(a.slot_id),
-                    "games": a.games,
+        out.append({**a.to_dict(), "positions": a.player.positions,
+                    "slot": _slot_name(a.slot_id),
                     "games_in_lineup": a.games_in_lineup if data.lineups_known else None,
-                    "games_left": a.games_left, "schedule": days})
+                    "days": days})
     return out
 
 
@@ -159,7 +161,6 @@ def _table(data: WorkloadData, pal: Palette, lay: _Layout, grouped: bool) -> Tab
     elif lay.gap == 1:
         t.padding = (0, 0)
     right = {"justify": "right", "no_wrap": True}
-    active = [a for a in data.acts if not a.on_ir]
 
     t.add_column("Player", footer=Text("Games", style=f"bold {pal.dim}"), no_wrap=True)
     if lay.pos:
@@ -176,10 +177,13 @@ def _table(data: WorkloadData, pal: Palette, lay: _Layout, grouped: bool) -> Tab
             t.add_column(head, footer=foot, justify="center" if lay.glyphs else "left",
                          no_wrap=True,
                          header_style=f"bold {pal.accent}" if sp == data.today else None)
-    t.add_column("G", footer=str(sum(a.games for a in active)), **right)
-    gin = sum(a.games_in_lineup or 0 for a in active)
+    # the totals follow each day's slot, like the daily counts: a player moved to IR midweek
+    # keeps the games he played for you before
+    left = sum(n for n, sp in zip(per_day, data.periods, strict=True) if sp >= data.today)
+    t.add_column("G", footer=str(sum(per_day)), **right)
+    gin = sum(a.games_in_lineup or 0 for a in data.acts)
     t.add_column("In", footer=Text(str(gin), style=pal.text) if data.lineups_known else "-", **right)
-    t.add_column("Left", footer=str(sum(a.games_left for a in active)), **right)
+    t.add_column("Left", footer=str(left), **right)
 
     if grouped:  # starters, bench, IR, with a blank line between them
         groups = [g for g in activity_mod.by_lineup(data.acts) if g]
