@@ -1,6 +1,6 @@
 # 04. Write operations, transactions and league communication
 
-Every write the ESPN web client can send for a Fantasy Basketball (`fba`) league, reconstructed from ESPN's own JavaScript bundles and cross-checked against live read-only responses; none of these writes was executed for this document.
+Every write the ESPN web client can send for a Fantasy Basketball (`fba`) league, reconstructed from ESPN's own JavaScript bundles and cross-checked against live read-only responses; none of these writes was executed for this document, except the watch list write in section 13 (sent live on 2026-10-16).
 All roster, lineup, waiver, trade and draft actions go through one endpoint (`POST .../transactions/`) with a typed body; a handful of side endpoints edit pending claims, waiver order and the Quick Lineup optimizer.
 The second half covers how to detect incoming trades and claims without writing anything (`mPendingTransactions`, `mTransactions2`, `kona_league_communication`, chat unread counts) and documents the chat API, including the type 271 trade card.
 
@@ -11,6 +11,7 @@ The second half covers how to detect incoming trades and claims without writing 
 | VERIFIED (bundle) | Read in ESPN's own bundle: kona web app build `7411ee0540f4-1.517` (`main-f2aedb781c45b792f61b.js` plus page bundles `team`, `team/trade`, `tradereview`, `rosterfix`, `recentactivity`, `league/waiverreport`, `league/waiverorder`, `league/transactioncounter`), or the community chat app build `927dc831b4be-1.0.67` (`chat-7847ae3f.js`). |
 | VERIFIED (live) | Seen in a live GET response for the reference league, season 2027, on 2026-10-14 or 2026-10-15. |
 | VERIFIED (live record) | The write itself was not executed for this document, but a record it produced (for example a transaction sent earlier by a non-browser client or by another league member) is visible in live read data. |
+| VERIFIED (live write) | The write was sent by benchboss to the reference league and its effect read back. Only the watch list (section 13). |
 | UNVERIFIED | Inferred, seen in earlier client runs that were not repeated here, or general knowledge. Treat as a hypothesis. |
 
 Bundles were fetched as data and searched as text; they were never executed.
@@ -35,6 +36,7 @@ Bundles were fetched as data and searched as text; they were never executed.
 | POST | `{WRITES}/teams/{teamId}/recommendations?lineupScoringPeriodId=&recommendationTypeId=LINEUP&restOfWeek=` | ESPN "Quick Lineup" (server sets the optimal lineup) | espn_s2 + SWID | VERIFIED (bundle) |
 | GET | `{READS}/teams/{teamId}/recommendations?recommendationTypeId=LINEUP&view=recommend` | Read ESPN's suggested lineup (no write) | espn_s2 + SWID | VERIFIED (live) |
 | POST | `{WRITES}/teams?scoringPeriodId=0` | LM: set waiver order, transaction counters, team fields | LM cookies | VERIFIED (bundle) |
+| POST | `{WRITES}/teams/{teamId}` body `{"watchList": [ids]}` | Replace your watch list | espn_s2 + SWID | VERIFIED (live write) |
 | GET | `{READS}?view=mPendingTransactions` | Pending trades and claims (source of truth for alerts) | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{READS}?view=mTransactions2` (+ `X-Fantasy-Filter: {"transactions":{...}}`) | Transaction log, filterable by type | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{COMM}/communication/?view=kona_league_communication` (+ filter) | Recent Activity topics (`ACTIVITY_TRANSACTIONS`, etc.) | espn_s2 + SWID | VERIFIED (live) |
@@ -706,6 +708,32 @@ How a non-browser client should match ESPN's web client. Rows marked VERIFIED (l
 - Map `details[].type` to friendly messages and show `resolution` when present.
 - Build alerts on `mPendingTransactions` plus `chat_unreads`, as in section 9.5.
 - Treat `teamId`s as opaque (this league uses 1, 2, 3, 6, 10, 11, 13, 14, 15, 16).
+
+---
+
+## 13. Watch list: `POST .../teams/{teamId}`
+
+Status: VERIFIED (live write) on 2026-10-16. benchboss added one player to the caller's watch list and then removed him again. This is the only write in this document that was sent for it.
+
+The watch list is the star on a player in the ESPN app. It lives on the caller's team as `teams[].watchList`, a list of player ids that `mTeam` returns for the caller's team only ([01 §7](01-league-views.md#7-mteam)).
+
+**Request:**
+
+```
+POST https://lm-api-writes.fantasy.espn.com/apis/v3/games/fba/seasons/2027/segments/0/leagues/{leagueId}/teams/3
+Cookie: espn_s2=<ESPN_S2>; SWID=<SWID>
+Content-Type: application/json
+
+{"watchList": [4432194, 4432816]}
+```
+
+- The body carries the **whole** list, and it replaces the saved one. Adding sends the old list plus the new id; removing sends the list without it (that is how the removal was done). No add-one or remove-one form is known.
+- So read the list fresh (`view=mTeam`) right before writing. It may have changed in the ESPN app since the last read, and an old copy would undo those changes.
+- Send one change at a time. Two writes built from the same old list would overwrite each other (this follows from the replace behavior; not tested).
+
+**Response:** the whole team object, including the new `watchList`. benchboss takes the list from the answer, and keeps the list it sent when the key is missing.
+
+**How benchboss uses it:** `Session.set_watched` (read `mTeam`, change the list, `Client.update_team`). The command line asks first (`benchboss watch add|remove`, `--dry-run`, `--yes`). The app's Player finder sends it on a key press without a confirmation step, because the list is private to the caller and the same key undoes it; a failed write puts the star back and shows the error.
 
 ---
 

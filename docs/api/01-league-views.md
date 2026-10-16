@@ -438,6 +438,7 @@ VERIFIED (live). `deadlineDate` is Fri Feb 26, 2027 11:00 CT. `revisionHours: 24
 | `teams[].valuesByStat` | {statId: float} | `{"0": 0.0, "1": 0.0, ...}` | Season totals for the scoring stats |
 | `teams[].transactionCounter` | object | `{acquisitions, drops, trades, moveToActive, moveToIR, misc, acquisitionBudgetSpent, paid, teamCharges, matchupAcquisitionTotals: {matchupPeriodId: count}}` | `matchupAcquisitionTotals` keyed by matchup period (VERIFIED (live) in 2026) |
 | `teams[].tradeBlock.players` | {playerId: str} | `{"4432166": "UNTOUCHABLE"}` | Values from `tradeBlockStatusTypes`: `NORMAL`, `ON_THE_BLOCK`, `UNTOUCHABLE`. Empty object when nothing is set |
+| `teams[].watchList` | [int] | `[4432194, 4683634]` | Player ids on the caller's watch list (the star in the ESPN app). Only the caller's own team carries the key (1 of 10 teams on 2026-10-16); it is an empty list when nothing is watched. VERIFIED (live). Changed with `POST {WRITES}/teams/{teamId}`, see [04 §13](04-writes-transactions.md#13-watch-list-post-teamsteamid) |
 | `teams[].pendingTransactions[]` | [transaction] | see section 12 | Only on teams involved, only while pending; key absent otherwise |
 | `teams[].draftStrategy` | object | `{keeperPlayerIds: []}` for other teams | The caller's own team also gets `draftList[{playerId, auctionValue}]` (1,095 rows), `excludedPlayerIds`, `futureKeeperPlayerIds` |
 
@@ -621,7 +622,20 @@ Adds `schedule[].{matchupPeriodId, home/away.{teamId, totalPoints, gamesPlayed}}
 
 `currentSimulationResults` is ESPN's season simulation (playoff odds). It is present in preseason 2027 and absent for the completed 2026 season. VERIFIED (live) The web standings page sends `mLiveScoring, mMatchupScore, mRoster, mSettings, mStandings, mStatus, mTeam` with a players filter `filterStatsForSourceIds [0]` and a game split, plus an optional `filterMatchupPeriodIds`. VERIFIED (bundle)
 
-**Use:** playoff odds column in the standings view.
+Team fields, re-checked on 2026-10-16 (preseason, all 10 teams). VERIFIED (live) unless marked:
+
+| Path | Type | Notes |
+|---|---|---|
+| `teams[].playoffClinchType` | str | `UNKNOWN` for every team in preseason. benchboss treats `UNKNOWN` and `NONE` as "no flag" and maps `PLAYOFFS`, `DIVISION`, `BYE`, `TOP_SEED` and `ELIMINATED` to tags; those five names were not seen live (UNVERIFIED) |
+| `teams[].currentSimulationResults.playoffPct` | float 0..1 | Share of ESPN's simulated seasons in which the team makes the playoffs. Over all teams it adds up to the number of playoff spots (4.0 in a league with 4 spots) |
+| `teams[].currentSimulationResults.divisionWinPct` | float 0..1 | Same for winning the division |
+| `teams[].currentSimulationResults.rank` | int | A rank from the simulation; by its name the projected final rank (UNVERIFIED). benchboss does not read it |
+| `teams[].currentSimulationResults.playoffClinchType` | str | Same values as the top-level field; benchboss reads the top-level one first |
+| `teams[].currentSimulationResults.modeRecord` | object | `{wins, losses, ties, percentage, pointsFor, pointsAgainst, gamesBack, streakLength, streakType}`, the record shape of `mTeam`; by its name the most common simulated final record (UNVERIFIED) |
+
+`mStandings` alone carries no `settings`; read `scheduleSettings.playoffTeamCount`, `playoffSeedingRule` and `divisions` from `mSettings`. benchboss 1.0.2 adds `mStandings` to its one league read (`mRoster, mTeam, mSettings, mMatchupScore, mStatus, mStandings`).
+
+**Use:** playoff odds column in the standings view, clinch tags, and ESPN's number next to benchboss's own simulation on the playoff race screen.
 
 ---
 

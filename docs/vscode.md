@@ -50,7 +50,7 @@ The repository ships everything an agent needs to drive benchboss safely:
 |---|---|
 | [`AGENTS.md`](../AGENTS.md) | Full instructions: commands, JSON output, the write protocol, exit codes |
 | [`.github/copilot-instructions.md`](../.github/copilot-instructions.md) | The short list of rules Copilot always loads |
-| [`.github/skills/`](../.github/skills) | Skills: lineup optimizer, trash scout, trade finder, player news, matchup report |
+| [`.github/skills/`](../.github/skills) | Skills: lineup optimizer, trash scout, trade finder, player news, matchup report, player finder, playoff race |
 | [`.github/agents/benchboss.agent.md`](../.github/agents/benchboss.agent.md) | A custom "benchboss" agent with terminal access and no file editing |
 | [`.vscode/settings.json`](../.vscode/settings.json) | Lets the agent run read commands and `--dry-run` previews without asking every time. Writes, anything with `--yes` or `-y`, `news --ai` (a paid call) and `dash --watch` (it never exits) always ask |
 
@@ -61,6 +61,8 @@ Open the folder, start Copilot Chat in agent mode and talk normally:
 - "Who is the best pickup this week? I can drop my worst guy."
 - "News on my players from the last 5 days."
 - "I need a center. Find me a fair trade."
+- "Which free agent guards have been hot over the last 15 days? Watch the best one."
+- "What are my playoff odds if I lose this week?"
 
 Writes always need your explicit yes in the chat; the agent then runs the command with
 `--yes` and shows you ESPN's answer.

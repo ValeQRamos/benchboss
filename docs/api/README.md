@@ -22,7 +22,7 @@ A field guide to the JSON services behind ESPN Fantasy Basketball (game code `fb
 
 - **Live read-only requests** made between 2026-10-12 and 2026-10-15 (preseason of the 2027 fantasy season, scoring period 1) against one private 10-team head-to-head points league, plus the completed 2026 season of the same league for in-season shapes.
 - **ESPN's own web bundles**, downloaded as text and searched, never executed: the fantasy web app (kona build `7411ee0540f4-1.517`, `main-f2aedb781c45b792f61b.js` plus page bundles) and the league chat app (community-chat `1.0.67`, `chat-7847ae3f.js`).
-- **No write was executed** to produce these documents. Write bodies come from the bundle and are cross-checked against the records that earlier writes left in the read API.
+- **No write was executed** to produce these documents, except one: the watch list write ([04 §13](04-writes-transactions.md#13-watch-list-post-teamsteamid)), sent on 2026-10-16 to add one player and remove him again. Other write bodies come from the bundle and are cross-checked against the records that earlier writes left in the read API.
 
 ### Verification labels
 
@@ -33,6 +33,7 @@ Every claim carries one of these labels.
 | VERIFIED (live) | Seen in a live response. |
 | VERIFIED (bundle) | Read in ESPN's own JavaScript. |
 | VERIFIED (live record) | The write was not sent for this reference, but a record it produced (by a non-browser client or by another league member) is visible in live read data. |
+| VERIFIED (live write) | The write was sent to the reference league and its effect read back. Only the watch list. |
 | UNVERIFIED | Inference, third-party code, memory, or not observable before the season starts. Treat as a hypothesis. |
 
 ### Examples and privacy
@@ -256,7 +257,7 @@ Every endpoint documented in this folder. Auth "cookies" means `espn_s2` for a p
 | `{L}` (no view) | Members, team ids and owners, league name; cheapest auth check | cookies | VERIFIED (live) | [01 §2](01-league-views.md#2-no-view-default-body) |
 | `{L}?view=mStatus` | Current day and matchup, season bounds, waiver run time | cookies | VERIFIED (live, bundle) | [01 §5](01-league-views.md#5-mstatus), [05 §2](05-matchup-schedule-scoring.md#2-league-status-viewmstatus) |
 | `{L}?view=mSettings` | Scoring items, roster slots, schedule, acquisition and trade settings | cookies | VERIFIED (live, bundle) | [01 §6](01-league-views.md#6-msettings) |
-| `{L}?view=mTeam` | Records, waiver rank, transaction counters, trade block, members | cookies | VERIFIED (live, bundle) | [01 §7](01-league-views.md#7-mteam) |
+| `{L}?view=mTeam` | Records, waiver rank, transaction counters, trade block, members, your watch list | cookies | VERIFIED (live, bundle) | [01 §7](01-league-views.md#7-mteam) |
 | `{L}?view=mNav` | Light teams and members | cookies | VERIFIED (live, bundle) | [01 §8](01-league-views.md#8-mnav) |
 | `{L}?view=mRoster` (`forTeamId`, `rosterForTeamId`, `scoringPeriodId`) | Rosters for a day with full player objects | cookies | VERIFIED (live, bundle) | [01 §9](01-league-views.md#9-mroster) |
 | `{L}?view=mMatchupScoreLite` | Whole season schedule, totals only | cookies | VERIFIED (live, bundle) | [01 §10.1](01-league-views.md#101-mmatchupscorelite) |
@@ -299,7 +300,7 @@ Every endpoint documented in this folder. Auth "cookies" means `espn_s2` for a p
 
 ### Writes (`lm-api-writes`)
 
-None of these were executed for this reference. Bodies and rules are in [04](04-writes-transactions.md).
+None of these were executed for this reference, except the watch list. Bodies and rules are in [04](04-writes-transactions.md).
 
 | Method | Endpoint | Purpose | Auth | Status | Docs |
 |---|---|---|---|---|---|
@@ -315,6 +316,7 @@ None of these were executed for this reference. Bodies and rules are in [04](04-
 | POST | `{W}/transactions/` type `DRAFT` | Offline draft entry and keepers (league manager) | league manager cookies | VERIFIED (bundle) | [04 §8](04-writes-transactions.md#8-draft-draft-lm-only) |
 | POST | `{W}/teams/{teamId}/recommendations?lineupScoringPeriodId=&recommendationTypeId=LINEUP&restOfWeek=` | Apply ESPN's Quick Lineup | cookies + SWID | VERIFIED (bundle) | [04 §4](04-writes-transactions.md#4-quick-lineup-espn-optimizer) |
 | POST | `{W}/teams?scoringPeriodId=0` | Waiver order and counters (league manager) | league manager cookies | VERIFIED (bundle) | [04 §6.6](04-writes-transactions.md#66-league-waiver-order-lm-only) |
+| POST | `{W}/teams/{teamId}` with `{"watchList": [ids]}` | Replace your watch list (the whole list) | cookies | VERIFIED (live write) | [04 §13](04-writes-transactions.md#13-watch-list-post-teamsteamid) |
 | POST, DELETE | `{W}/communication/topics...` | Legacy message board, polls, league email, reminders | cookies + SWID | VERIFIED (bundle) | [04 §10](04-writes-transactions.md#kona-message-board-writes) |
 
 ### Chat (`lm-api-communication`)
