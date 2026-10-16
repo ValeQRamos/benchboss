@@ -317,6 +317,11 @@ class Benchboss(App):
             self.load("dash")
 
     def on_resize(self) -> None:
+        # Textual stores the new size in its own handler, which runs after this one, so
+        # self.size is still the old size here: fit and draw once that handler is done
+        self.call_later(self._resized)
+
+    def _resized(self) -> None:
         if not self.query("#menu"):
             return  # the window can report its size before the widgets exist
         self._fit_menu()

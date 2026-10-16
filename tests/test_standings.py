@@ -168,6 +168,28 @@ def test_narrow_widths_drop_secondary_columns_first(league):
     assert "Div" in heads(46, DIVISIONS) and "W-L" in heads(46, DIVISIONS)
 
 
+def test_divisions_keep_pf_and_pa_together_and_cut_a_long_division_name(league):
+    for width in (46, 60, 74, 80, 100, 120, 160):
+        out = standings.draw(league, DARK, width, DIVISIONS)
+        heads = {h for t in tables(out) for h in headers(t)}
+        assert ("PF" in heads) == ("PA" in heads), width
+    league.divisions = {0: "The Northern Lights Conference", 1: "West"}
+    lines = text_of(standings.draw(league, DARK, 46, DIVISIONS), 46).splitlines()
+    head = next(i for i, line in enumerate(lines) if "The Northern" in line)
+    assert "…" in lines[head] and "W-L" in lines[head]  # cut on its own line, never wrapped
+    assert lines[head + 1].strip().startswith("─")
+
+
+def test_moves_keep_full_names_at_46_and_leave_clinch_tags_to_the_standings(league):
+    order = league.standings()
+    order[0].clinch, order[-1].clinch = "PLAYOFFS", "ELIMINATED"
+    out = standings.draw(league, DARK, 46, MOVES)
+    [t] = tables(out)
+    assert {c.plain for c in column(t, "Team")} == {x.name for x in league.teams.values()}
+    assert "Drops" not in headers(t) and {"Adds", "Trades"} <= set(headers(t))
+    assert "clinched" not in text_of(standings.draw(league, DARK, 120, MOVES), 120)
+
+
 def test_divisions_view_sorts_each_division_by_record(league):
     out = standings.draw(league, DARK, 120, DIVISIONS)
     east, west = tables(out)
@@ -223,6 +245,14 @@ def test_clinch_tags_show_and_only_the_ones_used_are_explained(league):
     assert "x clinched playoffs" in text and "e eliminated" in text
     assert "clinched division" not in text and "clinched bye" not in text
     assert "x clinched playoffs" not in text_of(standings.draw(demo_session().league(), DARK, 120), 120)
+    # a cut name keeps its tag, so the legend never explains a tag that is not on screen
+    for team in league.teams.values():
+        team.name += " of the Rio Grande Valley"
+    for width, view in ((46, LEAGUE), (30, LEAGUE), (46, DIVISIONS)):
+        names = [c for t in tables(standings.draw(league, DARK, width, view))
+                 for c in t.columns[1]._cells]
+        assert next(c for c in names if c.plain.startswith("Fast")).plain.endswith("… e")
+        assert next(c for c in names if c.plain.startswith("Brick")).plain.endswith("… x")
 
 
 def test_missing_odds_read_as_a_dash(league):
@@ -307,5 +337,27 @@ def test_app_cycles_the_views_with_v_and_the_menu_keys_still_work():
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert app.current == "roster"
+
+    asyncio.run(run())
+
+
+def test_a_resize_redraws_at_the_new_width():
+    """Textual stores the new size after the app's own resize handler runs: the screen must be
+    drawn for the new width, or the table overflows and Rich squeezes the team names away."""
+    app = Benchboss(Config(), demo=True)
+
+    async def run():
+        async with app.run_test(size=(150, 44)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.press("s")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.resize_terminal(64, 40)
+            await pilot.pause()
+            assert app.query_one("#menu").has_class("hidden")  # 64 columns is narrow
+            text = text_of(app.query_one("#body").content, 58)  # 64 minus padding and scrollbar
+            assert max(len(line) for line in text.splitlines()) <= 58
+            assert "Pick and Roll Pros" in text and "Diff" in text
 
     asyncio.run(run())

@@ -10,15 +10,16 @@ Three views (v cycles them in the app, ``--view`` picks one on the CLI):
 
 Every table sheds secondary columns as the width shrinks (Manager first, then the meters,
 then Strk and Pct), then rounds points and tightens the spacing, and only then cuts team
-names, so W-L, PF, PA and Diff always show. Before the first results (the preseason, or
-week 1 in progress) everybody is 0-0: the numbers read "-" and a line says why.
+names, so the league table keeps W-L, PF, PA and Diff down to about 30 columns. Before the
+first results (the preseason, or week 1 in progress) everybody is 0-0: the numbers read "-"
+and a line says why.
 """
 
 from __future__ import annotations
 
 import io
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from rich import box
 from rich.cells import cell_len
@@ -158,13 +159,19 @@ def _no_results(league: League) -> bool:
 
 # --- cells --------------------------------------------------------------------------------------
 
-def _team_cell(t: Team, league: League, pal: Palette) -> Text:
+def _team_cell(t: Team, league: League, pal: Palette, clinch: bool = True,
+               width: int | None = None) -> Text:
+    """The name (yours in bold accent), then ESPN's clinch tag. ``width`` cuts the name with
+    an ellipsis but keeps the tag, which the legend explains."""
     mine = t.id == league.my_team_id
+    tag = _clinch(t) if clinch else None
+    suffix = f" {tag[0]}" if tag else ""
     out = Text(t.name, style=f"bold {pal.accent}" if mine else pal.text, no_wrap=True,
                overflow="ellipsis")
-    tag = _clinch(t)
+    if width is not None:
+        out.truncate(max(1, width - len(suffix)), overflow="ellipsis")
     if tag:
-        out.append(f" {tag[0]}", style=f"bold {pal.bad if tag[0] == 'e' else pal.good}")
+        out.append(suffix, style=f"bold {pal.bad if tag[0] == 'e' else pal.good}")
     return out
 
 
@@ -217,7 +224,8 @@ class Col:
     head: str
     cells: list
     justify: str = "left"
-    flex: bool = False          # the one column cut (with an ellipsis) when nothing else can go
+    # the one column cut when nothing else can go (team names): its cells at a given width
+    cut: Callable[[int], list] | None = None
     head_style: str | None = None
     key: str = ""               # columns with the same key line up across tables
 
@@ -239,26 +247,34 @@ def _make(pal: Palette, cols: list[Col], line_after: int | None = None, tight: b
           widths: dict[str, int] | None = None, squeeze: int | None = None) -> Table:
     """A table in the common look. ``tight``: two spaces between columns and no edge, for
     narrow screens. ``widths``: minimum widths by column key, so stacked tables line up.
-    ``squeeze``: cut the flex column (team names) until the table fits that width."""
+    ``squeeze``: cut the team names (the ``cut`` column) until the table fits that width."""
+    widths = widths or {}
+    t = _table(pal, cols, line_after, tight, widths)
+    flex = next((i for i, c in enumerate(cols) if c.cut), None)
+    excess = _natural(t) - squeeze if squeeze is not None else 0
+    if excess > 0 and flex is not None:
+        c = cols[flex]
+        full = max([widths.get(c.key, 0), cell_len(c.head)] + [_cell_len(x) for x in c.cells])
+        w = max(4, full - excess)
+        t = _table(pal, [*cols[:flex], replace(c, cells=c.cut(w)), *cols[flex + 1:]],
+                   line_after, tight, widths)
+        t.columns[flex].width, t.columns[flex].min_width = w, None
+    return t
+
+
+def _table(pal: Palette, cols: list[Col], line_after: int | None, tight: bool,
+           widths: dict[str, int]) -> Table:
     t = table(pal)
     t.box = BOX
     if tight:
         t.collapse_padding, t.show_edge = True, False
-    widths = widths or {}
     for c in cols:
-        t.add_column(c.head, justify=c.justify, no_wrap=not c.flex, header_style=c.head_style,
+        # the cut column cuts its header too (a long division name) instead of wrapping it
+        head = Text(c.head, no_wrap=True, overflow="ellipsis") if c.cut else c.head
+        t.add_column(head, justify=c.justify, no_wrap=not c.cut, header_style=c.head_style,
                      min_width=widths.get(c.key))
-    rows = len(cols[0].cells) if cols else 0
-    for i in range(rows):
+    for i in range(len(cols[0].cells) if cols else 0):
         t.add_row(*[c.cells[i] for c in cols], end_section=line_after is not None and i == line_after)
-    if squeeze is not None:
-        excess = _natural(t) - squeeze
-        flex = next((i for i, c in enumerate(cols) if c.flex), None)
-        if excess > 0 and flex is not None:
-            c = cols[flex]
-            full = max([widths.get(c.key, 0), cell_len(c.head)] + [_cell_len(x) for x in c.cells])
-            t.columns[flex].width = max(4, full - excess)
-            t.columns[flex].min_width = None
     return t
 
 
@@ -359,7 +375,8 @@ def _league(league: League, pal: Palette, width: int) -> Group:
     def columns(manager: bool, bar: bool, strk: bool, pct: bool, gb: bool, chances: bool,
                 digits: int, tight: bool, pf: bool, pa: bool) -> list[Col]:
         cols = [Col("#", [_rank_cell(str(i + 1), t, league, pal) for i, t in enumerate(teams)], right),
-                Col("Team", [_team_cell(t, league, pal) for t in teams], flex=True)]
+                Col("Team", [_team_cell(t, league, pal) for t in teams],
+                    cut=lambda w: [_team_cell(t, league, pal, width=w) for t in teams])]
         if manager:
             cols.append(Col("Manager", [Text(t.owner_name, style=pal.dim) for t in teams]))
         cols.append(Col("W-L-T" if any(t.ties for t in teams) else "W-L",
@@ -419,11 +436,12 @@ def _divisions(league: League, pal: Palette, width: int) -> Group:
     ties = any(t.ties for t in standings)
     right = "right"
 
-    def columns(teams: list[Team], name: str, manager: bool, bar: bool, strk: bool, pa: bool,
-                pf: bool, chances: bool, digits: int, tight: bool, diff: bool, gb: bool) -> list[Col]:
+    def columns(teams: list[Team], name: str, manager: bool, bar: bool, points: bool, strk: bool,
+                chances: bool, digits: int, tight: bool, diff: bool, gb: bool) -> list[Col]:
         lead = teams[0]
         cols = [Col("#", [_rank_cell(str(i + 1), t, league, pal) for i, t in enumerate(teams)], right),
-                Col(name, [_team_cell(t, league, pal) for t in teams], flex=True,
+                Col(name, [_team_cell(t, league, pal) for t in teams],
+                    cut=lambda w: [_team_cell(t, league, pal, width=w) for t in teams],
                     head_style=f"bold {pal.text}", key="team")]
         if manager:
             cols.append(Col("Manager", [Text(t.owner_name, style=pal.dim) for t in teams]))
@@ -435,11 +453,10 @@ def _divisions(league: League, pal: Palette, width: int) -> Group:
         cols += [Col("Div", [Text(_record(t.division_record),
                                   style=pal.text if sum(t.division_record) else pal.dim)
                              for t in teams], right)]
-        if pf:
-            cols.append(Col("PF", [_points_cell(t, t.points_for, pal, digits) for t in teams], right))
-        if pa:
-            cols.append(Col("PA", [_points_cell(t, t.points_against, pal, digits) for t in teams],
-                            right))
+        if points:  # PF and PA go together: one without the other reads as a mistake
+            cols += [Col("PF", [_points_cell(t, t.points_for, pal, digits) for t in teams], right),
+                     Col("PA", [_points_cell(t, t.points_against, pal, digits) for t in teams],
+                         right)]
         if diff:
             cols.append(Col("Diff", [_diff_cell(t, pal, digits) for t in teams], right))
         if strk:
@@ -455,9 +472,10 @@ def _divisions(league: League, pal: Palette, width: int) -> Group:
         widths = _shared_widths(per)  # one width per column, so the stacked tables line up
         return [_make(pal, cols, tight=lv["tight"], widths=widths, squeeze=squeeze) for cols in per]
 
-    levels = _levels(dict(manager=False), dict(bar=False), dict(strk=False), dict(pa=False),
-                     dict(chances=False), dict(digits=0), dict(tight=True), dict(pf=False),
-                     manager=True, bar=True, strk=True, pa=True, pf=True, chances=True,
+    # PF and PA are on the League view; here the race (GB, Div, Diff, Strk, odds) comes first
+    levels = _levels(dict(manager=False), dict(bar=False), dict(points=False), dict(strk=False),
+                     dict(chances=False), dict(digits=0), dict(tight=True),
+                     manager=True, bar=True, points=True, strk=True, chances=True,
                      digits=1, tight=False, diff=True, gb=True)
     tables, lv = _fit(width, levels, build, last_resort=(dict(diff=False), dict(gb=False)))
 
@@ -485,7 +503,8 @@ def _moves(league: League, pal: Palette, width: int) -> Group:
     def columns(manager: bool, bar: bool, tight: bool, drops: bool, trades: bool) -> list[Col]:
         cols = [Col("Waiver", [_rank_cell(_ordinal(t.waiver_rank) if t.waiver_rank else "-", t,
                                           league, pal) for t in teams], right),
-                Col("Team", [_team_cell(t, league, pal) for t in teams], flex=True)]
+                Col("Team", [_team_cell(t, league, pal, clinch=False) for t in teams],
+                    cut=lambda w: [_team_cell(t, league, pal, False, w) for t in teams])]
         if manager:
             cols.append(Col("Manager", [Text(t.owner_name, style=pal.dim) for t in teams]))
         cols.append(Col("Adds", [count(t.acquisitions, f"bold {pal.text}") for t in teams], right))
@@ -498,13 +517,14 @@ def _moves(league: League, pal: Palette, width: int) -> Group:
                                                pal.info) for t in teams]))
         return cols
 
-    levels = _levels(dict(manager=False), dict(bar=False), dict(tight=True),
+    # drops mostly mirror adds (a full roster drops one to add one), so they go before names are cut
+    levels = _levels(dict(manager=False), dict(bar=False), dict(tight=True), dict(drops=False),
                      manager=True, bar=most > 0, tight=False, drops=True, trades=True)
     tables, lv = _fit(width, levels, lambda lv, squeeze: [
         _make(pal, columns(**lv), tight=lv["tight"], squeeze=squeeze)],
-        last_resort=(dict(drops=False), dict(trades=False)))
+        last_resort=(dict(trades=False),))
 
-    adds =sum(t.acquisitions for t in teams)
+    adds = sum(t.acquisitions for t in teams)
     trades = (sum(t.trades for t in teams) + 1) // 2  # a trade counts once for each team
     kind = {"WAIVERS_TRADITIONAL": "traditional waivers", "FAAB": "budget waivers"}.get(
         league.acquisition_type, "")
