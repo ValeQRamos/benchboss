@@ -195,6 +195,13 @@ def test_cli_alerts_mark_read(capsys):
                 if a["kind"] == "spin"]
 
 
+def test_cli_alerts_mark_read_with_nothing_new(capsys):
+    run(capsys, "--demo", "alerts", "--mark-read")
+    out = run(capsys, "--demo", "alerts", "--mark-read")
+    assert "No new watch list news to mark as read." in out and "Trade offer" in out
+    assert "--mark-read marks" not in run(capsys, "--demo", "alerts")
+
+
 def test_cli_alerts_mark_read_json(capsys):
     data = json.loads(run(capsys, "--demo", "--json", "alerts", "--mark-read"))
     assert len([a for a in data if a["kind"] == "spin"]) == 2
@@ -267,6 +274,17 @@ def test_news_screen_when_there_is_no_news_or_no_watch_list():
     out = text_of(news_screen.draw(news_screen.load(s), LIGHT), 46)
     assert "Your roster  4" in out and "Your watch list is empty" in out
     assert 'benchboss watch add "Player"' in out.replace("\n", " ")
+
+
+def test_news_screen_drops_the_time_and_source_for_every_item_at_once():
+    """At 46 columns some names leave room for the source and some do not: none get it, so
+    the lines read alike. The tip wraps at the same edge as the news on a wide screen."""
+    data = news_screen.load(demo_session(), 5, tip="Press g for an AI briefing. " * 6)
+    narrow = text_of(news_screen.draw(data, DARK, 46), 46)
+    assert "Demo" not in narrow and narrow.count(" AM") + narrow.count(" PM") == 6
+    assert text_of(news_screen.draw(data, DARK, 80), 80).count("·  Demo") == 6
+    wide = text_of(news_screen.draw(data, LIGHT, 200), 200)
+    assert max(cell_len(line.rstrip()) for line in wide.splitlines()) <= news_screen.MEASURE + 5
 
 
 def test_news_screen_names_the_watched_players_even_without_stats(monkeypatch):

@@ -353,7 +353,8 @@ def cmd_news(c: Ctx):
         players = list({p.id: p for sec in screen.sections(s, which, named)
                         for p in sec.players}.values())
         if not players:
-            raise BenchbossError(f"{screen.EMPTY_WATCH} {screen.WATCH_ADD}")
+            raise BenchbossError(f"{screen.EMPTY_WATCH} {screen.WATCH_ADD}" if a.watch else
+                                 "your roster is empty")
         with c.out.status("Asking Claude to search the web..."):
             text = news_mod.ai_digest(players, a.days)
         c.emit(text, {"digest": text})
@@ -380,13 +381,13 @@ def cmd_alerts(c: Ctx):
         spins = []
         c.err.print(Text(f"Watch list news is not available right now ({e}).", style=c.pal.dim))
     items += spins
-    note = None
-    if spins:
-        n = len(spins)
-        note = Text(f"\nMarked {n} watch list item{'s' * (n != 1)} as read." if mark else
-                    "\nbenchboss alerts --mark-read marks the watch list news as read.",
-                    style=c.pal.dim)
-    c.emit(Group(views.alerts(items, c.pal), *([note] if note else [])),
+    n = len(spins)
+    if mark:  # with nothing at all to show, the "Nothing new" line says it already
+        note = (f"Marked {n} watch list item{'s' * (n != 1)} as read." if n else
+                "No new watch list news to mark as read." if items else "")
+    else:
+        note = "benchboss alerts --mark-read marks the watch list news as read." if n else ""
+    c.emit(Group(views.alerts(items, c.pal), *([Text(f"\n{note}", style=c.pal.dim)] if note else [])),
            [x.to_dict() for x in items])
 
 
