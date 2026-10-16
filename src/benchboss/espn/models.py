@@ -266,6 +266,7 @@ class Matchup:
     away: MatchupSide
     winner: str = "UNDECIDED"    # HOME, AWAY, TIE or UNDECIDED
     playoff_tier: str = "NONE"   # NONE in the regular season
+    id: int = 0                  # schedule[].id, unique in the season
 
     @property
     def decided(self) -> bool:
@@ -461,7 +462,7 @@ def parse_league(raw: dict, my_team_id: int | None, swid: str | None = None,
         teams=teams, members=members,
         matchups=[Matchup(g.get("matchupPeriodId", 0), _side(g.get("home")), _side(g.get("away")),
                           winner=g.get("winner") or "UNDECIDED",
-                          playoff_tier=g.get("playoffTierType") or "NONE")
+                          playoff_tier=g.get("playoffTierType") or "NONE", id=g.get("id") or 0)
                   for g in raw.get("schedule") or []],
         scoring_type=(settings.get("scoringSettings") or {}).get("scoringType", ""),
         acquisition_type=acq.get("acquisitionType", ""),
