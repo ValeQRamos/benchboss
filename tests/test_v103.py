@@ -80,3 +80,28 @@ def test_demo_past_days_have_their_own_lineup(session):
     # somebody sits on a day already played who starts today, or the other way round
     assert any({s.player.id: s.slot_id for s in session.roster_on(p)} != now for p in past)
     assert session.roster_on(today + 1) == session.league().me.roster  # later days carry today's
+
+
+@pytest.mark.parametrize("flag, tag", [("PLAYOFFS", "x"), ("DIVISION_BYE", "yz"),
+                                       ("TOP_SEED_BYE", "*z"), ("ELIMINATED", "e"),
+                                       ("UNKNOWN", ""), ("", "")])
+def test_clinch_tags_are_espns_own(session, flag, tag):
+    lg = session.league()
+    team = next(t for t in lg.teams.values() if t.id != lg.my_team_id)
+    team.clinch = "" if flag == "UNKNOWN" else flag  # the parser drops UNKNOWN and NONE
+    out = text_of(standings.draw(lg, DARK, 140))
+    row = next(line for line in out.splitlines() if team.name in line)
+    if tag:
+        assert f"{team.name} {tag} " in row
+        for letter in tag:
+            assert f"{letter} {standings.CLINCH[letter]}" in out
+    else:
+        assert "clinched" not in out and "eliminated" not in out
+
+
+def test_the_clinch_flag_comes_from_the_simulation_results():
+    from benchboss.espn.models import parse_team
+
+    t = {"id": 1, "location": "A", "nickname": "B", "playoffClinchType": "UNKNOWN",
+         "currentSimulationResults": {"playoffClinchType": "DIVISION"}}
+    assert parse_team(t, 2027, {}).clinch == "DIVISION"

@@ -20,6 +20,7 @@ from benchboss.errors import BenchbossError
 from benchboss.espn.constants import SLOT_ID
 from benchboss.news import NewsItem
 from benchboss.service import Session
+from benchboss.text import surname
 
 
 def load() -> dict:
@@ -53,13 +54,6 @@ def _values(flt: dict, key: str) -> list | None:
     if v is None:
         return None
     return list(v) if isinstance(v, (list, tuple, set)) else [v]
-
-
-def _last_name(name: str) -> str:
-    parts = name.split()
-    while len(parts) > 1 and parts[-1].rstrip(".") in ("Jr", "Sr", "II", "III", "IV"):
-        parts.pop()
-    return parts[-1]
 
 
 def _sort_value(name: str, spec: dict):
@@ -274,7 +268,7 @@ class DemoSession(Session):
             pid, name = who[idx]
             published = now - dt.timedelta(hours=hours)
             if published >= cutoff:
-                items.append(NewsItem(i, published, f"{_last_name(name)} {headline}", spin,
+                items.append(NewsItem(i, published, f"{surname(name)} {headline}", spin,
                                       "Demo", "Rotowire", "", {pid}))
         return sorted(items, key=lambda x: x.published, reverse=True)
 

@@ -18,12 +18,12 @@ from benchboss.core.calendar import SeasonCalendar
 from benchboss.core.lineup import DayPlan, Move, day_value
 from benchboss.espn.constants import BENCH, INJURY_FACTOR, IR, SLOT
 from benchboss.espn.models import Player
+from benchboss.text import surname
 from benchboss.ui.common import day_label
 from benchboss.ui.theme import Palette
 
 WIDE = 64      # from this width on, Moves / Lineup / Bench get their own column
 LABEL_W = 9    # that column: " Moves" plus room
-SUFFIXES = {"jr.", "jr", "sr.", "sr", "ii", "iii", "iv", "v"}
 
 
 def plan(plans: list[DayPlan], cal: SeasonCalendar, pal: Palette,
@@ -172,11 +172,6 @@ def quiet_day(p: DayPlan, cal: SeasonCalendar, pal: Palette, width: int = 100) -
 
 # --- one day ----------------------------------------------------------------------------------
 
-def _surname(name: str) -> str:
-    parts = [x for x in name.split() if x.lower() not in SUFFIXES]
-    return parts[-1] if parts else name
-
-
 def day_body(p: DayPlan, cal: SeasonCalendar, pal: Palette, width: int,
              name_w: int = 0) -> RenderableType:
     """Moves, lineup and bench of one day, under labels in their own column when it fits.
@@ -279,7 +274,7 @@ def lineup(p: DayPlan, cal: SeasonCalendar, pal: Palette, width: int) -> Table:
     with no game that day (nobody better could take his slot) shows dim with a dash."""
     starters = sorted(p.starters, key=lambda x: (x[1], -x[2]))
     narrow = width < 60
-    names = [_surname(pl.name) if narrow else pl.short_name for pl, _, _ in starters]
+    names = [surname(pl.name) if narrow else pl.short_name for pl, _, _ in starters]
     name_w = max((len(n) for n in names), default=4)
     gap = 3
     cell = 2 + 1 + name_w + 1 + 4

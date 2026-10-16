@@ -36,10 +36,13 @@ TITLE = "Standings"
 VIEWS: tuple[tuple[str, str], ...] = (("league", "League"), ("divisions", "Divisions"),
                                       ("moves", "Moves"))
 
-# ESPN's clinch flags (Team.clinch) -> (the tag after the team name, what it means)
-CLINCH = {"PLAYOFFS": ("x", "clinched playoffs"), "DIVISION": ("y", "clinched division"),
-          "BYE": ("z", "clinched bye"), "TOP_SEED": ("*", "clinched top seed"),
-          "ELIMINATED": ("e", "eliminated")}
+# ESPN's clinch flags (Team.clinch) -> the tag its own standings put after the team name
+# (the same table is in ESPN's kona bundle: a team can hold two, "yz" is division and bye)
+CLINCH_TAGS = {"TOP_SEED_BYE": "*z", "TOP_SEED": "*", "DIVISION_BYE": "yz", "DIVISION": "y",
+               "PLAYOFFS_BYE": "xz", "PLAYOFFS": "x", "BYE": "z", "ELIMINATED": "e"}
+# each letter of a tag, in the order the legend explains them
+CLINCH = {"x": "clinched playoffs", "y": "clinched division", "z": "clinched bye",
+          "*": "clinched top seed", "e": "eliminated"}
 
 LINE = "╌"   # the playoff line
 METER = 10   # cells in an odds or activity meter
@@ -132,17 +135,14 @@ def _ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
-def _clinch(t: Team) -> tuple[str, str] | None:
-    flag = (t.clinch or "").upper()
-    for key in ("ELIMINATED", "TOP_SEED", "BYE", "DIVISION", "PLAYOFF"):
-        if key in flag:
-            return CLINCH["PLAYOFFS" if key == "PLAYOFF" else key]
-    return None
+def _clinch(t: Team) -> str:
+    """ESPN's tag for the team ("x", "yz", "e"...), or "" before anything is settled."""
+    return CLINCH_TAGS.get((t.clinch or "").upper(), "")
 
 
 def _clinch_legend(teams) -> list[tuple[str, str]]:
-    seen = {tag for tag in (_clinch(t) for t in teams) if tag}
-    return [tag for tag in CLINCH.values() if tag in seen]
+    seen = set("".join(_clinch(t) for t in teams))
+    return [(letter, meaning) for letter, meaning in CLINCH.items() if letter in seen]
 
 
 def _division_names(league: League) -> dict[int | None, str]:
@@ -164,14 +164,14 @@ def _team_cell(t: Team, league: League, pal: Palette, clinch: bool = True,
     """The name (yours in bold accent), then ESPN's clinch tag. ``width`` cuts the name with
     an ellipsis but keeps the tag, which the legend explains."""
     mine = t.id == league.my_team_id
-    tag = _clinch(t) if clinch else None
-    suffix = f" {tag[0]}" if tag else ""
+    tag = _clinch(t) if clinch else ""
+    suffix = f" {tag}" if tag else ""
     out = Text(t.name, style=f"bold {pal.accent}" if mine else pal.text, no_wrap=True,
                overflow="ellipsis")
     if width is not None:
         out.truncate(max(1, width - len(suffix)), overflow="ellipsis")
     if tag:
-        out.append(suffix, style=f"bold {pal.bad if tag[0] == 'e' else pal.good}")
+        out.append(suffix, style=f"bold {pal.bad if tag == 'e' else pal.good}")
     return out
 
 

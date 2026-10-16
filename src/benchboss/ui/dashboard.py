@@ -27,6 +27,7 @@ from benchboss.errors import BenchbossError
 from benchboss.espn.constants import BENCH, IR
 from benchboss.espn.models import League, Player
 from benchboss.inbox import Alert
+from benchboss.text import surname
 from benchboss.ui import logo
 from benchboss.ui.common import day_label, meter, odds_color, pct, player_cell, rost_cell
 from benchboss.ui.theme import Palette
@@ -404,15 +405,6 @@ def _short(name: str) -> str:
     return name if len(parts) < 2 else f"{parts[0][0]}. {' '.join(parts[1:])}"
 
 
-_SUFFIXES = {"jr.", "jr", "sr.", "sr", "ii", "iii", "iv", "v"}
-
-
-def _surname(name: str) -> str:
-    """ "Scotty Pippen Jr." -> "Pippen": how RotoWire headlines start."""
-    parts = [p for p in name.split() if p.lower() not in _SUFFIXES]
-    return parts[-1] if parts else name
-
-
 def news_limit(width: int) -> int:
     """How many news items fit: about 4 on the 46 column side panel, NEWS_MAX when wide."""
     return 4 if width < 60 else 6 if width < WIDE else NEWS_MAX
@@ -435,7 +427,7 @@ def news_card(d: Dashboard, pal: Palette, hint: str = "benchboss news for more",
     now = d.now.astimezone()
     for n in items:
         who = [_short(names[p]) for p in sorted(n.player_ids) if p in names]
-        last = [_surname(w) for w in who]
+        last = [surname(w) for w in who]
         headline = n.headline.strip()
         # RotoWire headlines start with the last name; only prefix when it is missing
         if who and not any(x in headline[:60] for x in last):

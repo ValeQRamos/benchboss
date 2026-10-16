@@ -226,7 +226,7 @@ class Team:
     trades: int = 0
     playoff_pct: float | None = None       # ESPN's season simulation, 0..1
     division_win_pct: float | None = None
-    clinch: str = ""             # PLAYOFFS, DIVISION, BYE, TOP_SEED, ELIMINATED or ""
+    clinch: str = ""             # PLAYOFFS, DIVISION_BYE, TOP_SEED, ELIMINATED... or ""
     watch_list: tuple[int, ...] = ()       # only filled in for your own team
 
     @property
@@ -400,7 +400,8 @@ def parse_team(t: dict, season: int, members: dict[str, str]) -> Team:
               for e in (t.get("roster") or {}).get("entries") or []]
     moves = t.get("transactionCounter") or {}
     sim = t.get("currentSimulationResults") or {}
-    clinch = t.get("playoffClinchType") or sim.get("playoffClinchType") or ""
+    # ESPN's standings read it from the simulation results; the team-level copy is a fallback
+    clinch = sim.get("playoffClinchType") or t.get("playoffClinchType") or ""
     return Team(
         id=t["id"], name=team_name(t), abbrev=t.get("abbrev", ""), owner_ids=owners,
         owner_name=members.get(owners[0], "") if owners else "",
