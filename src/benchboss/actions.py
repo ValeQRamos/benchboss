@@ -62,6 +62,11 @@ def prepare_add(session, name: str, drop: str | None = None, bid: int | None = N
     lg = session.league()
     x = _find_free_agent(session, name)
     kind = "WAIVER" if x.get("status") == "WAIVERS" else "FREEAGENT"
+    if bid is not None and not lg.uses_faab:
+        raise BenchbossError("your league has no waiver budget: leave out --bid")
+    if kind == "WAIVER" and lg.uses_faab and (bid is None or bid < lg.minimum_bid):
+        raise BenchbossError(f"{x['player']['fullName']} is on waivers and your league bids for "
+                             f"them: add --bid N (at least {max(lg.minimum_bid, 0)})")
     items = [{"playerId": x["id"], "type": "ADD", "toTeamId": lg.my_team_id}]
     summary = f"{'Waiver claim' if kind == 'WAIVER' else 'Add'}: {x['player']['fullName']}"
     if drop:

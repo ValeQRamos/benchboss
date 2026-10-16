@@ -524,8 +524,9 @@ def _moves(league: League, pal: Palette, width: int) -> Group:
 
     adds = sum(t.acquisitions for t in teams)
     trades = (sum(t.trades for t in teams) + 1) // 2  # a trade counts once for each team
-    kind = {"WAIVERS_TRADITIONAL": "traditional waivers", "FAAB": "budget waivers"}.get(
-        league.acquisition_type, "")
+    # ESPN's own app goes by isUsingAcquisitionBudget, whatever acquisitionType says
+    kind = ("budget waivers" if league.uses_faab
+            else {"WAIVERS_TRADITIONAL": "traditional waivers"}.get(league.acquisition_type, ""))
     so_far = (f"{adds} add{'s' * (adds != 1)} and {trades} trade{'s' * (trades != 1)} so far"
               if adds or trades else "no moves yet")
     head = _title(league, pal, width, "Moves", so_far, kind)

@@ -300,6 +300,8 @@ class League:
     scoring_type: str = "H2H_POINTS"
     acquisition_type: str = ""
     waiver_hours: int = 0
+    uses_faab: bool = False      # acquisitionSettings.isUsingAcquisitionBudget, as ESPN reads it
+    minimum_bid: int = 0
     roster_lock_type: str = ""   # rosterSettings.rosterLocktimeType, e.g. FIRSTGAME_SCORINGPERIOD
     playoff_teams: int = 0       # scheduleSettings.playoffTeamCount
     regular_season_weeks: int = 0  # scheduleSettings.matchupPeriodCount
@@ -468,6 +470,8 @@ def parse_league(raw: dict, my_team_id: int | None, swid: str | None = None,
         scoring_type=(settings.get("scoringSettings") or {}).get("scoringType", ""),
         acquisition_type=acq.get("acquisitionType", ""),
         waiver_hours=acq.get("waiverHours") or 0,
+        uses_faab=acq.get("isUsingAcquisitionBudget") is True,
+        minimum_bid=acq.get("minimumBid") or 0,
         roster_lock_type=roster_settings.get("rosterLocktimeType") or "",
         playoff_teams=sched.get("playoffTeamCount") or 0,
         regular_season_weeks=sched.get("matchupPeriodCount") or 0,
