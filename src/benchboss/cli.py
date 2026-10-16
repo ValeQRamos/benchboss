@@ -226,10 +226,14 @@ def cmd_standings(c: Ctx):
 
 
 def cmd_players(c: Ctx):
+    from benchboss.espn.constants import SPLITS
     from benchboss.ui.screens import finder
 
     a = c.args
-    _screen(c, finder, source=a.source, position=a.pos, sort=a.sort,
+    # the stats shown follow --sort unless --view says otherwise, and the other way round
+    sort = a.sort or (a.view if a.view in SPLITS else "proj")
+    a.view = a.view or (sort if sort in SPLITS else "proj")
+    _screen(c, finder, source=a.source, position=a.pos, sort=sort,
             query=" ".join(a.query) or None, n=a.n)
 
 
@@ -241,6 +245,7 @@ def cmd_watch(c: Ctx):
     if not a.action or a.action == "list":
         if a.player:
             raise BenchbossError("`watch list` takes no player; use `watch add` or `watch remove`")
+        a.view = "proj"  # benchboss watch has no --view: show the projections
         _screen(c, finder, source="watch")
         return
     if not a.player:
@@ -620,10 +625,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from", dest="source", choices=["fa", "rostered", "all", "watch"], default="fa",
                    help="free agents (default), players on a team, everyone, or your watch list")
     p.add_argument("--pos", help="PG SG SF PF C G F")
-    p.add_argument("--sort", default="proj",
-                   choices=["proj", "season", "l7", "l15", "l30", "last", "own", "change"],
-                   help="rank by this split (fantasy points per game), %% rostered or its change")
-    p.add_argument("--view", metavar="VIEW", help="which stats to show")
+    p.add_argument("--sort", choices=["proj", "season", "l7", "l15", "l30", "last", "own", "change"],
+                   help="rank by this split (fantasy points per game), %% rostered or its change "
+                        "(default: the --view split, else proj)")
+    p.add_argument("--view", metavar="VIEW",
+                   help="which split's box score to show: season l7 l15 l30 proj last")
     p.add_argument("-n", type=_count, default=50, help="how many (default 50)")
     p = add("watch", cmd_watch, "your ESPN watch list: list it, or add / remove a player")
     p.add_argument("action", nargs="?", choices=["list", "add", "remove"], help="default: list")
