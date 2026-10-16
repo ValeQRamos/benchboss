@@ -273,7 +273,7 @@ def test_outside_the_season_nobody_plays_today(day):
     draw, _ = app._build("roster")
     assert "●" not in text_of(draw(DARK, 120))
     draw, _ = app._build("activity")
-    table = draw(DARK, 120)
+    table = table_in(draw(DARK, 120))
     assert all(c.header_style != f"bold {DARK.accent}" for c in table.columns)
     draw, pending = app._build("today")
     assert pending is None
@@ -285,8 +285,15 @@ def test_outside_the_season_nobody_plays_today(day):
 
 def test_in_season_today_is_highlighted(session):
     app = Benchboss(Config(), demo=True, session=session)
-    table = app._build("activity")[0](DARK, 120)
+    table = table_in(app._build("activity")[0](DARK, 120))
     assert sum(c.header_style == f"bold {DARK.accent}" for c in table.columns) == 1
+
+
+def table_in(renderable) -> Table:
+    """The table in a screen's drawing (the workload draws a title, the table and a legend)."""
+    if isinstance(renderable, Table):
+        return renderable
+    return next(r for r in renderable.renderables if isinstance(r, Table))
 
 
 def test_dashboard_trash_card_skips_picks_that_add_nothing(session):
