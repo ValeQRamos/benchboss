@@ -1,12 +1,14 @@
-"""The benchboss mark: a small pixel-art basketball.
+"""The benchboss mark: a pixel-art basketball.
 
 Each terminal cell holds two pixels stacked: "▀" paints the top one, "▄" the bottom one and
-"█" both. When the two pixels of a cell are different parts of the ball, "▀" gets the top
-color as foreground and the bottom color as background. A pixel outside the ball gets no
+a colored background both (a block glyph leaves a hairline between rows in SVG screenshots).
+When the two pixels of a cell are different parts of the ball, "▀" gets the top color as
+foreground and the bottom color as background. A pixel outside the ball gets no
 color at all, so the terminal's own background shows through on dark and light themes.
 
-Pixels: O ball (the palette accent), D shade (a darker orange, the lower right side),
-S seam, . nothing. tools/make_logo.py turns BALL into docs/images/logo.png.
+The ball is seen a little from above and turned to the right, lit from the top left, so the
+seams curve the way they do on a real ball. Pixels: O ball (the palette accent), H the shine,
+D the shaded side, S seam, . nothing. tools/make_logo.py turns BALL into docs/images/logo.png.
 """
 
 from __future__ import annotations
@@ -16,28 +18,28 @@ from rich.text import Text
 
 from benchboss.ui.theme import Palette
 
-# 11 x 10 pixels, 5 rows of text: the side seams curve like "( | )" around the cross
+# 15 x 15 pixels, 8 rows of text (the last one half empty)
 BALL = (
-    "...OOOOO...",
-    "..OOOSOOO..",
-    ".OSOOSOOSO.",
-    "OSOOOSOOOSO",
-    "OSSSSSSSSSD",
-    "OSOOOSOOOSD",
-    "OSOOOSOOOSD",
-    ".OSOOSOOSD.",
-    "..DDDSDDD..",
-    "...DDDDD...",
+    ".....OOSOO.....",
+    "...OOOOSOOOO...",
+    "..SOHHHOSOOOS..",
+    ".OOSHHHOSOOOSD.",
+    ".OHSHHOOSOOOSD.",
+    "OOHSOOOOSOOOSDD",
+    "OOOOSOOOSOOOSDD",
+    "OOOOSOOOSOOOSDD",
+    "SOOOSOOOSOOOSDS",
+    "OSSSSOOOSOSSSSD",
+    ".OOOSSSSSSDDDD.",
+    ".OOOSOOOSDDDSD.",
+    "..DSDDDDSDDDS..",
+    "...SDDDDSDDD...",
+    ".....DDDSD.....",
 )
 
-# 4 x 2 pixels, one row of text, for the app's top bar. Two pixels of height cannot draw a
-# circle, so shading does it: a lit top, a darker rim, and the two lower corners in E, an
-# edge color halfway to the background that rounds the ball off like anti-aliasing. (A
-# vertical seam at this size looked like a pause button.)
-MARK = (
-    "DOOD",
-    "EDDE",
-)
+# The app's top bar has one row: too little for pixels to make a round ball, so it gets a
+# round glyph in the ball's color instead.
+MARK = "●"
 
 
 def _mix(color: str, factor: float) -> str:
@@ -53,9 +55,8 @@ def _toward_white(color: str, amount: float) -> str:
 
 def colors(pal: Palette) -> dict[str, str]:
     """Pixel letter -> color for this palette."""
-    shade = _mix(pal.accent, 0.72)
-    edge = _toward_white(shade, 0.5) if pal.name == "light" else _mix(pal.accent, 0.3)
-    return {"O": pal.accent, "D": shade, "S": _mix(pal.accent, 0.22), "E": edge}
+    return {"O": pal.accent, "H": _toward_white(pal.accent, 0.3), "D": _mix(pal.accent, 0.74),
+            "S": _mix(pal.accent, 0.22)}
 
 
 def draw(rows: tuple[str, ...], pal: Palette) -> Text:
@@ -70,8 +71,8 @@ def draw(rows: tuple[str, ...], pal: Palette) -> Text:
             t, b = paint.get(top), paint.get(bottom)
             if t is None and b is None:
                 out.append(" ")
-            elif t == b:
-                out.append("█", Style(color=t))
+            elif t == b:  # a background-colored space: no seam between rows in any renderer
+                out.append(" ", Style(bgcolor=t))
             elif b is None:
                 out.append("▀", Style(color=t))
             elif t is None:
@@ -82,13 +83,13 @@ def draw(rows: tuple[str, ...], pal: Palette) -> Text:
 
 
 def ball(pal: Palette) -> Text:
-    """The dashboard logo: 11 cells wide, 5 rows tall."""
+    """The dashboard logo: 15 cells wide, 8 rows tall."""
     return draw(BALL, pal)
 
 
 def mark(pal: Palette) -> Text:
-    """The top bar mark: 4 cells wide, 1 row tall."""
-    return draw(MARK, pal)
+    """The top bar mark: one cell."""
+    return Text(MARK, style=f"bold {pal.accent}", end="")
 
 
 BALL_WIDTH = len(BALL[0])

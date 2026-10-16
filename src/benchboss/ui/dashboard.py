@@ -35,7 +35,8 @@ NEWS_DAYS = 3     # how far back the news card looks
 NEWS_MAX = 8      # items on a wide screen; the side panel shows fewer
 WIDE = 92         # from here on the cards sit side by side and the news spans the bottom
 THREE = 150       # from here on there are three columns
-LOGO_MIN = 64     # narrower than this the header drops the pixel ball
+LOGO_MIN = 72     # narrower than this the header drops the pixel ball
+LOGO_GAP = 4      # columns between the ball and the team name
 
 
 @dataclass
@@ -179,7 +180,7 @@ def header(d: Dashboard, pal: Palette, width: int = 120) -> RenderableType:
     info.add_row(Text(d.league.name, style=pal.dim), Text(day_label(d.today), style=pal.dim))
     # the clock column (and the 2 spaces before it) sits on the right of every row, so this
     # line gets what is left
-    room = (width - (logo.BALL_WIDTH + 2 if width >= LOGO_MIN else 0)
+    room = (width - (logo.BALL_WIDTH + LOGO_GAP if width >= LOGO_MIN else 0)
             - max(len(clock), len(day_label(d.today))) - 2)
     dot = _dot(pal) if room >= 60 else (" · ", pal.border)
     line = Text(me.record, style=pal.text)
@@ -203,7 +204,7 @@ def header(d: Dashboard, pal: Palette, width: int = 120) -> RenderableType:
         info.add_row(line, "")
     if width < LOGO_MIN:
         return info
-    outer = Table.grid(expand=True, padding=(0, 2, 0, 0))
+    outer = Table.grid(expand=True, padding=(0, LOGO_GAP, 0, 0))
     outer.add_column(width=logo.BALL_WIDTH, no_wrap=True)
     outer.add_column(ratio=1, vertical="middle")
     outer.add_row(logo.ball(pal), info)

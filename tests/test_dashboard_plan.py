@@ -48,17 +48,22 @@ def fits(text: str, width: int) -> bool:
 def test_logo_sizes_and_blocks(pal):
     ball = logo.ball(pal)
     lines = ball.plain.split("\n")
-    assert len(lines) == logo.BALL_HEIGHT == 5
-    assert {cell_len(x) for x in lines} == {logo.BALL_WIDTH}
-    assert 10 <= logo.BALL_WIDTH <= 11
+    assert len(lines) == logo.BALL_HEIGHT == 8
+    assert {cell_len(x) for x in lines} == {logo.BALL_WIDTH} == {15}
+    assert set(ball.plain) <= {" ", "▀", "▄", "\n"}
     mark = logo.mark(pal)
-    assert "\n" not in mark.plain and 3 <= cell_len(mark.plain) <= 4
-    for t in (ball, mark):
-        assert set(t.plain) <= {" ", "▀", "▄", "█", "\n"}
+    assert mark.plain == "●" and pal.accent in str(mark.style)
     assert pal.accent in logo.colors(pal).values()
 
 
-@pytest.mark.parametrize("design", [logo.BALL, logo.MARK])
+def test_logo_is_round_and_symmetric_in_outline():
+    width = [len(r.strip(".")) for r in logo.BALL]
+    assert width == width[::-1] and max(width) == len(logo.BALL[0]) == len(logo.BALL)
+    for row in logo.BALL:  # the outline is centered on every row
+        assert len(row) - len(row.rstrip(".")) == len(row) - len(row.lstrip("."))
+
+
+@pytest.mark.parametrize("design", [logo.BALL])
 def test_logo_leaves_the_background_alone_outside_the_ball(design):
     out = logo.draw(design, DARK)
     rows = list(design) + (["." * len(design[0])] if len(design) % 2 else [])
