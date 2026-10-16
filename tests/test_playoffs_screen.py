@@ -2,6 +2,7 @@
 the playoffs command, all on the demo league (week 3 of 20, 4 spots, two divisions)."""
 
 import asyncio
+import copy
 import io
 import json
 import re
@@ -123,6 +124,22 @@ def test_games_view_opens_on_the_final_weeks_and_this_week(race):
     assert "12 earlier weeks hidden (weeks 4 to 15)" in out
     assert "this week" in out and "last week of the regular season" in out
     assert "live " in out  # this week's live scores
+
+
+def test_the_hidden_weeks_note_skips_a_picked_week():
+    s = demo_session()
+    data = playoffs.load(s, core.parse_picks(s.league(), ["Swish Kebab>Brick City@6"]), sims=100)
+    out = text_of(playoffs.draw(data, DARK, 120, 1), 120)
+    assert "Week 6" in out and "11 earlier weeks hidden (weeks 4, 5 and 7 to 15)" in out
+    assert playoffs._span([9]) == "week 9" and playoffs._span([9, 10]) == "weeks 9, 10"
+
+
+def test_a_change_that_rounds_to_zero_reads_as_unchanged(picked):
+    now, base = copy.deepcopy(picked), copy.deepcopy(picked.baseline)
+    for after, before in zip(now.teams, base.teams, strict=True):
+        after.playoffs, before.playoffs = 0.005, 0.0  # half a point: rounds to 0, not "+0"
+    out = text_of(playoffs.odds_table(now, DARK, playoffs.fit_columns(now, DARK, 160, base)[0]), 160)
+    assert "+/-" in out and not re.search(r" [+-]0 ", out)
 
 
 def test_no_playoff_spots_preseason_and_season_over():
@@ -271,6 +288,26 @@ def test_theme_and_width_changes_keep_the_builder():
     drive(app, scenario)
 
 
+@pytest.mark.parametrize("size", [(80, 24), (60, 30), (200, 20)])
+def test_short_windows_keep_the_odds_inside_their_pane(size):
+    app = Benchboss(Config(), demo=True)
+
+    async def scenario(pilot):
+        await pilot.press("right")
+        await settle(pilot)
+        b = app.query_one(playoffs.PlayoffBuilder)
+        split, odds = b.query_one("#pb-split").region, b.query_one("#pb-odds")
+        games = b.query_one("#pb-games")
+        assert odds.region.bottom <= split.bottom and games.size.height >= playoffs.GAMES_MIN
+        out = text_of(b._draw_odds(b.pal, odds.size.width, odds.size.height), odds.size.width)
+        lines = out.rstrip("\n").splitlines()
+        assert len(lines) <= odds.size.height
+        # what is left of the table: your team and the playoff bubble around the dashed line
+        assert "Monstars" in out and "╌╌╌" in out
+
+    drive(app, scenario, size=size)
+
+
 def test_the_games_list_keeps_the_cursor_in_view():
     b = playoffs.PlayoffBuilder(playoffs.load(demo_session(), sims=100), session=None)
     for i in range(len(b.games)):
@@ -280,6 +317,10 @@ def test_the_games_list_keeps_the_cursor_in_view():
         assert len(lines) <= 9 and any(line.startswith("▸") for line in lines)
         assert lines[0].startswith("Week ")  # a heading, pinned when the week is scrolled into
         assert not lines[-1].startswith("Week ")  # never a heading alone at the bottom
+    # e on a tall list: the final weeks start the window, not the tail of the week before
+    b.action_final()
+    lines = text_of(b._draw_games(DARK, 70, 40), 70).splitlines()
+    assert lines[0].startswith("Week 16") and lines[1].startswith("▸")
 
 
 def test_season_over_builder_has_nothing_to_pick():

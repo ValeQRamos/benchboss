@@ -34,6 +34,8 @@ DEBOUNCE = 0.12          # seconds the builder waits for more key presses before
 TIEBREAK = {"H2H_RECORD": "head-to-head record", "TOTAL_POINTS_SCORED": "points for",
             "INTRA_DIVISION_RECORD": "division record", "TOTAL_POINTS_AGAINST": "points against"}
 CURSOR_BG = {"dark": "#30323a", "light": "#e3e7ec"}
+TIGHT = "tight"          # a key in the fitted columns' options: collapse the padding between columns
+GAMES_MIN = 5            # rows the builder keeps for the games list (its CSS min-height)
 
 # common.table's look (a thin rule under the header), plus a dashed rule under a row that
 # ends a section: the playoff line
@@ -164,10 +166,21 @@ def odds_view(race: Race, pal: Palette, width: int) -> RenderableType:
 
 def _note(race: Race) -> str:
     if not race.playoff_teams:
-        return "This league has no playoff spots set yet, so there are no odds: projected records only."
+        return "No playoff spots are set in this league yet: projected records only."
     if not race.games:
         return "The regular season is over: the playoff field is set."
     return ""
+
+
+def rows_in_view(race: Race, k: int) -> list[int]:
+    """The ``k`` rows to show when not every team fits: yours, then the ones nearest the
+    playoff line (the top of the table when there is no line)."""
+    count = len(race.teams)
+    if k >= count:
+        return list(range(count))
+    cut = race.playoff_teams - 0.5
+    order = sorted(range(count), key=lambda i: (race.teams[i].team.id != race.me, abs(i - cut), i))
+    return sorted(order[:max(1, k)])
 
 
 def _columns(race: Race, pal: Palette, opt: dict, base: Race | None) -> list[tuple[str, dict, list]]:
@@ -215,9 +228,9 @@ def _columns(race: Race, pal: Palette, opt: dict, base: Race | None) -> list[tup
             cells = []
             for o in rows:
                 before = base.odds(o.team.id)
-                d = o.playoffs - before.playoffs if before else 0.0
-                cells.append(Text(f"{d * 100:+.0f}", style=f"bold {pal.good if d > 0 else pal.bad}")
-                             if abs(d) >= 0.005 else Text("·", style=pal.border))
+                d = round((o.playoffs - before.playoffs) * 100) if before else 0
+                cells.append(Text(f"{d:+d}", style=f"bold {pal.good if d > 0 else pal.bad}")
+                             if d else Text("·", style=pal.border))
             cols.append(("+/-", right, cells))
         if opt["seeds"]:
             for i in range(n):
@@ -241,9 +254,6 @@ def _need(cols: list[tuple[str, dict, list]], tight: bool = False) -> int:
     when ``tight`` (collapsed padding)."""
     total = sum(max([cell_len(head)] + [c.cell_len for c in cells]) for head, _, cells in cols)
     return total + (2 * len(cols) if tight else 3 * len(cols) - 1)
-
-
-TIGHT = "tight"  # a key in the fitted columns' options: collapse the padding between columns
 
 
 def fit_columns(race: Race, pal: Palette, width: int, base: Race | None = None
@@ -292,17 +302,18 @@ def fit_columns(race: Race, pal: Palette, width: int, base: Race | None = None
 
 
 def odds_table(race: Race, pal: Palette, cols: list[tuple[str, dict, list]],
-               tight: bool = False) -> Table:
-    """Every team in race.teams order, with the playoff line under the last spot."""
-    rows = race.teams
+               tight: bool = False, rows: list[int] | None = None) -> Table:
+    """The teams in race.teams order (only the indexes in ``rows`` when given), with the
+    playoff line under the last spot."""
     n = race.playoff_teams
+    shown = list(range(len(race.teams))) if rows is None else rows
     t = table(pal)
     t.box = _RACE_BOX
     t.collapse_padding = tight
     for head, kw, _ in cols:
         t.add_column(head, no_wrap=True, **kw)
-    for i in range(len(rows)):
-        line = bool(n) and i == n - 1 and len(rows) > n
+    for j, i in enumerate(shown):
+        line = i < n and j + 1 < len(shown) and shown[j + 1] >= n
         t.add_row(*[cells[i] for _, _, cells in cols], end_section=line)
     return t
 
@@ -426,6 +437,19 @@ def game_row(race: Race, g: Game, pal: Palette, size: int, compact: bool, *,
     return out
 
 
+def _span(weeks: list[int]) -> str:
+    """[4, 5, 7, 8, 9] -> "weeks 4, 5 and 7 to 9" (a picked week can sit in the middle)."""
+    runs: list[list[int]] = []
+    for w in weeks:
+        if runs and w == runs[-1][1] + 1:
+            runs[-1][1] = w
+        else:
+            runs.append([w, w])
+    parts = [str(a) if a == b else f"{a}, {b}" if b == a + 1 else f"{a} to {b}" for a, b in runs]
+    text = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    return ("week " if len(weeks) == 1 else "weeks ") + text
+
+
 def _by_week(games: list[Game]) -> dict[int, list[Game]]:
     out: dict[int, list[Game]] = {}
     for g in sorted(games, key=lambda g: g.week):
@@ -453,8 +477,7 @@ def games_view(race: Race, pal: Palette, width: int) -> RenderableType:
             parts.append(Text("  ") + row)
     parts.append(Text(""))
     if hidden:
-        span = f"week {hidden[0]}" if len(hidden) == 1 else f"weeks {hidden[0]} to {hidden[-1]}"
-        parts += [Text(f"{_plural(len(hidden), 'earlier week')} hidden ({span}).", style=pal.dim),
+        parts += [Text(f"{_plural(len(hidden), 'earlier week')} hidden ({_span(hidden)}).", style=pal.dim),
                   Text("Pick any game in the app (y), or here with --pick \"Winner>Loser@WEEK\".",
                        style=pal.dim)]
     items = [("%", "share of simulated seasons each side wins")]
@@ -491,7 +514,7 @@ class PlayoffBuilder(Widget, can_focus=True):
     PlayoffBuilder { height: 1fr; }
     PlayoffBuilder #pb-head { height: auto; margin-bottom: 1; }
     PlayoffBuilder #pb-split { height: 1fr; layout: horizontal; }
-    PlayoffBuilder #pb-games { width: 60; height: 1fr; min-height: 6; }
+    PlayoffBuilder #pb-games { width: 60; height: 1fr; min-height: 5; }
     PlayoffBuilder #pb-odds { width: 1fr; height: 1fr; padding: 0 0 0 4; }
     PlayoffBuilder.-stacked #pb-split { layout: vertical; }
     PlayoffBuilder.-stacked #pb-games { width: 1fr; }
@@ -564,17 +587,16 @@ class PlayoffBuilder(Widget, can_focus=True):
             games.styles.width = "1fr"
         else:
             size, compact = _layout(self.race, self.games, 64, 2)
-            games.styles.width = min(max(44, 2 + 2 * size + (14 if compact else 20) + 9), width // 2)
+            row = 2 + 2 * size + (14 if compact else 20)
+            games.styles.width = min(max(44, row + 9), width // 2)  # 9: room for the "picked" tag
         self.repaint()
 
     def _status_line(self) -> None:
-        """The app's status bar says "v for ..." for screens with views; this one shows both."""
-        try:
-            status = self.app.query_one("#status")
-        except Exception:
-            return
-        status.update(Text("Scenario builder · r refresh · ctrl+t light/dark · q quit",
-                           style=self.pal.dim))
+        """The app's status bar offers v for the next view, but the builder shows the games and
+        the odds at once (v does nothing here), so it gets its own line."""
+        for status in self.app.query("#status"):
+            status.update(Text("Scenario builder · r refresh · ctrl+t light/dark · q quit",
+                               style=self.pal.dim))
 
     def repaint(self) -> None:
         for pane in self.query(_Pane):
@@ -583,29 +605,49 @@ class PlayoffBuilder(Widget, can_focus=True):
     # --- drawing ---
 
     def _draw_head(self, pal: Palette, width: int, height: int) -> RenderableType:
-        line = _fit_line(pal, width - (14 if self.busy else 0), *context(self.race))
+        busy = "   simulating..."
+        line = _fit_line(pal, width - (len(busy) if self.busy else 0), *context(self.race))
         if self.busy:
-            line.append("   simulating...", style=pal.dim)
+            line.append(busy, style=pal.dim)
         return line
 
+    def _height(self, renderable: RenderableType, width: int) -> int:
+        console = self.app.console
+        return len(console.render_lines(renderable, console.options.update_width(width), pad=False))
+
+    def _odds_room(self, height: int) -> int:
+        """Lines the odds can take: the pane's own height side by side; stacked (the pane grows
+        with its content) what is left under the title, GAMES_MIN rows of games and the keys."""
+        if not self.has_class("-stacked") or not self.size.height:
+            return height
+        keys = self._height(self._draw_foot(self.pal, self.size.width, 0), self.size.width)
+        # the title and its margin, the keys and their margin, the odds' top padding
+        return self.size.height - 2 - (keys + 1) - GAMES_MIN - 1
+
     def _draw_odds(self, pal: Palette, width: int, height: int) -> RenderableType:
-        parts: list[RenderableType] = []
-        note = _note(self.race)
-        if note:
-            parts.append(Text(note, style=pal.dim))
+        text = _note(self.race)
+        note = [Text(text, style=pal.dim)] if text else []
         base = self.base if self.picks else None
-        if self.short:
-            # no edge spaces and no blank lines around the table, no legend: every row counts
-            cols, tight = fit_columns(self.race, pal, width + 2, base=base)
-            t = odds_table(self.race, pal, cols, tight)
+        room = self._odds_room(height)
+        if not self.short:
+            cols, tight = fit_columns(self.race, pal, width, base=base)
+            out = Group(*note, odds_table(self.race, pal, cols, tight))  # blank lines above and below
+            foot = odds_legend(self.race, pal, width, cols)
+            if foot.plain:
+                out.renderables.append(foot)
+            if self._height(out, width) <= room:
+                return out
+        # no edge spaces and no blank lines around the table, no legend: every row counts, and
+        # when even that is too tall, only the rows that fit (yours and the playoff bubble)
+        cols, tight = fit_columns(self.race, pal, width + 2, base=base)
+        head = [*note, Text("")] if note else []
+        t = odds_table(self.race, pal, cols, tight)
+        t.show_edge = False
+        extra = self._height(Group(*head, t), width) - room
+        if extra > 0:
+            t = odds_table(self.race, pal, cols, tight, rows_in_view(self.race, len(self.race.teams) - extra))
             t.show_edge = False
-            return Group(*parts, *([Text("")] if note else []), t)
-        cols, tight = fit_columns(self.race, pal, width, base=base)
-        parts.append(odds_table(self.race, pal, cols, tight))  # with blank lines above and below
-        foot = odds_legend(self.race, pal, width, cols)
-        if foot.plain:
-            parts.append(foot)
-        return Group(*parts)
+        return Group(*head, t)
 
     def _draw_foot(self, pal: Palette, width: int, height: int) -> RenderableType:
         keys = [("↑↓", "game"), ("←→", "pick the winner"), ("0", "clear"), ("c", "clear all"),
@@ -683,12 +725,16 @@ class PlayoffBuilder(Widget, can_focus=True):
         if line >= self._top + height:
             self._top = line - height + 1
         self._snap = False
-        self._top = max(0, min(self._top, len(lines) - height))
+        headings = set(head_of.values())
+        if self._top not in headings:
+            # no blank rows under the end of the list, unless that keeps a week at the top
+            # (e lands on the final weeks: they start the window, not a scrap of the week before)
+            self._top = min(self._top, len(lines) - height)
+        self._top = max(0, self._top)
         window = lines[self._top:self._top + height]
         top_head = head_of.get(self._top)
         if top_head is not None and top_head != self._top and line != self._top and height > 2:
             window[0] = lines[top_head]
-        headings = set(head_of.values())
         while len(window) > 1 and (not window[-1].plain or self._top + len(window) - 1 in headings):
             window.pop()
         return Text("\n").join(window)
