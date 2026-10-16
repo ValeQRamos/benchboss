@@ -634,6 +634,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help='fix a result, e.g. --pick "Monstars>Tune Squad" (add @WEEK for a '
                         "given week; repeat for more)")
     p.add_argument("--sims", type=_count, default=5000, help="simulated seasons (default 5000)")
+    p.add_argument("--view", metavar="VIEW", help="odds (default) or games: the matchups left")
     p = add("trash", cmd_trash, "most valuable free agents for this week (points added, best day to grab)")
     p.add_argument("pos", nargs="?", help="PG SG SF PF C G F")
     p.add_argument("-n", type=_count, default=10, help="how many (default 10)")
