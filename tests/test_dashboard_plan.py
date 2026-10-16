@@ -209,8 +209,8 @@ def test_header_keeps_a_gap_before_the_clock(session):
 
 def test_dashboard_without_news_or_watch_list(session):
     d = dashboard.collect(session)
-    assert d.watch == set() and len(d.news) <= dashboard.NEWS_MAX
-    d.news = []
+    assert d.watch and len(d.news) <= dashboard.NEWS_MAX  # the demo has a watch list
+    d.watch, d.news = set(), []
     for width in WIDTHS:
         out = text_of(dashboard.render(d, DARK, width), width)
         assert fits(out, width) and "LATEST NEWS" not in out and "★" not in out

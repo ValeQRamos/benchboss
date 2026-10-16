@@ -40,7 +40,8 @@ def table(pal: Palette, title: str | None = None, caption: str | None = None) ->
 
 def title(text: str, pal: Palette, *context: str) -> Text:
     """The screen's title line: "Roster · Monstars 2-0 · Last 7 days"."""
-    out = Text(text, style=f"bold {pal.accent}")
+    out = Text()
+    out.append(text, style=f"bold {pal.accent}")  # only the name is bold, not the context
     for part in context:
         if part:
             out.append("  ·  ", style=pal.border)

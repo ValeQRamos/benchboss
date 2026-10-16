@@ -87,7 +87,7 @@ class Benchboss(App):
     #panel { width: 1fr; height: 1fr; padding: 1 2; display: none; }
     #panel.visible { display: block; }
     #body { width: 1fr; }
-    #actions { height: auto; margin-top: 1; display: none; }
+    #actions { dock: bottom; height: auto; padding-top: 1; background: $background; display: none; }
     #actions.visible { display: block; }
     #actions Button { margin-right: 2; }
     #status { height: 1; padding: 0 1; color: $text-muted; }
