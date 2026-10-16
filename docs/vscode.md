@@ -52,7 +52,7 @@ The repository ships everything an agent needs to drive benchboss safely:
 | [`.github/copilot-instructions.md`](../.github/copilot-instructions.md) | The short list of rules Copilot always loads |
 | [`.github/skills/`](../.github/skills) | Skills: lineup optimizer, trash scout, trade finder, player news, matchup report, player finder, playoff race |
 | [`.github/agents/benchboss.agent.md`](../.github/agents/benchboss.agent.md) | A custom "benchboss" agent with terminal access and no file editing |
-| [`.vscode/settings.json`](../.vscode/settings.json) | Lets the agent run read commands and `--dry-run` previews without asking every time. Writes, anything with `--yes` or `-y`, `news --ai` (a paid call) and `dash --watch` (it never exits) always ask |
+| [`.vscode/settings.json`](../.vscode/settings.json) | Lets the agent run read commands and `--dry-run` previews without asking every time. Writes (including `watch add` and `watch remove`), anything with `--yes` or `-y`, `news --ai` (a paid call), `alerts --mark-read` (it marks your watch list news as read) and `dash --watch` (it never exits) always ask |
 
 Open the folder, start Copilot Chat in agent mode and talk normally:
 

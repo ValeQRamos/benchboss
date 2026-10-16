@@ -293,8 +293,9 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
     """News ("spins") on your watch-list players that you have not seen yet, newest first,
     as (player name, NewsItem).
 
-    What you have seen is kept per league in ``seen-news.json`` in the config folder (in memory for the demo): the
-    newest ``SEEN_KEEP`` news ids, and the watch list as it was at the last recorded check.
+    What you have seen is kept per league in ``seen-news.json`` in the config folder (in
+    memory for the demo, so every run of the demo shows the same spins): the newest
+    ``SEEN_KEEP`` news ids, and the watch list as it was at the last recorded check.
     News on a player new to the list (every player, the first time a league is checked)
     older than ``FIRST_RUN_HOURS`` counts as seen, so neither a new install nor a player
     you just starred brings days of old news. Anything else not seen yet is new, however

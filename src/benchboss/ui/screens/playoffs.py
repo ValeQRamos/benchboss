@@ -28,7 +28,7 @@ from benchboss.ui.theme import DARK, Palette
 
 TITLE = "Playoff race"
 VIEWS: tuple[tuple[str, str], ...] = (("odds", "Odds"), ("games", "Games left"))
-FINAL_WEEKS = 5          # Alonso's "last 5 matches": the stretch the games view opens on
+FINAL_WEEKS = 5          # the "last 5 matches" of issue #1: the stretch the games view opens on
 SCENARIO_SIMS = 2000     # simulated seasons per re-run in the scenario builder
 DEBOUNCE = 0.12          # seconds the builder waits for more key presses before simulating
 TIEBREAK = {"H2H_RECORD": "head-to-head record", "TOTAL_POINTS_SCORED": "points for",

@@ -383,7 +383,7 @@ def test_app_toasts_each_demo_spin_once(disk_demo):
 
     drive(app, scenario)
     toasts.clear()
-    again = Benchboss(Config(), demo=True)  # the next run of the app remembers them too
+    again = Benchboss(Config(), demo=True, session=on_disk())  # the next run remembers them too
     again.notify = lambda message, **kw: toasts.append(message)
 
     async def later(pilot):
