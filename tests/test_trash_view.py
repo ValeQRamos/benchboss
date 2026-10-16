@@ -125,6 +125,27 @@ def test_wide_shows_every_column_and_narrow_shortens_names(session):
     assert "Own%" not in narrow and "Pos" not in header_of(narrow)
 
 
+def test_one_long_name_is_cut_and_the_strip_stays(session):
+    top = [pk.player for pk in session.trash(n=6)]
+    top[0] = dataclasses.replace(top[0], name="Shai Gilgeous-Alexander Jr.", injury_status="OUT")
+    session.free_agents = lambda *a, **k: list(top)
+    data = screen.load(session)
+    out, _ = render(screen.draw(data, DARK, 46), 46)
+    assert max(cell_len(x.rstrip()) for x in out.splitlines()) <= 46
+    assert "Games" in header_of(out) and " # " in f" {header_of(out)}"
+    row = next(x for x in out.splitlines() if "S. Gilgeous" in x)
+    assert "… BKN OUT" in row  # the name is cut, his team and injury are not
+
+
+def test_the_narrow_caption_breaks_between_items(session):
+    data = screen.load(session)
+    out, _ = render(screen.draw(data, DARK, 46), 46)
+    lines = [x.strip() for x in out.splitlines()]
+    assert "Net points added minus the drop's points" in lines
+    assert "G games he plays for you  ·  ● grab day" in lines  # no Grab column: say what orange is
+    assert "Drops score more per game: one-week streams" in lines
+
+
 def test_ownership_arrows_follow_the_change(session):
     data = screen.load(session)
     out, _ = render(screen.trash(data.picks, data.calendar, DARK, 160), 160)

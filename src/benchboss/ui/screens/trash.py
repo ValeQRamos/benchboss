@@ -101,10 +101,18 @@ def heading(span: list[int], cal: SeasonCalendar, pal: Palette, width: int) -> T
     return line
 
 
-def _name(pk: TrashPick, pal: Palette, short: bool, waivers: bool) -> Text:
+def _name(pk: TrashPick, pal: Palette, short: bool, waivers: bool, room: int = 0) -> Text:
+    """The player cell. Wider than ``room``, the name is cut and the team, injury and "(W)"
+    after it stay: "S. Gilgeous-Al… OKC OUT"."""
+    name = pk.player.short_name if short else pk.player.name
     cell = player_cell(pk.player, pal, short=short)
     if waivers and pk.on_waivers:
         cell.append(" (W)", style=pal.warn)
+    over = cell.cell_len - room if room else 0
+    if over > 0 and len(name) > over + 1:
+        head = cell[:len(name) - over - 1]
+        head.rstrip()
+        cell = Text.assemble(head, ("…", pal.text), cell[len(name):])
     return cell
 
 
@@ -139,11 +147,20 @@ def _net(pk: TrashPick, pal: Palette) -> Text:
     return Text(f"{pk.net:+.1f}", style=f"bold {pal.good}" if pk.net > 0 else pal.dim)
 
 
-def _caption(items: list[tuple[str, str]], pal: Palette, width: int) -> Text:
-    """The legend, packed into lines no wider than ``width``, breaking between items."""
+Meaning = str | tuple[str, ...]   # a tuple holds shorter wordings for narrow tables, longest first
+
+
+def _caption(items: list[tuple[str | Text, Meaning]], pal: Palette, width: int) -> Text:
+    """The legend, packed into lines no wider than ``width``, breaking between items. Each
+    item takes the longest of its wordings that fits on one line."""
     out, line = Text(), 0
     for key, meaning in items:
-        size = (cell_len(key) + 1 if key else 0) + cell_len(meaning)
+        if isinstance(key, str):
+            key = Text(key, style=f"bold {pal.dim}")
+        lead = key.cell_len + 1 if key else 0
+        if isinstance(meaning, tuple):
+            meaning = next((m for m in meaning if lead + cell_len(m) <= width), meaning[-1])
+        size = lead + cell_len(meaning)
         if line and line + 5 + size > width:
             out.append("\n")
             line = 0
@@ -151,7 +168,8 @@ def _caption(items: list[tuple[str, str]], pal: Palette, width: int) -> Text:
             out.append("  ·  ", style=pal.border)
             line += 5
         if key:
-            out.append(f"{key} ", style=f"bold {pal.dim}")
+            out.append_text(key)
+            out.append(" ")
         out.append(meaning, style=pal.dim)
         line += size
     return out
@@ -160,7 +178,7 @@ def _caption(items: list[tuple[str, str]], pal: Palette, width: int) -> Text:
 # --- the table ---------------------------------------------------------------------------------
 
 COLUMNS = ("#", "Player", "Pos", "Games", "G", "Grab", "+Pts", "Drop", "Net", "Proj", "Own%")
-RIGHT = ("#", "G", "+Pts", "Net", "Proj", "Own%")
+RIGHT = ("#", "Games", "G", "+Pts", "Net", "Proj", "Own%")   # the strip ends on Sunday
 
 
 class _Layout:
@@ -208,11 +226,17 @@ class _Layout:
             return [Text(num(pk.player.proj), style=pal.dim) for pk in picks]
         return [_owned(pk, pal, self.digits) for pk in picks]  # Own%
 
-    def names(self, short: bool) -> list[Text]:
-        return [_name(pk, self.pal, short, "Grab" not in self.keys) for pk in self.picks]
+    def names(self, short: bool, room: int = 0) -> list[Text]:
+        return [_name(pk, self.pal, short, "Grab" not in self.keys, room) for pk in self.picks]
 
     def widest(self, short: bool) -> int:
         return max(c.cell_len for c in self.names(short))
+
+    def typical(self) -> int:
+        """The width four short names in five fit in, so one long name does not cost every
+        row a column."""
+        widths = sorted(c.cell_len for c in self.names(True))
+        return widths[(4 * len(widths) + 4) // 5 - 1]
 
     def need(self, player: int) -> int:
         """Columns the table takes with the player column ``player`` wide: one space of
@@ -238,8 +262,9 @@ def trash(picks: list[TrashPick], cal: SeasonCalendar, pal: Palette,
     row (the caption names him), then Proj and +Pts go. Only after those secondary columns are
     gone do the names shorten ("J. Kuminga MIN", on every row), then the drop names, then the
     Drop, Grab (the strip still shows the grab day, and a waiver claim gets "(W)" after his
-    name), # and strip columns go, and last of all long names are cut. Net and G, the columns
-    the list is ranked by, always show.
+    name), # and strip columns go, until four names in five fit. Last of all the longer
+    names are cut, keeping their team and injury. Net and G, the columns the list is ranked
+    by, always show.
     """
     span = week_span(picks)
     head = heading(span, cal, pal, width)
@@ -267,7 +292,7 @@ def trash(picks: list[TrashPick], cal: SeasonCalendar, pal: Palette,
             lay.keys.remove(step)
     # then the names shorten and the primary columns go; Net and G never do
     for step in ("short drop", "Drop", "Grab", "#", "Games"):
-        if lay.need(lay.widest(True)) <= width:
+        if lay.need(lay.typical()) <= width:
             break
         if step == "short drop":
             lay.short_drop = True
@@ -281,36 +306,51 @@ def trash(picks: list[TrashPick], cal: SeasonCalendar, pal: Palette,
         extra = {"overflow": "ellipsis", "max_width": room} if key == "Player" else {}
         t.add_column(lay.header(key), no_wrap=True, justify="right" if key in RIGHT else "left",
                      **extra)
-    columns = [lay.names(short) if k == "Player" else lay.column(k)[0] for k in lay.keys]
+    columns = [lay.names(short, room) if k == "Player" else lay.column(k)[0] for k in lay.keys]
     for row in zip(*columns, strict=True):
         t.add_row(*row)
-    t.caption = _caption(_legend(picks, lay.keys, drops), pal,
+    tipped = "Games" in lay.keys and any(TIPPED in c.plain for c in lay.column("Games")[0])
+    t.caption = _caption(_legend(picks, lay.keys, drops, pal, tipped), pal,
                          lay.need(min(room, lay.widest(short))))
     return Group(head, t)
 
 
-def _legend(picks: list[TrashPick], keys: list[str], drops: set[str]) -> list[tuple[str, str]]:
+def _legend(picks: list[TrashPick], keys: list[str], drops: set[str], pal: Palette,
+            tipped: bool) -> list[tuple[str | Text, Meaning]]:
     """(key, meaning) pairs for the caption; an empty key is a plain note."""
-    who = "the drop's points"
-    if "Drop" not in keys:
-        who = ("the suggested drop's points" if len(drops) != 1
-               else f"what {next(iter(drops))}, the suggested drop, would score")
-    if not drops:
-        who = ""
-    base = "+Pts" if "+Pts" in keys else "points over your weakest starter"
-    items = [("+Pts", "over your weakest starter")] if "+Pts" in keys else []
-    items.append(("Net", f"{base} minus {who}" if who else f"{base}, no drop needed"))
+    items: list[tuple[str | Text, Meaning]] = []
+    added = ("points over your weakest starter", "points added")
+    if "+Pts" in keys:
+        items.append(("+Pts", "over your weakest starter"))
+        added = ("+Pts",)
+    if drops:
+        net = tuple(f"{a} minus the drop's points" for a in added) + (f"{added[-1]} minus the drop's",)
+    else:
+        net = tuple(f"{a}, no drop needed" for a in added)
+    items.append(("Net", net))
     items.append(("G", "games he plays for you"))
+    if "Games" in keys and "Grab" not in keys:
+        items.append((Text(GAME, style=pal.accent), "grab day"))
+    if tipped:
+        items.append((Text(TIPPED, style=pal.dim), "already tipped off"))
     flagged = sum(1 for pk in picks if pk.drop_projects_higher)
-    if flagged and "Drop" in keys:
-        items.append(("*", "drop scores more per game: a one-week stream"))
+    every = flagged == sum(1 for pk in picks if pk.drop)
+    if "Drop" in keys:
+        if flagged:
+            items.append(("*", "drop scores more per game: a one-week stream"))
+    elif len(drops) == 1:
+        items.append(("", f"{next(iter(drops))} is the suggested drop"))
+        if flagged:
+            than = "all" if every else "some"
+            items.append(("", (f"He scores more per game than {than} of these: one-week streams",
+                               f"He scores more per game than {than} of these",
+                               f"He outscores {than} of these per game")))
     elif flagged:
-        every = flagged == sum(1 for pk in picks if pk.drop)
-        if len(drops) == 1:
-            note = f"{next(iter(drops))} scores more per game than {'all' if every else 'some'} of them"
-        else:
-            note = "Every drop scores more per game" if every else "Some drops score more per game"
-        items.append(("", f"{note}: one-week streams."))
+        items.append(("", ("Every drop scores more per game: one-week streams",
+                           "Drops score more per game: one-week streams",
+                           "Every drop scores more per game") if every else
+                          ("Some drops score more per game: one-week streams",
+                           "Some drops score more per game")))
     if any(pk.on_waivers for pk in picks):
-        items.append(("(W)", "on waivers, yours from the grab day"))
+        items.append(("(W)", ("on waivers, yours from the grab day", "on waivers")))
     return items
