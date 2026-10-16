@@ -105,3 +105,38 @@ def test_the_clinch_flag_comes_from_the_simulation_results():
     t = {"id": 1, "location": "A", "nickname": "B", "playoffClinchType": "UNKNOWN",
          "currentSimulationResults": {"playoffClinchType": "DIVISION"}}
     assert parse_team(t, 2027, {}).clinch == "DIVISION"
+
+
+def test_the_menu_follows_the_window_width_and_m_sticks():
+    import asyncio
+
+    from textual.widgets import OptionList
+
+    from benchboss.config import Config
+    from benchboss.ui.app import NARROW, Benchboss
+
+    app = Benchboss(Config(), demo=True)
+
+    async def wait(pilot, ok, timeout=5.0):
+        for _ in range(int(timeout / 0.05)):
+            if ok():
+                return True
+            await pilot.pause(0.05)
+        return ok()
+
+    async def run():
+        async with app.run_test(size=(NARROW + 20, 40)) as pilot:
+            await pilot.app.workers.wait_for_complete()
+            menu = app.query_one("#menu", OptionList)
+            assert await wait(pilot, lambda: not menu.has_class("hidden"))
+            await pilot.resize_terminal(NARROW - 10, 40)
+            assert await wait(pilot, lambda: menu.has_class("hidden"))
+            await pilot.press("m")
+            assert await wait(pilot, lambda: not menu.has_class("hidden"))
+            await pilot.resize_terminal(NARROW - 5, 40)  # still narrow: m keeps it open
+            await pilot.pause(0.3)
+            assert not menu.has_class("hidden")
+            await pilot.resize_terminal(NARROW + 20, 40)
+            assert await wait(pilot, lambda: not menu.has_class("hidden"))
+
+    asyncio.run(run())
