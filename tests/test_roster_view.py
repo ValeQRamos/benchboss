@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import io
 import json
+import re
 
 import pytest
 from rich.console import Console
@@ -143,14 +144,48 @@ def test_today_shows_the_opponent(data):
         opp = data.opponents[sp.player.id]
         assert " " not in opp and opp.lstrip("@").isalpha()
         assert opp in row_of(text, sp.player.name)
-    assert "@ away" in text
 
 
 def test_trend_arrows_compare_last_7_days_with_the_season(data):
     text = render(data, 160)
-    assert "▲" in row_of(text, "Tobias Harris")   # 43.3 in the last 7 days, 31.4 this season
-    assert "▼" in row_of(text, "Dyson Daniels")   # 32.2 against 38.0
+    assert "▲43.3" in row_of(text, "Tobias Harris")   # 43.3 in the last 7 days, 31.4 this season
+    assert "▼32.2" in row_of(text, "Dyson Daniels")   # 32.2 against 38.0
     assert "▲" not in row_of(text, "LaMelo Ball") and "▼" not in row_of(text, "LaMelo Ball")
+
+
+@pytest.mark.parametrize("width,value", [(160, "43.3"), (80, "31.4")])  # on L7, or on Avg
+def test_the_trend_arrow_keeps_the_decimal_points_in_line(data, width, value):
+    """A right-justified cell loses its trailing spaces, so the arrow goes in front."""
+    text = render(data, width)
+    harris = row_of(text, "Tobias Harris")
+    column_end = harris.index(value) + len(value)
+    for sp in data.league.me.roster:
+        row = row_of(text, sp.player.name)
+        assert row[column_end - 2] == "." and row[column_end - 1].isdigit(), row
+
+
+def test_the_legend_explains_what_is_on_screen(data):
+    wide = render(data, 160).splitlines()[-1]
+    for part in ("Avg this season", "L7 L15 L30", "Prev last season", "▲▼",
+                 "Rost% +/- of ESPN leagues, change in a week"):
+        assert part in wide
+    narrow = render(data, 46).splitlines()[-1]
+    assert narrow.startswith("▲▼") and len(narrow) <= 46  # the arrows are kept the longest
+
+
+def test_group_labels_never_look_cramped(data):
+    for width in range(46, 161):
+        groups = render(data, width).splitlines()[2]
+        labels = re.findall(r"(─+) [^─]+ (─+)", groups)
+        assert labels and all(len(left) >= 2 and len(right) >= 2 for left, right in labels), groups
+
+
+def test_an_empty_roster_says_so(session):
+    session.league().me.roster.clear()
+    data = roster.load(session)
+    text = render(data, 80)
+    assert text.splitlines()[0].startswith("Roster") and "No players yet" in text
+    assert roster.to_json(data) == []
 
 
 def test_only_the_leader_of_a_stat_stands_out(data):

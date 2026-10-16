@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from rich import box
 from rich.cells import cell_len
-from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
+from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
 from rich.table import Table
 from rich.text import Text
 
@@ -182,23 +182,23 @@ def _columns(rows: list[_Row], data: RosterData, lay: _Layout, pal: Palette) -> 
     add("pos", "Pos", "who", each(lambda p: Text(p.positions, style=pal.dim)), justify="left")
     add("today", "Today", "who", each(lambda p: _today(p, data, pal)))
 
-    # fantasy points per game, every split; the trend arrow rides on L7 (or on Avg without it)
+    # fantasy points per game, every split; the trend arrow rides on L7 (or on Avg without it),
+    # in front of the number: right-justified cells lose trailing spaces, so an arrow after
+    # the number would push the decimal points out of line
     shown = [k for k in SPLITS if _split_visible(k, lay)]
     arrow_on = "l7" if "l7" in shown else "season" if "season" in shown else None
     for k in shown:
         style = f"bold {pal.text}" if k == lay.sel else pal.dim
-        head = SPLIT_SHORT[k] + (" " if k == arrow_on else "")
 
         def cell(p: Player, k=k, style=style) -> Text:
             v = p.fpts(k)
             out = Text(num(v), style=style if v is not None else pal.border)
-            if k == arrow_on:
-                t = _trend(p)
-                out.append("▲" if t > 0 else "▼" if t < 0 else " ",
-                           style=pal.good if t > 0 else pal.bad)
+            t = _trend(p) if k == arrow_on else 0
+            if t:
+                out = Text.assemble(("▲" if t > 0 else "▼", pal.good if t > 0 else pal.bad), out)
             return out
 
-        add(f"fp_{k}", head, "fpts", each(cell),
+        add(f"fp_{k}", SPLIT_SHORT[k], "fpts", each(cell),
             header_style=f"bold {pal.accent}" if k == lay.sel else None)
 
     # the box score of the selected split
@@ -206,7 +206,7 @@ def _columns(rows: list[_Row], data: RosterData, lay: _Layout, pal: Palette) -> 
     present = [ln for ln in lines if ln is not None]
 
     def stat(key: str, header: str, get: Callable[[StatLine], float | None],
-             fmt: Callable[[float | None], str] = num, lead: bool = False) -> None:
+             fmt: Callable[[float], str] = num, lead: bool = False) -> None:
         pool = [get(ln) for ln in present]
 
         def one(ln: StatLine | None) -> Text:
@@ -220,7 +220,7 @@ def _columns(rows: list[_Row], data: RosterData, lay: _Layout, pal: Palette) -> 
         add(key, header, "box",
             [one(ln) if p else blank for ln, p in zip(lines, players, strict=True)])
 
-    stat("gp", "GP", lambda s: s.gp or None, lambda v: "-" if v is None else f"{v:.0f}")
+    stat("gp", "GP", lambda s: s.gp or None, "{:.0f}".format)
     stat("min", "MIN", lambda s: s.mpg)
     for key, header, stat_id, lead in BOX_STATS:
         stat(key, header, _count(stat_id), lead=lead)
@@ -322,7 +322,7 @@ class RosterTable(Table):
 def _group_line(cols: list[_Col], widths: list[int], lay: _Layout, pal: Palette) -> Text | None:
     """ "──── Fantasy points per game ────" over each block of numbers."""
     labels = {"fpts": ("Fantasy points per game", "Fantasy pts per game", "FPTS per game",
-                       "FPTS/G"),
+                       "FPTS"),
               "box": (f"{LONG[lay.sel]}, per game", f"{dict(VIEWS)[lay.sel]}, per game",
                       f"{SPLIT_SHORT[lay.sel]} per game", "Per game")}
     out, x, i = Text(), 0, 0
@@ -333,7 +333,8 @@ def _group_line(cols: list[_Col], widths: list[int], lay: _Layout, pal: Palette)
         start = x + (widths[i] - cols[i].width)  # skip the block gap
         end = x + sum(widths[i:j + 1]) + GAP * (j - i)
         span = end - start
-        label = next((t for t in labels.get(cols[i].block, ()) if cell_len(t) + 4 <= span), None)
+        # " label " with at least two dashes on each side, or no label over this block
+        label = next((t for t in labels.get(cols[i].block, ()) if cell_len(t) + 6 <= span), None)
         if label:
             out.append(" " * (start - out.cell_len))
             left = (span - cell_len(label) - 2) // 2
@@ -346,28 +347,29 @@ def _group_line(cols: list[_Col], widths: list[int], lay: _Layout, pal: Palette)
     return out if out.cell_len else None
 
 
-def _legend(cols: list[_Col], data: RosterData, pal: Palette, width: int) -> Text:
+def _legend(cols: list[_Col], pal: Palette, width: int) -> Text:
+    """The abbreviations on screen, in column order. When they do not fit on one line the
+    most familiar ones go first (Proj, then Avg and the windows), the trend arrows last."""
     keys = {c.key for c in cols}
-    items = []
+    items: list[tuple[int, str, str]] = []  # (keep priority, key, meaning)
     if "fp_season" in keys:
-        items.append(("Avg", "this season"))
+        items.append((1, "Avg", "this season"))
     windows = [k for k in ("l7", "l15", "l30") if f"fp_{k}" in keys]
     if windows:
-        items.append((" ".join(SPLIT_SHORT[k] for k in windows),
+        items.append((1, " ".join(SPLIT_SHORT[k] for k in windows),
                       f"last {', '.join(k[1:] for k in windows)} days"))
     if "fp_proj" in keys:
-        items.append(("Proj", "ESPN projection"))
+        items.append((0, "Proj", "ESPN projection"))
     if "fp_last" in keys:
-        items.append(("Prev", "last season"))
-    if any("▲" in c.plain or "▼" in c.plain for col in cols for c in col.cells):
-        items.append(("▲▼", "last 7 days well above or below Avg"))
-    if "today" in keys and any(o.startswith("@") for o in data.opponents.values()):
-        items.append(("@", "away"))
+        items.append((2, "Prev", "last season"))
+    if any(c.plain.startswith(("▲", "▼")) for col in cols for c in col.cells):
+        week = "L7" if "fp_l7" in keys else "last 7 days"
+        items.append((4, "▲▼", f"{week} well above or below Avg"))
     if "rost" in keys:
-        items.append(("Rost%", "of ESPN leagues"))
-    while items and legend(pal, *items).cell_len > width:
-        items.pop()
-    return legend(pal, *items)
+        items.append((3, "Rost% +/-", "of ESPN leagues, change in a week"))
+    while items and legend(pal, *[i[1:] for i in items]).cell_len > width:
+        items.remove(min(items))
+    return legend(pal, *[i[1:] for i in items])
 
 
 def _title(me: Team, want: str, sel: str, played: bool, pal: Palette, width: int) -> Text:
@@ -377,7 +379,8 @@ def _title(me: Team, want: str, sel: str, played: bool, pal: Palette, width: int
     if sel == want:
         tries = [(team, LONG[want]), (me.name, LONG[want]), (LONG[want],)]
     else:
-        why = "no games yet" if not played else "no games"
+        why = ("no projections" if want == "proj" else "no stats last season" if want == "last"
+               else "no recent games" if played else "no games yet")
         instead = "projections" if sel == "proj" else LONG[sel].lower()
         note = f"{why}, showing {instead}"
         tries = [(team, LONG[want], note), (team, note), (team, why), (me.name, why), (why,)]
@@ -394,9 +397,13 @@ def draw(data: RosterData, pal: Palette, width: int = 120, view: int = 0) -> Ren
     sections = _sections(data.league)
     rows = [r for sec in sections for r in sec]
     players = [r.player for r in rows if r.player]
+    if not players:  # before the draft
+        return Group(_title(me, want, want, False, pal, width), Text(""),
+                     Text("No players yet.", style=pal.dim))
     has = {k: any(p.split(k) for p in players) for k in SPLITS}
-    # a split nobody has data for (the preseason has only proj and last) shows the projection
-    sel = want if has[want] else next((k for k in ("proj", "last", *SPLITS) if has[k]), want)
+    # a split nobody has data for shows the closest one that has some: in the preseason
+    # (only proj and last exist) that is the projection
+    sel = want if has[want] else next((k for k in ("season", "proj", "last") if has[k]), want)
     base = "season" if has["season"] else "last"
     hidden = {f"fp_{k}" for k in SPLITS if not has[k] and k != sel}
     if not data.in_season:
@@ -410,7 +417,7 @@ def draw(data: RosterData, pal: Palette, width: int = 120, view: int = 0) -> Ren
     t = RosterTable(box=BOX, show_edge=False, padding=(0, 1, 0, 0), pad_edge=False,
                     header_style=f"bold {pal.dim}", border_style=pal.border, expand=False,
                     above=head,
-                    below=[Text(""), _legend(cols, data, pal, min(width, max(30, _total(widths))))])
+                    below=[Text(""), _legend(cols, pal, min(width, max(30, _total(widths))))])
     for c, w in zip(cols, widths, strict=True):
         t.add_column(c.header, justify=c.justify, header_style=c.header_style, width=w,
                      no_wrap=True, overflow="ellipsis")
