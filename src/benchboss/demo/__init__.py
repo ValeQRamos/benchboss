@@ -239,7 +239,23 @@ class DemoSession(Session):
         return SeasonCalendar.from_raw(self.data["schedule"])
 
     def roster_on(self, period: int):
-        return self.league().me.roster
+        """The demo's lineup on a day. Days already played get the lineup a manager who set
+        it every morning would have had (whoever had a game played), so the week shows a few
+        bench games rather than one lineup copied to every day. Today and later carry today's
+        lineup, as ESPN does when nothing is saved for a day."""
+        from benchboss.core.lineup import best_lineup, day_value
+        from benchboss.espn.constants import BENCH, IR
+        from benchboss.espn.models import RosterSpot
+
+        lg = self.league()
+        roster = lg.me.roster
+        if period >= self.today_period:
+            return roster
+        pool = [s for s in roster if s.slot_id != IR]
+        values = [day_value(s.player, period, self.calendar) for s in pool]
+        assign = best_lineup(pool, lg.slot_counts, values)
+        return ([RosterSpot(s.player, assign.get(i, BENCH)) for i, s in enumerate(pool)]
+                + [s for s in roster if s.slot_id == IR])
 
     def news(self, player_ids, days=5):
         """RotoWire-style items for 4 roster players and 2 watch-list players, newest first,

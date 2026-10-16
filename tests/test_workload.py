@@ -121,7 +121,8 @@ def test_team_codes_line_up_in_a_column_with_bench_games(session):
     starters, bench, _ = by_lineup(data.acts)
     day, starter, benched = next((i, s, b) for i in range(len(data.periods))
                                  for s in starters for b in bench
-                                 if s.schedule[i] and b.schedule[i])
+                                 if s.schedule[i] and b.schedule[i]
+                                 and s.starting(i) and not b.starting(i))
     out = text_of(workload.draw(data, DARK, 140))
     s_row, b_row = (player_lines(out, [a.player.name])[0] for a in (starter, benched))
     code = starter.schedule[day][-3:]  # "vs MIL" or "@ MIL" -> MIL
@@ -275,7 +276,8 @@ def test_json_shape(session):
     no_game = next(d for d in first["days"] if not d["opponent"])
     assert no_game["opponent"] == ""
     bench = next(r for r in rows if r["slot"] == "BE")
-    assert bench["games_in_lineup"] == 0 and bench["days"][0]["starting"] is False
+    # on the bench from today on; Monday (already played) he started, as the demo lineup had it
+    assert bench["games_in_lineup"] < bench["games"] and bench["days"][-1]["starting"] is False
     json.dumps(rows)
 
 
