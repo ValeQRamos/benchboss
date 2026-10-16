@@ -217,3 +217,11 @@ def alerts(session, include_chat: bool = True) -> list[Alert]:
                 out.append(Alert("dm", f"{unread} unread message{'s' * (unread > 1)} from {who}",
                                  urgent=True))
     return out
+
+
+def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, object]]:
+    """New news items ("spins") on your watch-list players: [(player name, NewsItem)].
+
+    Placeholder until the 1.0.2 spin alerts land: nothing yet.
+    """
+    return []

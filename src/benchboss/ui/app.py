@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from rich.console import Group, RenderableType
 from rich.text import Text
@@ -18,6 +19,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.theme import Theme
+from textual.widget import Widget
 from textual.widgets import Button, Footer, OptionList, Static
 from textual.widgets.option_list import Option
 from textual.worker import get_current_worker
@@ -26,6 +28,7 @@ from benchboss import __version__
 from benchboss import config as config_mod
 from benchboss.errors import BenchbossError
 from benchboss.ui import dashboard, views
+from benchboss.ui.screens import SCREENS
 from benchboss.ui.theme import DARK, LIGHT, Palette, palette
 
 THEMES = {
@@ -45,10 +48,12 @@ MENU = [
     ("week", "Optimize week", "w"),
     ("activity", "Workload", "a"),
     ("trash", "Best trash", "f"),
+    ("players", "Player finder", "p"),
     ("news", "Player news", "n"),
     ("trades", "Trade finder", "x"),
     ("inbox", "Inbox", "i"),
     ("standings", "Standings", "s"),
+    ("playoffs", "Playoff race", "y"),
     ("roster", "Roster", "o"),
 ]
 PLANS = ("today", "week")  # the screens that can send moves to ESPN
@@ -58,6 +63,13 @@ NARROW = 110  # below this many columns the menu hides itself (m shows it again)
 # Draws a screen from data already loaded: (palette, width) -> renderable. Kept so a resize
 # or a theme change can draw the screen again without asking ESPN.
 Draw = Callable[[Palette, int], RenderableType]
+SPIN_CHECK = 300  # seconds between checks for new spins on watch-list players
+
+
+@dataclass
+class Mount:
+    """An interactive screen: a Textual widget shown in place of the static drawing."""
+    make: Callable[[], Widget]
 
 
 class Benchboss(App):
@@ -71,6 +83,9 @@ class Benchboss(App):
     #menu.hidden { display: none; }
     #menu > .option-list--option { padding: 0 2; }
     #content { padding: 1 2; }
+    #content.hidden { display: none; }
+    #panel { width: 1fr; height: 1fr; padding: 1 2; display: none; }
+    #panel.visible { display: block; }
     #body { width: 1fr; }
     #actions { height: auto; margin-top: 1; display: none; }
     #actions.visible { display: block; }
@@ -80,6 +95,7 @@ class Benchboss(App):
     BINDINGS = [Binding(key, f"show('{sid}')", label, show=sid in ("dash", "today", "week", "trash"))
                 for sid, label, key in MENU] + [
         Binding("g", "show('ainews')", "AI news", show=False),
+        Binding("v", "cycle_view", "Next view", show=False),
         Binding("m", "toggle_menu", "Menu"),
         Binding("r", "reload", "Refresh"),
         Binding("ctrl+t", "toggle_theme", "Light/Dark"),
@@ -96,6 +112,7 @@ class Benchboss(App):
         self.pending: dict | None = None  # the plan on screen that Apply would send
         self._last: tuple[str, Draw] | None = None  # (screen, draw) of what is on screen
         self._narrow: bool | None = None
+        self.views: dict[str, int] = {}  # screen id -> index into its module's VIEWS
 
     # --- layout --------------------------------------------------------------------------------
 
@@ -109,6 +126,7 @@ class Benchboss(App):
                 with Horizontal(id="actions"):
                     yield Button("Apply", id="apply", variant="primary")
                     yield Button("Cancel", id="cancel")
+            yield Vertical(id="panel")
         yield Static(id="status")
         yield Footer()
 
@@ -120,6 +138,8 @@ class Benchboss(App):
         self._top()
         self.action_show("dash")
         self.set_interval(60, self._auto_refresh)
+        self.set_timer(20, self.check_spins)
+        self.set_interval(SPIN_CHECK, self.check_spins)
 
     @property
     def pal(self):
@@ -151,8 +171,29 @@ class Benchboss(App):
         self.query_one("#status", Static).update(Text(text, style=self.pal.dim))
 
     def _show(self, renderable: RenderableType, actions: bool = False) -> None:
+        self._unmount_panel()
         self.query_one("#body", Static).update(renderable)
         self._set_actions(actions)
+
+    def _mount_panel(self, mount: Mount) -> None:
+        """Show an interactive screen: its widget replaces the static drawing."""
+        self._set_actions(False)
+        panel = self.query_one("#panel")
+        panel.remove_children()
+        widget = mount.make()
+        panel.mount(widget)
+        panel.add_class("visible")
+        self.query_one("#content").add_class("hidden")
+        self.call_after_refresh(widget.focus)
+
+    def _unmount_panel(self) -> None:
+        panel = self.query_one("#panel")
+        if panel.has_class("visible"):
+            panel.remove_class("visible")
+            panel.remove_children()
+            self.query_one("#content").remove_class("hidden")
+            if self.focused is None:
+                self._focus_home()
 
     def _set_actions(self, visible: bool) -> None:
         self.query_one("#actions").set_class(visible, "visible")
@@ -163,12 +204,23 @@ class Benchboss(App):
 
     def _focus_home(self) -> None:
         menu = self.query_one("#menu", OptionList)
-        (self.query_one("#content") if menu.has_class("hidden") else menu).focus()
+        if not menu.has_class("hidden"):
+            menu.focus()
+        elif self.query_one("#panel").has_class("visible"):
+            self.query_one("#panel").focus()
+        else:
+            self.query_one("#content").focus()
 
-    def _present(self, draw: Draw, pending: dict | None = None) -> None:
+    def _present(self, draw: Draw | Mount, pending: dict | None = None) -> None:
         """Draw a screen on the UI thread. A plan that can be applied gets the Apply button and
         is never drawn again in place (a theme change rebuilds it); anything else is kept so a
-        resize or a theme change can draw it again from the same data."""
+        resize or a theme change can draw it again from the same data. An interactive screen
+        (Mount) gets its widget mounted instead."""
+        if isinstance(draw, Mount):
+            self._last = None
+            self.pending = None
+            self._mount_panel(draw)
+            return
         self._last = None if pending else (self.current, draw)
         self._show(draw(self.pal, self._width()), actions=bool(pending))
         self.pending = pending
@@ -184,7 +236,7 @@ class Benchboss(App):
         if visible:
             menu.focus()
         elif self.focused is None or self.focused is menu:  # a hidden menu must not keep the keys
-            self.query_one("#content").focus()
+            self._focus_home()
 
     def _fit_menu(self) -> None:
         """Hide the menu on a narrow window so the tables keep their columns; m shows it."""
@@ -211,6 +263,25 @@ class Benchboss(App):
         self._show(Text("Loading...", style=self.pal.dim))
         self._status("talking to ESPN..." if not self.demo else "demo data")
         self.load(sid)
+
+    def action_cycle_view(self) -> None:
+        """v: the next view of the current screen (Season, Last 7... on the roster)."""
+        module = SCREENS.get(self.current)
+        views_ = getattr(module, "VIEWS", ()) if module else ()
+        if not views_ or self._last is None or self._last[0] != self.current:
+            return
+        i = (self.views.get(self.current, 0) + 1) % len(views_)
+        self.views[self.current] = i
+        self._rerender()
+        self._status_views()
+
+    def _status_views(self) -> None:
+        module = SCREENS.get(self.current)
+        views_ = getattr(module, "VIEWS", ()) if module else ()
+        if views_:
+            i = self.views.get(self.current, 0) % len(views_)
+            nxt = views_[(i + 1) % len(views_)][1]
+            self._status(f"{views_[i][1]} · v for {nxt} · r refresh · ctrl+t light/dark · q quit")
 
     def action_toggle_menu(self) -> None:
         self._set_menu(self.query_one("#menu").has_class("hidden"))
@@ -270,7 +341,7 @@ class Benchboss(App):
             return  # the user already moved to another screen
         self.call_from_thread(self._finish, sid, draw, pending)
 
-    def _finish(self, sid: str, draw: Draw, pending: dict | None) -> None:
+    def _finish(self, sid: str, draw: Draw | Mount, pending: dict | None) -> None:
         """Runs on the UI thread: only the screen the user is looking at gets drawn, and only
         the plan that is drawn can be applied."""
         if self.current != sid:
@@ -279,6 +350,26 @@ class Benchboss(App):
         self._present(draw, pending)
         self._status("demo data · nothing is sent to ESPN" if self.demo
                      else "r refresh · ctrl+t light/dark · q quit")
+        self._status_views()
+
+    # --- watch list spins -------------------------------------------------------------------------
+
+    def check_spins(self) -> None:
+        if self._session is not None or self.demo:
+            self._check_spins()
+
+    @work(thread=True, exclusive=True, group="spins")
+    def _check_spins(self) -> None:
+        """Toast every new spin on a watch-list player (each one once, see inbox.watch_spins)."""
+        from benchboss import inbox
+
+        try:
+            items = inbox.watch_spins(self.session, mark_seen=True)
+        except Exception:  # a background check never bothers the user with errors
+            return
+        for who, item in items[:5]:
+            text = f"{who}: {item.headline}"
+            self.call_from_thread(self.notify, text, title="Watch list news", timeout=12)
 
     @staticmethod
     def _error(e) -> Draw:
@@ -291,21 +382,17 @@ class Benchboss(App):
         """Read what a screen needs (in a worker thread). Returns how to draw it, and the plan
         Apply would send when the screen is a plan with moves to make."""
         s = self.session
+        module = SCREENS.get(sid)
+        if module is not None:
+            data = module.load(s)
+            if hasattr(module, "widget"):
+                return Mount(lambda: module.widget(data, self)), None
+            return (lambda pal, w: module.draw(data, pal, w, self.views.get(sid, 0))), None
         if sid == "dash":
             d = dashboard.collect(s)
             return (lambda pal, w: dashboard.render(d, pal, w, news_hint="n for more")), None
         if sid in PLANS:
             return self._build_plan(s, sid)
-        if sid == "activity":
-            acts, periods, cal = s.activity(), s.matchup_periods(), s.calendar
-            day = cal.period_of(s.today)  # not clamped: outside the season no column is today
-            return (lambda pal, w: views.activity(acts, cal, periods, day, pal)), None
-        if sid == "trash":
-            picks, cal = s.trash(n=12), s.calendar
-            return (lambda pal, w: Group(
-                views.trash(picks, cal, pal, w),
-                Text("\nGrab one from a terminal: benchboss add \"Player\" --drop \"Player\"",
-                     style=pal.dim))), None
         if sid in ("news", "ainews"):
             from benchboss import news as news_mod
 
@@ -343,15 +430,6 @@ class Benchboss(App):
 
             items = inbox.alerts(s)
             return (lambda pal, w: views.alerts(items, pal)), None
-        if sid == "standings":
-            lg = s.league()
-            return (lambda pal, w: views.standings(lg, pal)), None
-        if sid == "roster":
-            lg, cal = s.league(), s.calendar
-            day = cal.period_of(s.today)
-            in_season = 1 <= day <= cal.final_period  # before or after it, nobody plays today
-            today = {x.player.id for x in lg.me.roster if in_season and cal.plays(x.player.pro_team_id, day)}
-            return (lambda pal, w: views.roster(lg, pal, today)), None
         raise BenchbossError(f"unknown screen {sid}")
 
     def _build_plan(self, s, sid: str) -> tuple[Draw, dict | None]:
