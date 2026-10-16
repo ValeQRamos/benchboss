@@ -102,8 +102,11 @@ def main(league_path, schedule_path, fa_path, trending_path):
     order = sorted(id_map.values())
     schedule_games = []
     for w in range(1, 21):
-        rot = order[:1] + order[1:][w - 1:] + order[1:][:w - 1]
+        r = (w - 1) % (len(order) - 1)  # a round robin repeats after n - 1 weeks
+        rot = order[:1] + order[1:][r:] + order[1:][:r]
         pairs = [(rot[i], rot[-1 - i]) for i in range(len(rot) // 2)]
+        if (w - 1) // (len(order) - 1) % 2:
+            pairs = [(b, a) for a, b in pairs]  # the second time around, swap home and away
         a, b = weeks[w - 1]
         for home, away in pairs:
             sides = {}
