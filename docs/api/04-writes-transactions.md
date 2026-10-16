@@ -35,6 +35,7 @@ Bundles were fetched as data and searched as text; they were never executed.
 | POST | `{WRITES}/teams/{teamId}/recommendations?lineupScoringPeriodId=&recommendationTypeId=LINEUP&restOfWeek=` | ESPN "Quick Lineup" (server sets the optimal lineup) | espn_s2 + SWID | VERIFIED (bundle) |
 | GET | `{READS}/teams/{teamId}/recommendations?recommendationTypeId=LINEUP&view=recommend` | Read ESPN's suggested lineup (no write) | espn_s2 + SWID | VERIFIED (live) |
 | POST | `{WRITES}/teams?scoringPeriodId=0` | LM: set waiver order, transaction counters, team fields | LM cookies | VERIFIED (bundle) |
+| POST | `{WRITES}/teams/{teamId}` with `{"watchList": [playerIds]}` | Replace your watch list (the star next to a player); the same path takes `tradeBlock` and `owners` | espn_s2 + SWID | VERIFIED (bundle) |
 | GET | `{READS}?view=mPendingTransactions` | Pending trades and claims (source of truth for alerts) | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{READS}?view=mTransactions2` (+ `X-Fantasy-Filter: {"transactions":{...}}`) | Transaction log, filterable by type | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{COMM}/communication/?view=kona_league_communication` (+ filter) | Recent Activity topics (`ACTIVITY_TRANSACTIONS`, etc.) | espn_s2 + SWID | VERIFIED (live) |
@@ -706,6 +707,27 @@ How a non-browser client should match ESPN's web client. Rows marked VERIFIED (l
 - Map `details[].type` to friendly messages and show `resolution` when present.
 - Build alerts on `mPendingTransactions` plus `chat_unreads`, as in section 9.5.
 - Treat `teamId`s as opaque (this league uses 1, 2, 3, 6, 10, 11, 13, 14, 15, 16).
+
+---
+
+## 13. Team fields: the watch list
+
+Status: VERIFIED (bundle, `watchPlayer` and `updateTeam` in kona build `449ae61ae2f5-1.520`, `main-c35771d3939c007a8afd.js`, read on 2026-10-16; never executed for this document), except where marked.
+
+**Request.** `POST {WRITES}/teams/{teamId}` with the whole new list, not a delta:
+
+```json
+{"watchList": [4432166, 3149673]}
+```
+
+**What the web app does.** The watch list is the star next to a player. On a click, `watchPlayer` copies `teams[].watchList` from its store, adds or removes the one id, and sends the whole list; when the request fails it puts the old list back. The same `updateTeam` call carries other team fields, one per request: `{"tradeBlock": {"players": {"<playerId>": "ON_THE_BLOCK"}}}` (the whole map) and `{"owners": [...]}` (co-owners).
+
+**Gotchas.**
+- `teams[].watchList` (player ids) comes back in `mTeam` only on the caller's own team; every other team has no `watchList` key. VERIFIED (live, 2026-10-16). Other managers cannot read your list, so the star is private. Read the list fresh before a change: it may have been edited in another client.
+- The web app caps the list at 50 players on its own side (`maxWatchListPlayers: 50`): a 51st add is never sent and shows "The Watch List is capped at {max} players. To add another player to your Watch List, please first remove a player." (`tooManyPlayers`). Whether the server enforces the cap is UNVERIFIED; refuse the 51st add the same way.
+- Response: UNVERIFIED (the web app only checks the status). Use the `watchList` of the answer when it has one, otherwise keep the list you sent.
+
+**How the app should use it.** It is private, instant and undone by the same click, so a client can treat it like the star in ESPN's apps rather than a league move. benchboss toggles it with one key in the player finder and asks first in `benchboss watch add|remove`.
 
 ---
 

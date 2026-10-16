@@ -1,16 +1,19 @@
 {
   // Let Copilot's agent run benchboss read commands and --dry-run previews without asking.
-  // Writes (optimize, add, drop, trade, chat with text) still require your approval.
-  // The false rules always win: anything with --yes or -y, a paid AI briefing (news --ai),
-  // dash --watch (it never exits) and account commands always ask.
+  // Writes (optimize, add, drop, trade, chat with text, watch add/remove) still require your
+  // approval. The false rules always win: anything with --yes or -y, a paid AI briefing
+  // (news --ai), alerts --mark-read (it marks your watch list news as read), dash --watch
+  // (it never exits) and account commands always ask.
   "chat.tools.terminal.autoApprove": {
-    "/^benchboss (status|doctor|dash|matchup|roster|activity|trash|fa|trending|news|trades|alerts|standings)\\b/": true,
+    "/^benchboss (status|doctor|dash|matchup|roster|activity|players|trash|fa|trending|news|trades|alerts|standings|playoffs)\\b/": true,
     "/^benchboss chat( --json| -n \\d+| --to [\\w-]+)*$/": true,
-    "/^benchboss (optimize|add|drop|trade|chat) .*--dry-run(\\s|$)/": true,
+    "/^benchboss watch( list| --json)*$/": true,
+    "/^benchboss (optimize|add|drop|trade|chat|watch) .*--dry-run(\\s|$)/": true,
     "/\\s--y/": false,
     "/\\s-[A-Za-z]*y/": false,
     "/\\s--ai?(\\s|=|$)/": false,
-    "/\\s--w(a(t(ch?)?)?)?(\\s|=|$)/": false,
+    "/\\s--m(a(r(k(-(r(e(ad?)?)?)?)?)?)?)?(\\s|=|$)/": false,
+    "/^benchboss dash\\b.*\\s--w(a(t(ch?)?)?)?(\\s|=|$)/": false,
     "/^benchboss (login|logout|setup)\\b/": false
   },
   "files.exclude": { "**/__pycache__": true, "**/.pytest_cache": true, "**/.ruff_cache": true }

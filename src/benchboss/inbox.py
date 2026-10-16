@@ -251,6 +251,9 @@ SPIN_DAYS = 3                 # how far back watch_spins looks
 FIRST_RUN_HOURS = 24          # on the first check of a league, older news counts as seen
 
 _seen_lock = threading.Lock()  # the app checks in a worker thread while screens read
+# A demo session's seen book, kept in memory for the life of the session: the demo is frozen,
+# so a file would hide its spins for good after one run (and the demo leaves nothing on disk).
+_demo_seen: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 def seen_path() -> Path:
@@ -285,7 +288,8 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
     as (player name, NewsItem).
 
     What you have seen is kept per league in ``seen-news.json`` in the config folder (the
-    newest ``SEEN_KEEP`` ids). The first time a league is checked, news older than
+    newest ``SEEN_KEEP`` ids); a demo session keeps it in memory instead, so every run of the
+    demo shows the same spins. The first time a league is checked, news older than
     ``FIRST_RUN_HOURS`` counts as seen, so a new install is not flooded. ``mark_seen=True``
     records what this call returns (on that first check, the older news too). ESPN errors
     propagate as BenchbossError.
@@ -296,7 +300,7 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
     items = session.news(watched, SPIN_DAYS)
     key = str(session.client.league_id)
     with _seen_lock:
-        book = _read_seen()
+        book = _demo_seen.setdefault(session, {}) if session.demo else _read_seen()
         entry = book.get(key)
         first = not isinstance(entry, list)
         known = [] if first else list(entry)
@@ -310,7 +314,8 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
             # oldest first, so the cap drops the oldest; ids compare as text, kept as given
             record = known + [i.id for i in reversed(new)]
             book[key] = list({str(x): x for x in record}.values())[-SEEN_KEEP:]
-            _write_seen(book)
+            if not session.demo:
+                _write_seen(book)
     if not new:
         return []
     ids = set(watched)

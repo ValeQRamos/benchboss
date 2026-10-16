@@ -6,10 +6,13 @@ are in [AGENTS.md](../AGENTS.md); these rules are the non-negotiable part.
 - When the user asks about their fantasy team, run the `benchboss` CLI in the terminal with
   `--json` and answer from its output. Do not edit source files for those requests.
 - Reads are safe: `dash`, `matchup`, `roster`, `activity`, `trash`, `fa`, `trending`, `news`,
-  `trades`, `alerts`, `standings`, `chat` (without text), `status`.
-- Writes change the real league: `optimize`, `add`, `drop`, `trade`, `chat "text"`. Show the
-  plan first with `--dry-run`, wait for the user's explicit yes in chat, then run the same
-  command with `--yes` and quote the `ESPN: ...` line. One approval covers one action.
+  `players`, `watch` (or `watch list`), `trades`, `alerts`, `standings`, `playoffs`, `chat`
+  (without text), `status`.
+- Writes change the real league or the user's ESPN watch list: `optimize`, `add`, `drop`,
+  `trade`, `chat "text"`, `watch add "Player"`, `watch remove "Player"`. Show the plan first
+  with `--dry-run`, wait for the user's explicit yes in chat, then run the same command with
+  `--yes` and quote the `ESPN: ...` line. One approval covers one action.
+- `alerts --mark-read` marks the user's watch list news as read: run it only when they ask.
 - Never run a write command without `--yes` or `--dry-run`: it waits for keyboard input and
   hangs the agent terminal. For the same reason never run `benchboss` with no command,
   `benchboss app` or `dash --watch` (they are interactive and never exit).

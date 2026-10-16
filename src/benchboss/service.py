@@ -32,6 +32,9 @@ LEAGUE_VIEWS = ("mRoster", "mTeam", "mSettings", "mMatchupScore", "mStatus", "mS
 # The player finder's pools (kona_player_info filterStatus; "watch" is your watch list)
 POOLS = {"fa": ["FREEAGENT", "WAIVERS"], "rostered": ["ONTEAM"], "all": None, "watch": None}
 
+# ESPN's apps never send a 51st watch-list player (maxWatchListPlayers, docs/api/04 §13)
+WATCH_LIST_MAX = 50
+
 
 def eastern() -> dt.tzinfo:
     try:
@@ -219,7 +222,8 @@ class Session:
         """Add a player to your ESPN watch list or take him off; returns the new list.
 
         The list is read fresh first (it may have changed in the ESPN app) and ESPN gets the
-        whole new list, which is how its web app does it.
+        whole new list, which is how its web app does it. Like that app, a 51st player is
+        refused before anything is sent (BenchbossError).
         """
         lg = self.league()
         raw = self.client.league("mTeam")
@@ -228,6 +232,10 @@ class Session:
         if watched == (player_id in ids):
             lg.me.watch_list = tuple(ids)
             return lg.me.watch_list
+        if watched and len(ids) >= WATCH_LIST_MAX:
+            lg.me.watch_list = tuple(ids)
+            raise BenchbossError(f"your watch list is full (ESPN allows {WATCH_LIST_MAX} "
+                                 "players): take someone off first")
         ids = ids + [player_id] if watched else [x for x in ids if x != player_id]
         team = self.client.update_team(lg.my_team_id, {"watchList": ids})
         got = team.get("watchList") if isinstance(team, dict) else None

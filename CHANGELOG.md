@@ -6,7 +6,58 @@ All notable changes to this project are documented here. The format follows
 
 ## [1.0.2] - 2026-10-16
 
-Work in progress.
+Most of this release was asked for in
+[issue #1](https://github.com/ValeQRamos/benchboss/issues/1): positions and the bench on
+Workload, every stat split, a player finder with the ESPN watch list, and the playoff race.
+
+### Added
+
+- **Player finder** (`p` in the app, `benchboss players`): free agents, players on a team,
+  your watch list or everyone, with a position filter, search, sorting, every stat split
+  with its box score, and a card with the player's latest news.
+- **ESPN watch list.** In the player finder, space or `*` stars a player on your ESPN watch
+  list right away, with no Apply step, like the star in the ESPN app: the list is private
+  to you and the same key undoes it. It is the only change benchboss sends to ESPN without
+  asking first; lineups, adds, drops, trades and chat still show the change and ask.
+  `benchboss watch` lists the watch list and `benchboss watch add|remove "Player"` changes
+  it; on the command line that asks first (or takes `--yes`) and supports `--dry-run`. Like
+  ESPN's apps, benchboss refuses a 51st player instead of sending it.
+- **Watch list news alerts.** New news ("spins") on your watch-list players shows in
+  `benchboss alerts`, as a toast in the app (checked every 5 minutes) and with
+  `benchboss news --watch`; `benchboss alerts --mark-read` marks it as read. What you have
+  seen is kept in a new file in the config folder, `seen-news.json` (league ids and news
+  ids only). Demo mode keeps it in memory and writes nothing.
+- **Playoff race** (`y` in the app, `benchboss playoffs`): playoff, seed and division odds
+  from a season simulation that seeds like ESPN (division winners first, then the league's
+  tiebreakers), the games left, and a scenario builder: pick winners with the arrow keys
+  in the app, or with `--pick "Winner>Loser@WEEK"`.
+- **Stat splits** for every player: season, last 7, 15 and 30 days, ESPN's projection and
+  last season, each with its per-game box score.
+- Screens with more than one view switch with `v` in the app and `--view` on the command
+  line (`roster`, `standings`, `activity`, `players`, `playoffs`).
+- ESPN API: reads `mStandings` (ESPN's playoff odds and clinch flags) and your team's
+  `watchList` from `mTeam`; writes the watch list with `POST .../teams/{teamId}`
+  (see [docs/api](docs/api/04-writes-transactions.md)).
+
+### Changed
+
+- **Workload** shows each player's positions and today's slot, groups starters, bench and
+  IR, and marks the games a player spends on your bench, from the lineup ESPN has saved
+  for each day. A footer compares each day's games with your starting spots.
+- **Best trash** is redesigned so it reads at a glance, with a strip of the days left for
+  each pick that marks the day to grab him.
+- **Roster** shows every split side by side and the box score of the selected one.
+- **Standings** add points against, point differential, win percentage, games back,
+  streaks, ESPN's playoff odds, clinch tags and the playoff line, with league, divisions
+  and moves (waiver order and transactions) views.
+- **Dashboard**: a pixel-art basketball replaces the emoji in the header, which also shows
+  your record, place, streak and playoff odds; the news card is bigger and stars news on
+  watch-list players.
+- **Week view** lays out each day's moves, the lineup and why each benched player sits,
+  including the injury discount (day-to-day and questionable players count 75%).
+- **Player news** has a section for your roster and one for your watch list.
+- The demo league has box scores, records, divisions and a watch list, so every new
+  screen works with `--demo`.
 
 ## [1.0.1] - 2026-10-15
 

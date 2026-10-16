@@ -31,16 +31,21 @@ Every read command supports `--json` and prints stable keys, ISO dates and names
 | Games per player this week | `benchboss activity --json` |
 | Best free agents for this week | `benchboss trash --json [-n 10] [POS]` |
 | Free agents by ownership / rising | `benchboss fa --json [POS]`, `benchboss trending --json` |
-| News and spins (last N days) | `benchboss news --json [--days 5] [PLAYER ...]` |
+| Search players, every stat split | `benchboss players --json [--from fa\|rostered\|all\|watch] [--pos C] [NAME]` |
+| The user's ESPN watch list | `benchboss watch --json` |
+| News and spins (last N days) | `benchboss news --json [--days 5] [--watch \| PLAYER ...]` |
 | Trade ideas | `benchboss trades --json [--need C] [--with TEAM]` |
 | Every team's positional balance | `benchboss trades --needs --json` |
-| Trade offers, claims, unread DMs | `benchboss alerts --json` |
+| Trade offers, claims, unread DMs, new watch list news | `benchboss alerts --json` |
 | Standings | `benchboss standings --json` |
+| Playoff odds and what-ifs | `benchboss playoffs --json [--pick "Winner>Loser@WEEK"]` |
 | League chat or a DM (read) | `benchboss chat --json [--to TEAM]` |
 
 Do not run `benchboss` with no command, `benchboss app` or `benchboss dash --watch`: they
 are interactive and never exit. Run `benchboss news --ai` only when the user asks for the AI
-briefing: it calls the Anthropic API with their key and costs money.
+briefing: it calls the Anthropic API with their key and costs money. Run
+`benchboss alerts --mark-read` only when the user asks: it marks their watch list news as
+read, so it stops showing for them too.
 
 ### Writes need the user's explicit yes, every time
 
@@ -60,6 +65,7 @@ Write commands change the real league on ESPN. Protocol:
 | Release a player | `benchboss drop "Player" --yes` |
 | Send a trade offer | `benchboss trade --give "A" --get "B" --msg "text" --yes` |
 | Post in the league chat or a DM | `benchboss chat "text" [--to TEAM] --yes` |
+| Add a player to the watch list or take him off | `benchboss watch add "Player" --yes`, `benchboss watch remove "Player" --yes` |
 
 Never chain several writes from one approval. Never retry a failed write without asking.
 
@@ -100,7 +106,7 @@ Layout:
 | `src/benchboss/service.py` | `Session`: caches league data and exposes every feature |
 | `src/benchboss/actions.py`, `inbox.py`, `news.py` | Writes, chat and alerts, news |
 | `src/benchboss/ui/` | Rich views, the dashboard, the Textual app |
-| `src/benchboss/demo/` | Fictional league dataset and a client that refuses writes |
+| `src/benchboss/demo/` | Fictional league dataset and a client that refuses writes (only the watch list changes, in memory) |
 | `docs/api/` | Reverse-engineered ESPN Fantasy Basketball API reference |
 
 Rules:
@@ -109,5 +115,7 @@ Rules:
 - New ESPN calls go through `espn/client.py`; document new endpoints in `docs/api/`.
 - Every new read command gets a `--json` output and a test in `tests/test_cli.py`.
 - Every write must go through a confirmation (`Ctx.confirm` in the CLI, the Apply button in the app).
+  The one exception is the watch list star in the app's player finder (space): private to the
+  user, instant and undone by the same key, like the star in the ESPN app.
 - Never commit cookies, league ids of private leagues, or real manager names. Tests use the demo league.
 - Writing style for docs and UI text: plain English, no em dashes.

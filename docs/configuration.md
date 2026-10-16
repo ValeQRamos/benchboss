@@ -1,7 +1,9 @@
 # Configuration
 
-benchboss keeps two things on your computer: which league and team to drive (a small JSON
-file) and your ESPN session cookies (your keychain). `benchboss setup` writes both.
+benchboss keeps three things on your computer: which league and team to drive (a small JSON
+file), your ESPN session cookies (your keychain), both written by `benchboss setup`, and which
+news on your watch-list players you have already seen, so each spin alerts you once. It also
+caches the NBA schedule for a day. Demo mode (`--demo`) writes none of these.
 
 ## Files
 
@@ -11,6 +13,7 @@ file) and your ESPN session cookies (your keychain). `benchboss setup` writes bo
 | Cache (NBA schedule, 24 h) | `~/.config/benchboss/cache/` | `%APPDATA%\benchboss\cache\` |
 | Cookies | OS keychain, service `benchboss`, accounts `espn_s2` and `SWID` | Windows Credential Locker, same names |
 | Cookies fallback | `credentials.json` next to the settings, permissions 0600, only when no keychain is available | same |
+| Watch list news you have seen | `seen-news.json` next to the settings: the ids of the newest 500 news items per league id, nothing else | same |
 
 `config.json`:
 

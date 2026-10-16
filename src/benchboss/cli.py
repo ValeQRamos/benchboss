@@ -261,7 +261,17 @@ def cmd_watch(c: Ctx):
         return
     summary = (f"Add {p.name} ({p.pro_team}) to your ESPN watch list" if on
                else f"Take {p.name} ({p.pro_team}) off your ESPN watch list")
-    _write(c, summary, lambda: f"watch list has {len(s.set_watched(p.id, on))} players")
+
+    def send() -> str:
+        if a.demo:
+            # the demo client takes watch-list edits in memory, for the app's star; a command
+            # would report a change that dies with it, so refuse like every other demo write
+            from benchboss.demo import REFUSED
+
+            raise BenchbossError(REFUSED)
+        return f"watch list has {len(s.set_watched(p.id, on))} players"
+
+    _write(c, summary, send)
 
 
 def cmd_playoffs(c: Ctx):
@@ -390,6 +400,8 @@ def cmd_alerts(c: Ctx):
     if mark:  # with nothing at all to show, the "Nothing new" line says it already
         note = (f"Marked {n} watch list item{'s' * (n != 1)} as read." if n else
                 "No new watch list news to mark as read." if items else "")
+        if n and s.demo:  # the frozen demo keeps what was seen in memory (inbox.watch_spins)
+            note += " Demo mode does not save it: the next run shows them again."
     else:
         note = "benchboss alerts --mark-read marks the watch list news as read." if n else ""
     c.emit(Group(views.alerts(items, c.pal), *([Text(f"\n{note}", style=c.pal.dim)] if note else [])),
