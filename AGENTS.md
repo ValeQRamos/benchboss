@@ -31,11 +31,16 @@ Every read command supports `--json` and prints stable keys, ISO dates and names
 | Games per player this week | `benchboss activity --json` |
 | Best free agents for this week | `benchboss trash --json [-n 10] [POS]` |
 | Free agents by ownership / rising | `benchboss fa --json [POS]`, `benchboss trending --json` |
+| Find players: free agents, rostered, watch list, everyone | `benchboss players --json [--from fa] [--pos C] [--sort l7] [NAME]` |
+| The user's ESPN watch list | `benchboss watch --json` |
 | News and spins (last N days) | `benchboss news --json [--days 5] [PLAYER ...]` |
+| News on the watch list | `benchboss news --json --watch` |
 | Trade ideas | `benchboss trades --json [--need C] [--with TEAM]` |
 | Every team's positional balance | `benchboss trades --needs --json` |
-| Trade offers, claims, unread DMs | `benchboss alerts --json` |
+| Trade offers, claims, unread DMs, new watch-list news | `benchboss alerts --json` |
+| Mark that watch-list news as read (a file on this computer; nothing goes to ESPN) | `benchboss alerts --json --mark-read` |
 | Standings | `benchboss standings --json` |
+| Playoff odds, and what-if scenarios | `benchboss playoffs --json [--pick "Winner>Loser@WEEK"]` |
 | League chat or a DM (read) | `benchboss chat --json [--to TEAM]` |
 
 Do not run `benchboss` with no command, `benchboss app` or `benchboss dash --watch`: they
@@ -60,6 +65,7 @@ Write commands change the real league on ESPN. Protocol:
 | Release a player | `benchboss drop "Player" --yes` |
 | Send a trade offer | `benchboss trade --give "A" --get "B" --msg "text" --yes` |
 | Post in the league chat or a DM | `benchboss chat "text" [--to TEAM] --yes` |
+| Add a player to the ESPN watch list, or take him off | `benchboss watch add "Player" --yes`, `benchboss watch remove "Player" --yes` |
 
 Never chain several writes from one approval. Never retry a failed write without asking.
 
@@ -109,5 +115,8 @@ Rules:
 - New ESPN calls go through `espn/client.py`; document new endpoints in `docs/api/`.
 - Every new read command gets a `--json` output and a test in `tests/test_cli.py`.
 - Every write must go through a confirmation (`Ctx.confirm` in the CLI, the Apply button in the app).
+  The one exception is the watch-list star (space in the app's Player finder): the watch list
+  is private and the same key undoes the change, like the star in the ESPN app. Do not add
+  another.
 - Never commit cookies, league ids of private leagues, or real manager names. Tests use the demo league.
 - Writing style for docs and UI text: plain English, no em dashes.

@@ -137,9 +137,11 @@ Inside the app every screen has a single key:
 | `t` | Optimize today | `x` | Trade finder |
 | `w` | Optimize week | `i` | Inbox |
 | `a` | Workload | `s` | Standings |
-| `f` | Best trash | `o` | Roster |
-| `r` | Refresh | `ctrl+t` | Light or dark |
-| `m` | Show or hide the menu (it hides itself below 110 columns) | `q` | Quit |
+| `f` | Best trash | `y` | Playoff race |
+| `p` | Player finder | `o` | Roster |
+| `v` | Next view of the screen | `r` | Refresh |
+| `ctrl+t` | Light or dark | `q` | Quit |
+| `m` | Show or hide the menu (it hides itself below 110 columns) | | |
 
 ## Using it from VS Code
 
@@ -178,10 +180,13 @@ Run `benchboss --help` or `benchboss <command> --help` for every flag. Read comm
 | `benchboss optimize [today\|tomorrow\|week\|11-04]` | Best lineup for a day or the rest of the week (`--dry-run` to only look) |
 | `benchboss trash [POS] [-n N]` | Most valuable free agents for this week |
 | `benchboss fa [POS]` · `benchboss trending` | Free agents by % rostered, or rising the fastest |
-| `benchboss news [PLAYER ...] [--days 5] [--ai]` | News and spins for your roster or named players |
+| `benchboss players [NAME] [--from fa\|rostered\|watch\|all] [--pos C]` | Player finder with every stat split |
+| `benchboss watch [list\|add\|remove] [PLAYER]` | Your ESPN watch list: show it, or add or remove a player |
+| `benchboss news [PLAYER ...] [--watch] [--days 5] [--ai]` | News and spins for your roster, your watch list or named players |
 | `benchboss trades [--need C] [--with TEAM] [--needs]` | Trade ideas, or every team's positional balance |
-| `benchboss alerts` | Trade offers, accepted trades, pending claims, unread DMs |
-| `benchboss standings` | League table |
+| `benchboss alerts [--mark-read]` | Trade offers, accepted trades, pending claims, unread DMs, new watch-list news |
+| `benchboss standings [--view divisions]` | League table, divisions, every team's moves |
+| `benchboss playoffs [--pick "Winner>Loser"]` | Playoff odds, and what-if scenarios |
 | `benchboss add PLAYER [--drop PLAYER]` · `drop` | Sign a free agent or put in a claim; release a player |
 | `benchboss trade --give A --get B [--msg TEXT]` | Send a trade offer |
 | `benchboss chat [TEXT] [--to TEAM]` | Read or post in the league chat or a DM |
@@ -229,6 +234,8 @@ More in [docs/configuration.md](docs/configuration.md).
   prints them, logs them or puts them in `--json` output.
 - Nothing changes in your league without a confirmation: every write shows the exact moves and
   asks first. `--dry-run` shows the plan and sends nothing. Demo mode cannot write at all.
+  The one exception is the watch-list star in the app's Player finder (space): your watch
+  list is private, so it changes at once, and the same key undoes it.
 - Player news comes from ESPN's public feed and needs no cookies. The optional AI briefing sends
   only your players' names, NBA teams and positions to the Anthropic API, and only when you ask for it.
 - benchboss is not affiliated with, endorsed by or supported by ESPN. It uses the same
