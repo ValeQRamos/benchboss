@@ -410,7 +410,7 @@ class Benchboss(App):
             return self._build_plan(s, sid)
         if sid in ("news", "ainews"):
             from benchboss import news as news_mod
-            from benchboss.ui.common import title
+            from benchboss.ui.common import fit_title
             from benchboss.ui.screens import news as news_screen
 
             if sid == "ainews":
@@ -419,7 +419,8 @@ class Benchboss(App):
                 roster = [x.player for x in s.league().me.roster]
                 text = news_mod.ai_digest(roster, 5)
                 return (lambda pal, w: Group(
-                    title("AI briefing", pal, "Claude with web search", "last 5 days"), Text(""),
+                    fit_title("AI briefing", pal, w, ("Claude with web search", "last 5 days"),
+                              ("last 5 days",)), Text(""),
                     Text(text, style=pal.text))), None
             tip = ("Press g for an AI briefing with web search (sends your players' names to the "
                    "Anthropic API)." if news_mod.ai_available() and not self.demo else
@@ -434,8 +435,9 @@ class Benchboss(App):
             ideas = trades_mod.find_trades(lg, limit=8)
             bal = trades_mod.describe_needs(lg)
             return (lambda pal, w: Group(
-                common.title("Trade finder", pal, "fair 1-for-1 deals that fix a position"), Text(""),
-                views.trades(ideas, pal), Text(""), views.needs(bal, lg.me.name, pal),
+                common.fit_title("Trade finder", pal, w, ("fair 1-for-1 deals that fix a position",)),
+                Text(""),
+                views.trades(ideas, pal), Text(""), views.needs(bal, lg.me.name, pal, w),
                 Text("\nSend one from a terminal: benchboss trade --give \"A\" --get \"B\" --msg \"...\"",
                      style=pal.dim))), None
         if sid == "inbox":
@@ -444,8 +446,9 @@ class Benchboss(App):
             items = inbox.alerts(s)
             urgent = sum(1 for a in items if a.urgent)
             note = (f"{urgent} need{'s' * (urgent == 1)} you" if urgent else "") if items else ""
+            about = "trade offers, claims, messages and watch list news"
             return (lambda pal, w: Group(
-                common.title("Inbox", pal, "trade offers, claims, messages and watch list news", note),
+                common.fit_title("Inbox", pal, w, (about, note), (note,)),  # the count stays longest
                 Text(""), views.alerts(items, pal))), None
         raise BenchbossError(f"unknown screen {sid}")
 
@@ -468,14 +471,13 @@ class Benchboss(App):
         title = "Today" if sid == "today" else "Rest of the matchup week"
 
         def draw(pal: Palette, width: int) -> RenderableType:
-            from benchboss.ui.common import day_label
-            from benchboss.ui.common import title as heading
+            from benchboss.ui.common import day_label, fit_title
 
             span = ""
             if plans:
                 first, last = cal.date_of(plans[0].period), cal.date_of(plans[-1].period)
                 span = day_label(first) if first == last else f"{day_label(first)} to {day_label(last)}"
-            head = heading("Optimize", pal, title, span)  # "Optimize · Today · Wed Nov 4"
+            head = fit_title("Optimize", pal, width, (title, span), (title,))  # "Optimize · Today · Wed Nov 4"
             body = views.plan(plans, cal, pal, width)
             if not todo:
                 return Group(head, Text(""), body,

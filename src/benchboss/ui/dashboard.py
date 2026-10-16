@@ -28,7 +28,7 @@ from benchboss.espn.constants import BENCH, IR
 from benchboss.espn.models import League, Player
 from benchboss.inbox import Alert
 from benchboss.ui import logo
-from benchboss.ui.common import day_label, meter, pct, player_cell
+from benchboss.ui.common import day_label, meter, odds_color, pct, player_cell, rost_cell
 from benchboss.ui.theme import Palette
 
 NEWS_DAYS = 3     # how far back the news card looks
@@ -189,11 +189,15 @@ def header(d: Dashboard, pal: Palette, width: int = 120) -> RenderableType:
             break
         line.append_text(piece)
     info.add_row(line, "")
-    if me.playoff_pct is not None:
+    if me.playoff_pct is not None:  # ESPN's number; the Playoff race (y) runs its own
         odds = me.playoff_pct
-        color = pal.good if odds >= 0.6 else pal.warn if odds >= 0.3 else pal.bad
-        info.add_row(Text.assemble((pct(odds), color), (" playoff odds  ", pal.dim),
-                                   meter(odds, 12, pal, color)), "")
+        color = odds_color(odds, pal)
+        line = Text.assemble((pct(odds), color), (" ESPN playoff odds", pal.dim))
+        bar = min(12, room - line.cell_len - 2)
+        if bar >= 4:  # a shorter bar when the line is short of room, none rather than a stub
+            line.append("  ")
+            line.append_text(meter(odds, bar, pal, color))
+        info.add_row(line, "")
     if width < LOGO_MIN:
         return info
     outer = Table.grid(expand=True, padding=(0, 2, 0, 0))
@@ -342,8 +346,8 @@ def trending_card(d: Dashboard, pal: Palette) -> Panel | None:
     t.add_column(no_wrap=True, justify="right")
     for p in d.trending:
         t.add_row(Text.assemble((p.short_name, pal.text), (f" {p.pro_team}", pal.dim)),
-                  Text(f"{p.owned_change:+.1f}%", style=pal.good if p.owned_change >= 0 else pal.bad))
-    return _panel(t, "RISING ON WAIVERS", pal)
+                  rost_cell(p, pal))
+    return _panel(t, "RISING ON WAIVERS", pal, "% rostered, change in a week")
 
 
 def alerts_card(d: Dashboard, pal: Palette) -> Panel | None:

@@ -28,7 +28,15 @@ from textual.worker import get_current_worker
 from benchboss.errors import BenchbossError
 from benchboss.espn.constants import SPLIT_LABEL, SPLIT_SHORT, SPLITS
 from benchboss.espn.models import Player, StatLine
-from benchboss.ui.common import legend, player_cell, table, title
+from benchboss.ui.common import (
+    legend,
+    player_cell,
+    rost_cell,
+    rostered,
+    shooting_pct,
+    table,
+    title,
+)
 from benchboss.ui.theme import DARK, Palette
 
 TITLE = "Player finder"
@@ -40,17 +48,12 @@ POSITIONS = (None, "PG", "SG", "SF", "PF", "C", "G", "F")
 DEFAULT_SPLIT = "proj"
 POOL_SIZE = 150                                 # players fetched per pool in the app
 SEARCH_WIDTH = 28                               # the app's search box (less on a narrow window)
+SEARCH_MIN = 10                                 # ... but never less than this
 NEWS_DAYS = 7
 RECENT = ("l7", "l15", "l30")                   # colored hot or cold against the season
 
 # The selector says "Season"; the column says "Avg" (constants.SPLIT_SHORT).
 SPLIT_PICK = {k: ("Season" if k == "season" else SPLIT_SHORT[k]) for k in SPLIT_KEYS}
-
-
-def _pct3(v: float) -> str:
-    """A shooting percentage the way the box score shows it: .454, 1.000."""
-    s = f"{v:.3f}"
-    return s[1:] if s.startswith("0") else s
 
 
 # Box score columns for the selected split: (key, header, value from a StatLine, format).
@@ -64,8 +67,8 @@ BOX: tuple[tuple[str, str, Callable[[StatLine], float | None], Callable[[float],
     ("blk", "BLK", lambda s: s.blk, lambda v: f"{v:.1f}"),
     ("tpm", "3PM", lambda s: s.tpm, lambda v: f"{v:.1f}"),
     ("to", "TO", lambda s: s.to, lambda v: f"{v:.1f}"),
-    ("fgp", "FG%", lambda s: s.fg_pct, _pct3),
-    ("ftp", "FT%", lambda s: s.ft_pct, _pct3),
+    ("fgp", "FG%", lambda s: s.fg_pct, shooting_pct),
+    ("ftp", "FT%", lambda s: s.ft_pct, shooting_pct),
 )
 BOX_KEYS = tuple(k for k, *_ in BOX)
 _BOX = {k: (head, value, fmt) for k, head, value, fmt in BOX}
@@ -157,27 +160,8 @@ def default_desc(key: str) -> bool:
     return key not in TEXT_COLUMNS
 
 
-def _own(v: float) -> str:
-    """% rostered: no decimals, except below 10 where the decimal still says something."""
-    return f"{v:.0f}" if v >= 9.95 else f"{v:.1f}"
-
-
-def rost_cell(p: Player, pal: Palette) -> Text:
-    """ "46 ▲1.7": % of ESPN leagues that roster him, and the change. Always 8 cells, left
-    justified: a right-justified cell drops trailing blanks, which would push a number with
-    no change under the arrows of the others."""
-    out = Text(_own(p.owned).rjust(3), style=pal.text, justify="left")
-    ch = p.owned_change
-    if abs(ch) >= 0.05:
-        mag = f"{abs(ch):.1f}" if abs(ch) < 9.95 else f"{abs(ch):.0f}"
-        out.append(f" {'▲' if ch > 0 else '▼'}{mag}".rjust(5), style=pal.good if ch > 0 else pal.bad)
-    else:
-        out.append(" " * 5)
-    return out
-
-
 def start_cell(p: Player, pal: Palette) -> Text:
-    return Text(_own(p.started), style=pal.dim, justify="right")
+    return Text(rostered(p.started), style=pal.dim, justify="right")
 
 
 def owner_cell(p: Player, data: FinderData, pal: Palette) -> Text:
@@ -434,13 +418,13 @@ def detail(p: Player, data: FinderData, split: str, watched: bool, pal: Palette,
                  (pal.bad if p.injury in ("OUT", "SUSP", "IR") else pal.warn))
     facts.append("  ·  ", style=pal.border)
     facts.append("Rostered ", style=pal.dim)
-    facts.append(f"{_own(p.owned)}%", style=pal.text)
+    facts.append(f"{rostered(p.owned)}%", style=pal.text)
     if abs(p.owned_change) >= 0.05:
         up = p.owned_change > 0
         facts.append(f" {'▲' if up else '▼'}{abs(p.owned_change):.1f}", style=pal.good if up else pal.bad)
     facts.append("  ·  ", style=pal.border)
     facts.append("Started ", style=pal.dim)
-    facts.append(f"{_own(p.started)}%", style=pal.text)
+    facts.append(f"{rostered(p.started)}%", style=pal.text)
     if p.adp:
         facts.append("  ·  ", style=pal.border)
         facts.append("ADP ", style=pal.dim)
@@ -688,8 +672,8 @@ class FinderView(Vertical):
             "Loading..." if self.loading else ""))
         tabs, regions = self._tabs(pal, width)
         self.query_one("#finder-tabs", _Bar).show(tabs, regions)
-        self.query_one("#finder-search", Input).styles.width = max(10, min(SEARCH_WIDTH,
-                                                                           width - tabs.cell_len))
+        self.query_one("#finder-search", Input).styles.width = max(SEARCH_MIN, min(SEARCH_WIDTH,
+                                                                                   width - tabs.cell_len))
         self.query_one("#finder-filters", _Bar).show(*self._filters(pal, width))
         self._render_hint()
 
@@ -699,9 +683,11 @@ class FinderView(Vertical):
 
     def _tabs(self, pal: Palette, width: int) -> tuple[Text, list[Region]]:
         """ "1 Free agents  2 On a team  3 Watch list  4 Everyone", the current one a pill;
-        short names when the long ones and the search box do not fit."""
+        short names when the long ones and the search box do not fit, and only the digits of
+        the other pools when the short names and the smallest search box do not either."""
         short = {"fa": "FA", "rostered": "Teams", "watch": "Watch", "all": "All"}
-        for names in (SOURCES, short):
+        digits = {k: v if k == self.source else "" for k, v in short.items()}
+        for names, search in ((SOURCES, SEARCH_WIDTH), (short, SEARCH_MIN), (digits, 0)):
             out, regions = Text(), []
             for i, key in enumerate(TABS):
                 start = out.cell_len
@@ -710,10 +696,10 @@ class FinderView(Vertical):
                                style=f"bold {_ON_ACCENT.get(pal.name, '#ffffff')} on {pal.accent}")
                 else:
                     out.append(f" {i + 1}", style=f"bold {pal.dim}")
-                    out.append(f" {names[key]} ", style=pal.text)
+                    out.append(f" {names[key]} " if names[key] else " ", style=pal.text)
                 regions.append((0, start, out.cell_len, "pool", key))
                 out.append(" ")
-            if out.cell_len + SEARCH_WIDTH <= width:
+            if out.cell_len + search <= width:
                 break
         return out, regions
 

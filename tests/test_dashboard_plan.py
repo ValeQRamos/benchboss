@@ -179,7 +179,7 @@ def test_watch_list_news_gets_a_dim_star(busy):
 def test_header_has_logo_odds_and_clock(busy):
     d = dashboard.collect(busy)
     wide = text_of(dashboard.header(d, DARK, 120), 120)
-    assert "64% playoff odds" in wide and "3:30 pm" in wide and "2nd of 10" in wide
+    assert "64% ESPN playoff odds" in wide and "3:30 pm" in wide and "2nd of 10" in wide
     assert logo.ball(DARK).plain.split("\n")[0] in wide
     narrow = text_of(dashboard.header(d, DARK, 46), 46)
     assert "▄██" not in narrow and "MONSTARS" in narrow and fits(narrow, 46)

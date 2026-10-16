@@ -287,12 +287,14 @@ class Session:
         done = sum(1 for p in current if p < today) if self.in_season else 0
         progress = done / len(current) if current else 0.0
         ahead = [p for p in range(today, today + 14) if p <= cal.final_period]
-        daily = {}
+        left = [p for p in current if p >= today]   # what the matchup card projects
+        daily, live_left = {}, {}
         for tid, team in lg.teams.items():
             pts, _ = week_projection(team, ahead, cal, lg.starter_slots)
             daily[tid] = pts / len(ahead) if ahead else 0.0
+            live_left[tid] = week_projection(team, left, cal, lg.starter_slots, today, self.now)[0]
         return playoffs.race(lg, picks or {}, sims=sims, daily=daily, days_by_week=days,
-                             week_progress=progress)
+                             week_progress=progress, live_left=live_left)
 
     # --- features ------------------------------------------------------------------------------
 

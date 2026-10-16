@@ -9,8 +9,9 @@ head-to-head record, points for, division record, points against and finally a c
 drawn around what it is expected to score that week: its points per day so far, blended
 with what its roster projects, times the days in that week, with a spread of about 12%
 (typical for weekly fantasy scores). A week that is in progress keeps the live score and
-only simulates the days left. Results you pick (``picks``: matchup id -> winning team id)
-are fixed in every simulation; that is how the scenarios work.
+only simulates the days left, around what each roster projects for its own games left that
+week (the projected final of the matchup card). Results you pick (``picks``: matchup id ->
+winning team id) are fixed in every simulation; that is how the scenarios work.
 
 "Clinched" and "eliminated" are certain, not simulated: clinched means no combination of
 the results not yet picked can keep the team out, eliminated means none can get it in. Both
@@ -198,7 +199,8 @@ def projected_daily(team: Team) -> float:
 
 def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, *,
          daily: dict[int, float] | None = None, days_by_week: dict[int, int] | None = None,
-         week_progress: float = 0.0, seed: int | None = 0) -> Race:
+         week_progress: float = 0.0, live_left: dict[int, float] | None = None,
+         seed: int | None = 0) -> Race:
     """Simulate the rest of the regular season.
 
     ``daily``: expected points per day for each team id over the next days, from its roster,
@@ -206,6 +208,11 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
     week and the next; later weeks use the roster's healthy projection, because a player out
     today is not out all season. ``days_by_week``: days in each matchup week (7 when missing);
     ``week_progress``: the share of the current week already played (0..1).
+    ``live_left``: points each team id is expected to add in the week in progress, from its
+    roster and its games left that week (core.projection.week_projection over the days left,
+    as the matchup card projects them). A games-left gap decides a week, and a rate per day
+    averaged over other days hides it; without ``live_left`` the week in progress uses the
+    same rate as the next one.
 
     Each simulated season also moves every team's level a little (TEAM_SPREAD) for all the
     weeks ahead: trades, injuries and waiver luck make a team better or worse for a stretch,
@@ -268,8 +275,12 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
             mh = rate[g.home] * days.get(g.week, 7) * level[g.home]
             ma = rate[g.away] * days.get(g.week, 7) * level[g.away]
             left = 1 - progress if g.live else 1.0
-            hp = g.home_points + rng.gauss(mh * left, mh * SPREAD * left ** 0.5)
-            ap = g.away_points + rng.gauss(ma * left, ma * SPREAD * left ** 0.5)
+            eh, ea = mh * left, ma * left
+            if g.live and live_left:   # the days left on each roster's own schedule
+                eh = live_left[g.home] * level[g.home] if g.home in live_left else eh
+                ea = live_left[g.away] * level[g.away] if g.away in live_left else ea
+            hp = g.home_points + rng.gauss(eh, mh * SPREAD * left ** 0.5)
+            ap = g.away_points + rng.gauss(ea, ma * SPREAD * left ** 0.5)
             if g.picked and (g.winner == g.home) != (hp > ap):
                 hp, ap = ap, hp  # keep the points in line with the result you picked
             win = g.winner if g.picked else (g.home if hp > ap else g.away if ap > hp else 0)

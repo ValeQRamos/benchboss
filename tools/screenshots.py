@@ -67,7 +67,8 @@ def to_png(svg: Path) -> None:
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     asyncio.run(app_shots("dark", [("", "dashboard"), ("w", "optimize-week"), ("apply", "optimize-done"),
-                                   ("f", "trash"), ("x", "trades"), ("a", "workload"), ("n", "news")]))
+                                   ("f", "trash"), ("x", "trades"), ("a", "workload"), ("n", "news"),
+                                   ("p", "finder"), ("y", "playoffs")]))
     asyncio.run(app_shots("light", [("", "dashboard-light")]))
     side_panel()
     for svg in OUT.glob("*.svg"):

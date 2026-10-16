@@ -29,7 +29,7 @@ from rich.table import Table
 from rich.text import Text
 
 from benchboss.espn.models import League, Team
-from benchboss.ui.common import legend, meter, table, title
+from benchboss.ui.common import legend, meter, odds_color, table, title
 from benchboss.ui.theme import Palette
 
 TITLE = "Standings"
@@ -204,9 +204,7 @@ def _streak_cell(t: Team, pal: Palette) -> Text:
 
 
 def _odds_color(v: float | None, pal: Palette) -> str:
-    if v is None:
-        return pal.dim
-    return pal.good if v >= 0.6 else pal.bad if v < 0.2 else pal.warn
+    return pal.dim if v is None else odds_color(v, pal)
 
 
 def _odds_cell(v: float | None, pal: Palette, bar: bool) -> Text:

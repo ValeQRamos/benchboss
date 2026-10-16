@@ -6,7 +6,47 @@ All notable changes to this project are documented here. The format follows
 
 ## [1.0.2] - 2026-10-16
 
-Work in progress.
+### Added
+
+- **Player finder** (key `p`, `benchboss players`): every player in one table, free agents,
+  players on a team, your watch list or everyone, by position, with every stat split side by
+  side and the box score of the split you pick. Search with `/`, sort by any column with `<`
+  `>` or a click, and open a card with his news with `enter`.
+- **ESPN watch list**: `space` in the Player finder stars a player on your ESPN watch list
+  (the same list as the star in the ESPN app; it is private and takes effect at once).
+  `benchboss watch [list|add|remove]` does the same from a terminal and asks first.
+- **Watch list news**: a spin on a player you watch shows up in the Inbox and pops up in the
+  app; `benchboss news --watch` and the Player news screen have a watch list section.
+- **Playoff race** (key `y`, `benchboss playoffs`): odds to make the playoffs and for each
+  seed, simulated with ESPN's seeding (division winners first, then the league's
+  tiebreakers), who has clinched or is out, and a scenario builder: pick the winners of the
+  games left and watch everyone's odds move (`--pick "Winner>Loser@WEEK"` in the CLI).
+- **Stat splits everywhere**: players carry this season, the last 7, 15 and 30 days, ESPN's
+  projection and last season, each with its per-game box score (`--json` too).
+
+### Changed
+
+- **Roster**: every split side by side, the box score of the split you pick with `v`
+  (`--view` in the CLI), % rostered and its change.
+- **Standings**: points against, point difference, win percentage, streak, ESPN's playoff
+  odds, clinch tags and a line under the last playoff spot. `v` switches to the divisions
+  (games back, odds to win the division) and to the waiver order with each team's adds,
+  drops and trades.
+- **Dashboard**: a pixel-art basketball in the header instead of the emoji, ESPN's playoff
+  odds, a bigger news card with your watch list starred.
+- **Workload**: positions, today's slot, the days a player sits on your bench in the lineup
+  saved on ESPN, and how many games do not fit in your starting spots.
+- **Best trash**: redesigned to read at a glance, with a strip of the games each pick plays
+  for you.
+- **Optimize week**: one block per day with the moves and the lineup, and the injury
+  discount explained (day-to-day players count 75%).
+- Every screen shares one look: one title line that shortens to fit, the same tables and
+  colors, % rostered as "46 ▲1.7" and shooting as ".454" wherever they appear.
+
+### Fixed
+
+- The Trade finder no longer prints "-0" in the positional balance, keeps its messages and
+  team names inside their columns on a narrow terminal, and its titles no longer wrap.
 
 ## [1.0.1] - 2026-10-15
 

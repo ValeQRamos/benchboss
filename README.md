@@ -1,10 +1,12 @@
 <div align="center">
 
-# 🏀 benchboss
+<img src="docs/images/logo.png" alt="benchboss logo: a pixel-art basketball" width="88">
+
+# benchboss
 
 **Run your ESPN Fantasy Basketball team from the terminal.**
 
-Live matchup dashboard · one-key lineup optimizer · waiver scout that does the math · trade finder · player news
+Live matchup dashboard · one-key lineup optimizer · waiver scout that does the math · player finder · playoff race · trade finder · player news
 
 [![CI](https://github.com/ValeQRamos/benchboss/actions/workflows/ci.yml/badge.svg)](https://github.com/ValeQRamos/benchboss/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab)
@@ -49,13 +51,16 @@ uvx --from "benchboss @ https://github.com/ValeQRamos/benchboss/archive/refs/hea
 
 | Feature | What it does |
 |---|---|
-| **Matchup dashboard** | Live score, a projected final for both sides, games left this week, your roster with who plays today, standings, alerts. Works full screen or as a narrow side panel that refreshes itself. |
+| **Matchup dashboard** | Live score, a projected final for both sides, games left this week, your roster with who plays today, standings, ESPN's playoff odds, alerts and the latest news (your watch list starred). Works full screen or as a narrow side panel that refreshes itself. |
+| **Roster** | Every stat split side by side (this season, last 7, 15 and 30 days, ESPN's projection, last season) and the per-game box score of the split you pick with `v`. |
 | **Optimize today / Optimize week** | One key sets the best lineup for today or for every day left in the matchup week. Benches players who rest, are OUT or project less; doubtful and day-to-day players are discounted. Shows the plan, waits for **Apply**, then tells you *"Your week is set"*. |
 | **Workload this week** | Who plays the most and the fewest games this week, with the opponent for every day. In daily leagues, volume wins. |
 | **Best trash** | Ranks free agents ("trash") by the points they would actually add to *your* lineup from the day you grab them to Sunday, after subtracting what your weakest player would have scored. Knows about waivers. |
+| **Player finder** | Every player in one table: free agents, players on a team, your ESPN watch list or everyone, by position, with every stat split and the box score. Search, sort by any column, open a card with his news, and star him on your ESPN watch list with `space`. |
+| **Standings and playoff race** | Standings with points against, games back, streaks, ESPN's playoff odds and clinch tags. The playoff race simulates the rest of the regular season with ESPN's seeding (division winners first, then the tiebreakers) and lets you pick winners to see what each result does to everyone's odds. |
 | **Trade finder** | Profiles every roster by position, finds where you are deep and they are thin (and the other way around), and proposes fair 1-for-1 deals that respect league position limits. Comes with a ready-to-send note. |
-| **Player news** | The latest RotoWire blurbs and their "spin" for your players, plus an optional AI briefing that searches the web. |
-| **Inbox** | Trade offers sent to you, accepted trades waiting to process, pending claims and unread DMs. |
+| **Player news** | The latest RotoWire blurbs and their "spin" for your players and your watch list, plus an optional AI briefing that searches the web. |
+| **Inbox** | Trade offers sent to you, accepted trades waiting to process, pending claims, unread DMs and new spins on your watch list (the app also pops them up as they come). |
 | **Agent ready** | Every read command speaks `--json`; every write has `--dry-run`. The repo ships instructions and skills so GitHub Copilot, Claude Code and other agents can drive it safely. |
 
 <table>
@@ -66,6 +71,10 @@ uvx --from "benchboss @ https://github.com/ValeQRamos/benchboss/archive/refs/hea
 <tr>
 <td width="50%"><img src="docs/images/trades.png" alt="Trade finder: fair deals by positional need"><br><sub><b>Trade finder</b>: fair 1-for-1 deals that fix needs on both sides.</sub></td>
 <td width="50%"><img src="docs/images/workload.png" alt="Workload: games per player, day by day"><br><sub><b>Workload</b>: games per player this week, with opponents.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/finder.png" alt="Player finder: every player with every stat split"><br><sub><b>Player finder</b>: every split, any pool, your watch list one key away.</sub></td>
+<td width="50%"><img src="docs/images/playoffs.png" alt="Playoff race: odds and what-if scenarios"><br><sub><b>Playoff race</b>: simulated odds, and what each pick does to them.</sub></td>
 </tr>
 </table>
 
@@ -138,8 +147,10 @@ Inside the app every screen has a single key:
 | `w` | Optimize week | `i` | Inbox |
 | `a` | Workload | `s` | Standings |
 | `f` | Best trash | `o` | Roster |
-| `r` | Refresh | `ctrl+t` | Light or dark |
-| `m` | Show or hide the menu (it hides itself below 110 columns) | `q` | Quit |
+| `p` | Player finder | `y` | Playoff race |
+| `v` | Next view (the stat split, the standings view) | `r` | Refresh |
+| `m` | Show or hide the menu (it hides itself below 110 columns) | `ctrl+t` | Light or dark |
+| | | `q` | Quit |
 
 ## Using it from VS Code
 
@@ -173,15 +184,18 @@ Run `benchboss --help` or `benchboss <command> --help` for every flag. Read comm
 | `benchboss` | Interactive app (menu + screens) |
 | `benchboss dash [--watch]` | Dashboard once, or live in a side terminal |
 | `benchboss matchup` | Live score, projected final, games left |
-| `benchboss roster` | Roster with slots, injuries, averages, projections, who plays today |
+| `benchboss roster [--view l7]` | Roster with slots, injuries, every stat split, the box score, who plays today |
 | `benchboss activity` | Games per player this matchup week, day by day |
 | `benchboss optimize [today\|tomorrow\|week\|11-04]` | Best lineup for a day or the rest of the week (`--dry-run` to only look) |
 | `benchboss trash [POS] [-n N]` | Most valuable free agents for this week |
 | `benchboss fa [POS]` · `benchboss trending` | Free agents by % rostered, or rising the fastest |
-| `benchboss news [PLAYER ...] [--days 5] [--ai]` | News and spins for your roster or named players |
+| `benchboss players [NAME] [--from fa\|rostered\|watch\|all]` | Player finder: every stat split for any pool of players |
+| `benchboss watch [list\|add\|remove] [PLAYER]` | Your ESPN watch list |
+| `benchboss news [PLAYER ...] [--days 5] [--watch] [--ai]` | News and spins for your roster, your watch list or named players |
 | `benchboss trades [--need C] [--with TEAM] [--needs]` | Trade ideas, or every team's positional balance |
 | `benchboss alerts` | Trade offers, accepted trades, pending claims, unread DMs |
 | `benchboss standings` | League table |
+| `benchboss playoffs [--pick "Winner>Loser@WEEK"]` | Playoff odds, who is in or out, what-if scenarios |
 | `benchboss add PLAYER [--drop PLAYER]` · `drop` | Sign a free agent or put in a claim; release a player |
 | `benchboss trade --give A --get B [--msg TEXT]` | Send a trade offer |
 | `benchboss chat [TEXT] [--to TEAM]` | Read or post in the league chat or a DM |

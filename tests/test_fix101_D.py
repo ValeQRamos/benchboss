@@ -233,7 +233,7 @@ def test_trash_names_the_drop_when_its_column_goes(session):
     assert "Drop" not in narrow.splitlines()[2]
     assert drop.split()[0] in narrow and "the suggested drop" in narrow
     wide = text_of(views.trash(picks, session.calendar, DARK, 120), 120)
-    assert "Drop" in wide and "Own%" in wide
+    assert "Drop" in wide and "Rost%" in wide
 
 
 def test_cli_trash_at_80_columns(capsys, monkeypatch):
