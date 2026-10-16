@@ -256,6 +256,8 @@ def _row(a: Activity, data: WorkloadData, pal: Palette, lay: _Layout) -> list:
     p, ir = a.player, a.on_ir or a.gone
     cells: list = [player_cell(p, pal, short=lay.short, team=lay.team,
                                style=pal.dim if ir else None)]
+    if a.gone and not lay.slot:  # the Slot column that says it is gone is dropped first
+        cells[0].append(f" {GONE}", style=pal.dim)
     if lay.pos:
         cells.append(Text(p.positions, style=pal.dim))
     if lay.slot:

@@ -271,10 +271,14 @@ class Session:
         return {p: self._lineups[p] for p in periods}
 
     def former_players(self, periods: list[int]) -> list[Player]:
-        """Players on your roster on one of these days who are not on it now (dropped or
-        traded away midweek), from the lineups already read (``lineups``)."""
+        """Players on your roster on a day already played who are not on it now (dropped or
+        traded away midweek), from the lineups already read (``lineups``). "Now" is the
+        roster ESPN gave for today and later days as well as the league's, which the app may
+        have read hours ago: a player who just joined is never taken for one who left."""
+        today = self.today_period
         now = {s.player.id for s in self.league().me.roster}
-        seen = dict.fromkeys(pid for p in periods for pid in self._lineups.get(p, {}))
+        now |= {pid for p in periods if p >= today for pid in self._lineups.get(p, {})}
+        seen = dict.fromkeys(pid for p in periods if p < today for pid in self._lineups.get(p, {}))
         return [self._lineup_players[pid] for pid in seen
                 if pid not in now and pid in self._lineup_players]
 

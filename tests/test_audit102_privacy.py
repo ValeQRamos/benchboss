@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-import benchboss
 from benchboss import config as config_mod
 from benchboss import inbox
 from benchboss.cli import build_parser, main

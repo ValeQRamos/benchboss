@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 A small patch on top of 1.0.2: a better ball and the loose ends the 1.0.2 audit left.
 
+### Added
+
+- `activity --json` rows have an `on_roster` key, false for a player who left your roster
+  during the week (see Workload below).
+
 ### Changed
 
 - New pixel ball on the dashboard and in the README. It's bigger (15 by 15 pixels), has a
@@ -15,10 +20,9 @@ A small patch on top of 1.0.2: a better ball and the loose ends the 1.0.2 audit 
   more room next to the team name. The app's top bar shows a round dot in the ball's color,
   since one row of text is too short for a pixel ball.
 - Workload: a player you dropped or traded away this week stays at the bottom, marked
-  `gone`, with the games he played for you, so `In` and the daily counts add up. In
-  `activity --json` every row has a new `on_roster` key.
+  `gone`, with the games he played for you, so `In` and the daily counts add up.
 - Standings shows ESPN's own clinch tags, combined ones included (`yz` is division and bye,
-  `*z` top seed and bye), read from the same field ESPN's site uses.
+  `*z` top seed and bye).
 - The demo league's days already played get the lineup a manager setting it every morning
   would have had, so Workload shows a few bench games instead of one lineup copied to every
   day.

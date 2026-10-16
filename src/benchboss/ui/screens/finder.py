@@ -628,6 +628,7 @@ class FinderView(Vertical):
         if not self._live():
             return
         self.watch(self.app, "theme", self._theme_changed, init=False)
+        self.watch(self.query_one(DataTable), "scroll_x", lambda _: self._fit_width(), init=False)
         if self.query_text:
             self.query_one("#finder-search", Input).value = self.query_text
         if self._restore is not None:
@@ -645,7 +646,10 @@ class FinderView(Vertical):
 
     def on_resize(self) -> None:
         self._render_header()
-        self.call_after_refresh(self._fit_width)
+        if self._live() and self.query(DataTable):
+            # a resize can leave the scroll inside a column: snap it to the next column, refit
+            t = self.query_one(DataTable)
+            self.call_after_refresh(lambda: self._scroll_columns(t.scroll_x, None))
         if self.detail_id is not None:
             self._render_detail()
 
@@ -863,27 +867,28 @@ class FinderView(Vertical):
     def _fit_width(self, scroll_x: float | None = None) -> None:
         """End the table on the last column that fits whole. A column cut off at the right
         edge shows a stray digit or two (the "1" of a "10.2"); with the table one column
-        narrower the cut never shows, and the columns past it are a scroll away."""
+        narrower the cut never shows, and the columns past it are a scroll away. Runs again
+        whenever the table scrolls sideways (keys or mouse) and when the window resizes."""
         if not self._live():
             return
         t = self.query_one(DataTable)
         widths = [c.get_render_width(t) for c in t.ordered_columns]
-        room = self.content_region.width - t.styles.scrollbar_size_vertical
+        bar = t.scrollbar_size_vertical  # 0 while the rows fit and no scrollbar shows
+        room = self.content_region.width - bar
         if not widths or room <= 0:
             return
         scroll_x = t.scroll_x if scroll_x is None else scroll_x
-        used = sum(widths[:t.fixed_columns])
-        j, skipped = t.fixed_columns, 0
-        while j < len(widths) and skipped < scroll_x:  # the columns scrolled out on the left
-            skipped += widths[j]
-            j += 1
-        while j < len(widths) and used + widths[j] <= room:
-            used += widths[j]
-            j += 1
-        if j >= len(widths):  # everything to the right fits: the table takes the whole row
+        fixed = sum(widths[:t.fixed_columns])
+        # the right edge of each scrolling column, measured like scroll_x
+        edges, x = [], 0
+        for w in widths[t.fixed_columns:]:
+            x += w
+            edges.append(x)
+        shown = [e for e in edges if e > scroll_x and fixed + e - scroll_x <= room]
+        if not shown or shown[-1] == edges[-1]:  # all the rest fits: the whole row is the table's
             t.styles.width = None
         else:
-            t.styles.width = used + t.styles.scrollbar_size_vertical
+            t.styles.width = fixed + shown[-1] - round(scroll_x) + bar
 
     def _render_detail(self) -> None:
         p = self._player(self.detail_id)

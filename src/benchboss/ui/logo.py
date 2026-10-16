@@ -1,7 +1,8 @@
 """The benchboss mark: a pixel-art basketball.
 
 Each terminal cell holds two pixels stacked: "▀" paints the top one, "▄" the bottom one and
-a colored background both (a block glyph leaves a hairline between rows in SVG screenshots).
+"█" both, with the background in the same color (a block glyph alone leaves a hairline
+between rows in SVG screenshots).
 When the two pixels of a cell are different parts of the ball, "▀" gets the top color as
 foreground and the bottom color as background. A pixel outside the ball gets no
 color at all, so the terminal's own background shows through on dark and light themes.
@@ -71,8 +72,8 @@ def draw(rows: tuple[str, ...], pal: Palette) -> Text:
             t, b = paint.get(top), paint.get(bottom)
             if t is None and b is None:
                 out.append(" ")
-            elif t == b:  # a background-colored space: no seam between rows in any renderer
-                out.append(" ", Style(bgcolor=t))
+            elif t == b:  # the background too, so no hairline shows between rows in an SVG
+                out.append("█", Style(color=t, bgcolor=t))
             elif b is None:
                 out.append("▀", Style(color=t))
             elif t is None:

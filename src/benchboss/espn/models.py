@@ -400,8 +400,10 @@ def parse_team(t: dict, season: int, members: dict[str, str]) -> Team:
               for e in (t.get("roster") or {}).get("entries") or []]
     moves = t.get("transactionCounter") or {}
     sim = t.get("currentSimulationResults") or {}
-    # ESPN's standings read it from the simulation results; the team-level copy is a fallback
-    clinch = sim.get("playoffClinchType") or t.get("playoffClinchType") or ""
+    # ESPN's standings take the team's own flag and fall back on the simulation's only when
+    # the team has none at all (an "UNKNOWN" there still counts, as in ESPN's bundle)
+    clinch = t.get("playoffClinchType")
+    clinch = (sim.get("playoffClinchType") if clinch is None else clinch) or ""
     return Team(
         id=t["id"], name=team_name(t), abbrev=t.get("abbrev", ""), owner_ids=owners,
         owner_name=members.get(owners[0], "") if owners else "",

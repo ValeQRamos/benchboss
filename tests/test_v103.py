@@ -99,12 +99,19 @@ def test_clinch_tags_are_espns_own(session, flag, tag):
         assert "clinched" not in out and "eliminated" not in out
 
 
-def test_the_clinch_flag_comes_from_the_simulation_results():
+def test_the_clinch_flag_is_the_teams_own_then_the_simulations():
     from benchboss.espn.models import parse_team
 
-    t = {"id": 1, "location": "A", "nickname": "B", "playoffClinchType": "UNKNOWN",
-         "currentSimulationResults": {"playoffClinchType": "DIVISION"}}
-    assert parse_team(t, 2027, {}).clinch == "DIVISION"
+    def team(own, sim):
+        t = {"id": 1, "location": "A", "nickname": "B",
+             "currentSimulationResults": {"playoffClinchType": sim}}
+        if own is not None:
+            t["playoffClinchType"] = own
+        return parse_team(t, 2027, {}).clinch
+
+    assert team("PLAYOFFS", "UNKNOWN") == "PLAYOFFS"
+    assert team(None, "DIVISION") == "DIVISION"
+    assert team("UNKNOWN", "DIVISION") == ""  # ESPN shows nothing here either
 
 
 def test_the_menu_follows_the_window_width_and_m_sticks():
@@ -175,3 +182,41 @@ def test_a_player_dropped_midweek_keeps_the_games_he_played_for_you(session, mon
     rows = workload.to_json(data)
     assert [r["on_roster"] for r in rows].count(False) == 1
     json.dumps(rows)
+
+
+def test_a_player_who_just_joined_is_not_taken_for_one_who_left(session, monkeypatch):
+    from benchboss.espn.models import RosterSpot
+    from benchboss.ui.screens import workload
+
+    session.league()  # the league is read (and cached) before the pickup
+    new = session.free_agents(1)[0]
+    real = type(session).roster_on
+    today = session.today_period
+
+    def roster_on(self, period):  # signed today: on today's and later lineups, not the cache
+        roster = real(self, period)
+        return roster + [RosterSpot(new, BENCH)] if period >= today else roster
+
+    monkeypatch.setattr(type(session), "roster_on", roster_on)
+    data = workload.load(session)
+    assert not any(a.gone for a in data.acts)
+
+
+@pytest.mark.parametrize("width", [60, 84, 150])
+def test_gone_shows_at_every_width(session, monkeypatch, width):
+    from benchboss.espn.models import RosterSpot
+    from benchboss.ui.screens import workload
+
+    gone = next(p for p in session.free_agents(40)
+                if session.calendar.plays(p.pro_team_id, session.matchup_periods()[0]))
+    real = type(session).roster_on
+    first = session.matchup_periods()[0]
+
+    def roster_on(self, period):
+        roster = real(self, period)
+        return roster + [RosterSpot(gone, 0)] if period == first else roster
+
+    monkeypatch.setattr(type(session), "roster_on", roster_on)
+    out = text_of(workload.draw(workload.load(session), DARK, width), width)
+    rows = [x for x in out.splitlines() if "gone" in x and "no longer" not in x]
+    assert len(rows) == 1 and "no longer on your roster" in " ".join(out.split())

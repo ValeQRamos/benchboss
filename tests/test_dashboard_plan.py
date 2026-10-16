@@ -50,7 +50,10 @@ def test_logo_sizes_and_blocks(pal):
     lines = ball.plain.split("\n")
     assert len(lines) == logo.BALL_HEIGHT == 8
     assert {cell_len(x) for x in lines} == {logo.BALL_WIDTH} == {15}
-    assert set(ball.plain) <= {" ", "▀", "▄", "\n"}
+    assert set(ball.plain) <= {" ", "▀", "▄", "█", "\n"}
+    # a full cell is a block with the same background: solid without color, no SVG hairline
+    full = [i for i, ch in enumerate(ball.plain) if ch == "█"]
+    assert full and all(ball.get_style_at_offset(Console(), i).bgcolor is not None for i in full)
     mark = logo.mark(pal)
     assert mark.plain == "●" and pal.accent in str(mark.style)
     assert pal.accent in logo.colors(pal).values()
