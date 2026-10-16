@@ -226,6 +226,9 @@ class DemoSession(Session):
         self.data = data
         me = next(t for t in data["league"]["teams"] if t["id"] == data["my_team_id"])
         self._watched = list(me.get("watchList") or [])  # as shipped, before any edit
+        # the news seen stays in memory: the frozen demo shows the same alerts on every run
+        # and never writes to your config folder
+        self.seen_news = {}
 
     @property
     def demo(self) -> bool:

@@ -414,11 +414,19 @@ def test_the_status_line_follows_every_split_in_season():
 
 # --- tui-7: a toast is not a read ------------------------------------------------------------------
 
-def test_toasts_show_each_spin_once_and_leave_it_unread(session):
+def on_disk():
+    """A demo session that keeps seen and toasted news on disk, like a real league."""
+    s = demo_session()
+    s.seen_news = None
+    return s
+
+
+def test_toasts_show_each_spin_once_and_leave_it_unread():
+    session = on_disk()
     first = inbox.toast_spins(session)
     assert [who for who, _ in first] == ["Egor Demin", "Dereck Lively II"]
     assert inbox.toast_spins(session) == []
-    assert inbox.toast_spins(demo_session()) == []  # remembered on disk
+    assert inbox.toast_spins(on_disk()) == []  # remembered on disk
     assert len(inbox.watch_spins(session)) == 2  # still unread
     assert [a.kind for a in inbox.alerts(session)][-2:] == ["spin", "spin"]
     assert not (config_mod.config_dir() / inbox.SEEN_FILE).exists()
@@ -426,7 +434,8 @@ def test_toasts_show_each_spin_once_and_leave_it_unread(session):
     assert sorted(toasted[str(session.client.league_id)]) == sorted(i.id for _, i in first)
 
 
-def test_news_already_marked_read_is_never_toasted(session):
+def test_news_already_marked_read_is_never_toasted():
+    session = on_disk()
     inbox.watch_spins(session, mark_seen=True)
     assert inbox.toast_spins(session) == []
     assert not (config_mod.config_dir() / inbox.TOASTED_FILE).exists()

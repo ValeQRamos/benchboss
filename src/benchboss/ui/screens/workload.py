@@ -69,11 +69,12 @@ def load(session) -> WorkloadData:
 
 
 def to_json(data: WorkloadData) -> list[dict]:
-    """One row per player, IR included (slot "IR"). The keys ``activity --json`` always had
-    stay as they were (player, team, games, games_left, and schedule as "vs MIL", "@ HOU" or
-    ""); the positions, slots and daily lineups come under new keys."""
+    """Most games first, with the keys ``dash --json`` uses for its activity (player, team,
+    games, games_left, and schedule as "vs MIL" / "@ HOU" / "" per day), as in 1.0.1. On top:
+    positions, today's slot, games in your lineup, and ``days`` with the date, opponent,
+    slot and whether he starts on each day. IR players are included (slot "IR")."""
     out = []
-    for a in _ordered(data.acts, grouped=True):
+    for a in data.acts:
         days = []
         for i, sp in enumerate(data.periods):
             slot = a.slot_on(i)

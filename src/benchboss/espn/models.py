@@ -91,8 +91,9 @@ class StatLine:
         return _pct(self.totals, FTM, FTA, self.avg.get(FT_PCT))
 
     def to_dict(self) -> dict:
+        # ESPN's averageStats carries GP as the games count, not a per-game value: that is gp
         box = {STAT.get(k, str(k)): round(v, 3 if "%" in STAT.get(k, "") else 1)
-               for k, v in sorted(self.avg.items()) if k in STAT}
+               for k, v in sorted(self.avg.items()) if k in STAT and k != GP}
         return {"fpts": round(self.fpts, 1), "total": round(self.total, 1), "gp": self.gp,
                 "per_game": box}
 

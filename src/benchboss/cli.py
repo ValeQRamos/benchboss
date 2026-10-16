@@ -68,6 +68,11 @@ class Ctx:
         else:
             self.out.print(renderable)
 
+    def usage(self, message: str):
+        """Bad usage found after parsing: the command's usage line and ``message`` on stderr,
+        exit 2, the same as argparse's own checks."""
+        self.args.parser.error(message)
+
     def confirm(self, question: str = "Go ahead?") -> bool:
         if self.args.yes:
             return True
@@ -243,17 +248,18 @@ def cmd_watch(c: Ctx):
     from benchboss.ui.screens import finder
 
     a = c.args
+    name = " ".join(a.player).strip()
     if not a.action or a.action == "list":
-        if a.player:
-            raise BenchbossError("`watch list` takes no player; use `watch add` or `watch remove`")
+        if name:
+            c.usage("`watch list` takes no player; use `watch add` or `watch remove`")
         a.view = "proj"  # benchboss watch has no --view: show the projections
         _screen(c, finder, source="watch")
         return
-    if not a.player:
-        raise BenchbossError(f"name the player: benchboss watch {a.action} \"Player\"")
+    if not name:
+        c.usage(f"name the player: benchboss watch {a.action} \"Player\"")
     s = c.session
-    p = s.find_player(" ".join(a.player))
     on = a.action == "add"
+    p = _watch_target(s, name, on)
     listed = p.id in s.watch_list()
     if on == listed:
         msg = f"{p.name} is {'already' if on else 'not'} on your watch list: nothing to do."
@@ -272,6 +278,27 @@ def cmd_watch(c: Ctx):
         return f"watch list has {len(ids)} players"
 
     _write(c, summary, send)
+
+
+def _watch_target(s, name: str, on: bool):
+    """The player `watch add/remove NAME` is about.
+
+    remove looks at the watch list first, so "Allen" is the Allen you watch. Otherwise the
+    players on every roster and ESPN's name search count together: a name that fits a
+    rostered player and a free agent matches several players, it is not quietly the
+    rostered one (Session.find_player looks at the rosters first).
+    """
+    from benchboss.text import match_one, norm
+
+    if not on:
+        watched = s.player_pool("watch")
+        if any(norm(name) in norm(p.name) for p in watched):
+            return match_one(watched, name, lambda p: p.name, where="your watch list")
+    lg = s.league()
+    found = {sp.player.id: sp.player for t in lg.teams.values() for sp in t.roster}
+    for p in s.player_pool("all", n=10, sort="own", query=name):
+        found.setdefault(p.id, p)
+    return match_one(found.values(), name, lambda p: p.name, where="your league or free agency")
 
 
 def cmd_playoffs(c: Ctx):
@@ -361,7 +388,7 @@ def cmd_news(c: Ctx):
     a = c.args
     s = c.session
     if a.watch and a.players:
-        raise BenchbossError("name players or use --watch, not both")
+        c.usage("name players or use --watch, not both")
     named = [s.find_player(q) for q in a.players] if a.players else None
     which = () if named else ("watch",) if a.watch else ("roster",)
     if a.ai:
@@ -616,8 +643,22 @@ def _views(module) -> str:
     return ", ".join([f"{keys[0]} (default)", *keys[1:]]) if keys else "none"
 
 
+def _view(module):
+    """argparse type for --view: one of the screen's view keys, else bad usage (exit 2)."""
+    from benchboss.ui.screens import view_index
+
+    def check(key: str) -> str:
+        try:
+            view_index(module, key)
+        except BenchbossError as e:
+            raise argparse.ArgumentTypeError(str(e)) from None
+        return key
+
+    return check
+
+
 def build_parser() -> argparse.ArgumentParser:
-    from benchboss.ui.screens import roster, standings, workload
+    from benchboss.ui.screens import finder, playoffs, roster, standings, workload
 
     def global_options(suppress: bool) -> argparse.ArgumentParser:
         # the same flags work before or after the command; inside subcommands they default to
@@ -642,7 +683,7 @@ def build_parser() -> argparse.ArgumentParser:
     def add(name, fn, help_, **kw):
         p = sub.add_parser(name, parents=[common], help=help_,
                            description=help_.replace("%%", "%"), **kw)
-        p.set_defaults(fn=fn)
+        p.set_defaults(fn=fn, parser=p)
         return p
 
     add("app", cmd_app, "open the interactive app (same as running benchboss with no command)")
@@ -660,14 +701,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add("roster", cmd_roster, "your roster: every stat split (season, last 7/15/30, "
                                   "projection, last season) and the box score")
-    p.add_argument("--view", metavar="VIEW", help="the split for the box score: " + _views(roster))
+    p.add_argument("--view", metavar="VIEW", type=_view(roster),
+                   help="the split for the box score: " + _views(roster))
     p = add("standings", cmd_standings, "league table: record, points for and against, streaks, "
                                         "playoff odds")
-    p.add_argument("--view", metavar="VIEW", help="which table: " + _views(standings))
+    p.add_argument("--view", metavar="VIEW", type=_view(standings),
+                   help="which table: " + _views(standings))
     add("matchup", cmd_matchup, "this week's matchup: live score, projected final, games left")
     p = add("activity", cmd_activity, "games per player this matchup week, day by day, and the "
                                       "ones on your bench")
-    p.add_argument("--view", metavar="VIEW", help="row order: " + _views(workload))
+    p.add_argument("--view", metavar="VIEW", type=_view(workload), help="row order: " + _views(workload))
     p = add("players", cmd_players, "player finder: free agents, rostered players or your watch "
                                     "list with every stat split")
     p.add_argument("query", nargs="*", help="part of a player's name")
@@ -677,7 +720,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sort", choices=["proj", "season", "l7", "l15", "l30", "last", "own", "change"],
                    help="rank by this split (fantasy points per game), %% rostered or its change "
                         "(default: the --view split, else proj)")
-    p.add_argument("--view", metavar="VIEW",
+    p.add_argument("--view", metavar="VIEW", type=_view(finder),
                    help="which split's box score to show: season l7 l15 l30 proj last")
     p.add_argument("-n", type=_count, default=50, help="how many (default 50)")
     p = add("watch", cmd_watch, "your ESPN watch list: list it, or add / remove a player")
@@ -689,7 +732,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help='fix a result, e.g. --pick "Monstars>Tune Squad" (add @WEEK for a '
                         "given week; repeat for more)")
     p.add_argument("--sims", type=_count, default=5000, help="simulated seasons (default 5000)")
-    p.add_argument("--view", metavar="VIEW", help="odds (default) or games, the matchups left")
+    p.add_argument("--view", metavar="VIEW", type=_view(playoffs),
+                   help="odds (default) or games, the matchups left")
     p = add("trash", cmd_trash, "most valuable free agents for this week (points added, best day to grab)")
     p.add_argument("pos", nargs="?", help="PG SG SF PF C G F")
     p.add_argument("-n", type=_count, default=10, help="how many (default 10)")

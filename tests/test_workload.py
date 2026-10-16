@@ -264,11 +264,11 @@ def test_json_shape(session):
     data = workload.load(session)
     rows = workload.to_json(data)
     assert len(rows) == len(session.league().me.roster)
-    first = rows[0]
+    first = next(r for r in rows if r["player"] == "LaMelo Ball")
     assert set(first) == {"player", "team", "positions", "slot", "games", "games_in_lineup",
                           "games_left", "schedule", "days"}
     assert first["slot"] == "PG" and first["positions"]
-    assert len(first["days"]) == len(data.periods) == 7
+    assert len(first["days"]) == len(first["schedule"]) == len(data.periods) == 7
     day = first["days"][0]
     assert set(day) == {"date", "opponent", "slot", "starting"}
     assert day["date"] == "2026-11-02" and day["slot"] == "PG" and day["starting"] is True

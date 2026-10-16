@@ -258,20 +258,26 @@ def seen_path() -> Path:
     return config_mod.config_dir() / SEEN_FILE
 
 
-def _read_seen(path: Path | None = None) -> dict:
-    """The seen file (or ``path``) as a dict; a missing, unreadable or broken file reads as
-    empty."""
+def _read_seen(session, name: str = SEEN_FILE) -> dict:
+    """The seen file (or the toasted one, ``name``) as a dict; a missing, unreadable or broken
+    file reads as empty. A session that keeps them in memory (``Session.seen_news``, the
+    demo) never reads the file."""
+    if session.seen_news is not None:
+        return dict(session.seen_news.get(name) or {})
     try:
-        raw = json.loads((path or seen_path()).read_text())
+        raw = json.loads((config_mod.config_dir() / name).read_text())
     except (OSError, ValueError):
         return {}
     return raw if isinstance(raw, dict) else {}
 
 
-def _write_seen(book: dict, path: Path | None = None) -> None:
-    """Write the seen file (or ``path``) atomically (a temp file, then a rename), like
-    config.save."""
-    path = path or seen_path()
+def _write_seen(session, book: dict, name: str = SEEN_FILE) -> None:
+    """Write the seen file (or ``name``) atomically (a temp file, then a rename), like
+    config.save; or keep the book in memory when the session does (the demo)."""
+    if session.seen_news is not None:
+        session.seen_news[name] = book
+        return
+    path = config_mod.config_dir() / name
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -287,7 +293,7 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
     """News ("spins") on your watch-list players that you have not seen yet, newest first,
     as (player name, NewsItem).
 
-    What you have seen is kept per league in ``seen-news.json`` in the config folder: the
+    What you have seen is kept per league in ``seen-news.json`` in the config folder (in memory for the demo): the
     newest ``SEEN_KEEP`` news ids, and the watch list as it was at the last recorded check.
     News on a player new to the list (every player, the first time a league is checked)
     older than ``FIRST_RUN_HOURS`` counts as seen, so neither a new install nor a player
@@ -301,7 +307,7 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
     items = session.news(watched, SPIN_DAYS)
     key = str(session.client.league_id)
     with _seen_lock:
-        book = _read_seen()
+        book = _read_seen(session)
         entry = book.get(key)
         if isinstance(entry, list):  # the first format kept only the news ids
             entry = {"news": entry, "players": watched}
@@ -323,7 +329,7 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
             record = known + [i.id for i in reversed(new)]
             book[key] = {"news": list({str(x): x for x in record}.values())[-SEEN_KEEP:],
                          "players": watched}
-            _write_seen(book)
+            _write_seen(session, book)
     if not new:
         return []
     ids = set(watched)
@@ -344,9 +350,8 @@ def toast_spins(session) -> list[tuple[str, NewsItem]]:
     if not spins:
         return []
     key = str(session.client.league_id)
-    path = config_mod.config_dir() / TOASTED_FILE
     with _seen_lock:
-        book = _read_seen(path)
+        book = _read_seen(session, TOASTED_FILE)
         entry = book.get(key)
         known = list(entry) if isinstance(entry, list) else []
         toasted = {str(x) for x in known}
@@ -354,7 +359,7 @@ def toast_spins(session) -> list[tuple[str, NewsItem]]:
         if new:
             record = known + [item.id for _, item in reversed(new)]  # oldest first, like seen
             book[key] = list({str(x): x for x in record}.values())[-SEEN_KEEP:]
-            _write_seen(book, path)
+            _write_seen(session, book, TOASTED_FILE)
     return new
 
 
