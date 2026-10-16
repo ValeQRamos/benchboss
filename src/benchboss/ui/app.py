@@ -159,10 +159,13 @@ class Benchboss(App):
         return self._session
 
     def _top(self, extra: str = "") -> None:
+        from benchboss.ui import logo
+
         name = self.cfg.team_name
         if not name and self._session is not None and getattr(self._session, "_league", None):
             name = self._session._league.me.name
-        left = Text.assemble(("🏀 benchboss", f"bold {self.pal.accent}"), (f"  {__version__}", self.pal.dim),
+        left = Text.assemble(logo.mark(self.pal), (" benchboss", f"bold {self.pal.accent}"),
+                             (f"  {__version__}", self.pal.dim),
                              (f"   {name}" if name else "", self.pal.text),
                              ("   demo data" if self.demo else "", self.pal.warn), (extra, self.pal.dim))
         self.query_one("#top", Static).update(left)
@@ -451,13 +454,22 @@ class Benchboss(App):
         title = "Today" if sid == "today" else "Rest of the matchup week"
 
         def draw(pal: Palette, width: int) -> RenderableType:
-            head = Text(title + "\n", style=f"bold {pal.accent}")
-            body = views.plan(plans, cal, pal)
+            from benchboss.ui.common import day_label
+            from benchboss.ui.common import title as heading
+
+            span = ""
+            if plans:
+                first, last = cal.date_of(plans[0].period), cal.date_of(plans[-1].period)
+                span = day_label(first) if first == last else f"{day_label(first)} to {day_label(last)}"
+            head = heading("Optimize", pal, title, span)  # "Optimize · Today · Wed Nov 4"
+            body = views.plan(plans, cal, pal, width)
             if not todo:
-                return Group(head, body, Text("\n✓ Already optimal. Nothing to do.", style=pal.good))
-            return Group(head, body, Text(f"\n{moves} move{'s' * (moves != 1)} on {len(todo)} day"
-                                          f"{'s' * (len(todo) != 1)}. Press Apply to send them to ESPN.",
-                                          style=pal.text))
+                return Group(head, Text(""), body,
+                             Text("\n✓ Already optimal. Nothing to do.", style=pal.good))
+            return Group(head, Text(""), body,
+                         Text(f"\n{moves} move{'s' * (moves != 1)} on {len(todo)} day"
+                              f"{'s' * (len(todo) != 1)}. Press Apply to send them to ESPN.",
+                              style=pal.text))
 
         pending = {"periods": [p.period for p in plans], "day": s.today, "kind": sid} if todo else None
         return draw, pending
