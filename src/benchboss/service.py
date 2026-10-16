@@ -289,22 +289,32 @@ class Session:
         """Playoff odds and who is in or out, with the results you pick fixed (see
         core.playoffs.race: ``picks`` maps a matchup id to the team id you say wins it)."""
         from benchboss.core import playoffs
-        from benchboss.core.projection import week_projection
+        from benchboss.core.projection import not_started, week_projection
 
         lg, cal = self.league(), self.calendar
         weeks = range(1, playoffs.regular_season_weeks(lg) + 1)
         days = {w: len(cal.matchup_periods(w, lg.matchup_periods)) for w in weeks}
         current = cal.matchup_periods(lg.current_matchup, lg.matchup_periods)
-        today = self.today_period
-        done = sum(1 for p in current if p < today) if self.in_season else 0
+        today, now = self.today_period, self.now
+        done = 0.0
+        if self.in_season:
+            done = sum(1 for p in current if p < today)
+            if today in current:  # today's games that tipped off are in the live score
+                playing = [t for t in cal.games if cal.plays(t, today)]
+                tipped = sum(1 for t in playing if not not_started(cal, t, today, now))
+                done += tipped / len(playing) if playing else 1.0
         progress = done / len(current) if current else 0.0
+        # what each team still adds to the live score, counted like the matchup projection
+        left = [p for p in current if p >= today]
+        live_left = {tid: week_projection(team, left, cal, lg.starter_slots, today, now)[0]
+                     for tid, team in lg.teams.items()}
         ahead = [p for p in range(today, today + 14) if p <= cal.final_period]
         daily = {}
         for tid, team in lg.teams.items():
             pts, _ = week_projection(team, ahead, cal, lg.starter_slots)
             daily[tid] = pts / len(ahead) if ahead else 0.0
         return playoffs.race(lg, picks or {}, sims=sims, daily=daily, days_by_week=days,
-                             week_progress=progress)
+                             week_progress=progress, live_left=live_left)
 
     # --- features ------------------------------------------------------------------------------
 

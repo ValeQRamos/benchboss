@@ -414,7 +414,8 @@ def game_row(race: Race, g: Game, pal: Palette, size: int, compact: bool, *,
 
     home = _cut(names.get(g.home, str(g.home)), size)
     away = _cut(names.get(g.away, str(g.away)), size)
-    left, right = share(g.home, p_home), share(g.away, 1 - p_home)
+    # the away side's own share, not 1 - p_home: a simulated tie is neither team's win
+    left, right = share(g.home, p_home), share(g.away, race.away_win.get(g.id, 1 - p_home))
     out = Text(" " * (size - cell_len(home)))
     out.append(home, style=name_style(g.home))
     out.append(gap + " " * (4 - left.cell_len))
