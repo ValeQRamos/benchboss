@@ -29,6 +29,8 @@ from benchboss.espn.models import League, Matchup, Team
 from benchboss.text import match_one
 
 SPREAD = 0.12          # weekly score standard deviation, as a share of the expected score
+TEAM_SPREAD = 0.05     # how far a team's level can drift over the season (trades, injuries)
+NEAR_WEEKS = 2         # this week and next use the injury-aware projection; later, healthy
 PRIOR_DAYS = 21        # how many days of real results it takes to outweigh the projection
 GAMES_PER_DAY = 0.5    # an NBA player plays about every other day
 BENCH_LOSS = 0.92      # share of those games that fit in the starting slots
@@ -199,9 +201,15 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
          week_progress: float = 0.0, seed: int | None = 0) -> Race:
     """Simulate the rest of the regular season.
 
-    ``daily``: expected points per day for each team id from its roster (the service passes
-    one built from the NBA schedule); ``days_by_week``: days in each matchup week (7 when
-    missing); ``week_progress``: the share of the current week already played (0..1).
+    ``daily``: expected points per day for each team id over the next days, from its roster,
+    the NBA schedule and today's injuries (the service builds it). It sets the level for this
+    week and the next; later weeks use the roster's healthy projection, because a player out
+    today is not out all season. ``days_by_week``: days in each matchup week (7 when missing);
+    ``week_progress``: the share of the current week already played (0..1).
+
+    Each simulated season also moves every team's level a little (TEAM_SPREAD) for all the
+    weeks ahead: trades, injuries and waiver luck make a team better or worse for a stretch,
+    not just for one week, and without it the odds of the best rosters come out too sure.
     """
     picks = dict(picks or {})
     games = season_games(league)
@@ -228,13 +236,16 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
             for tid, pts in ((g.home, g.home_points), (g.away, g.away_points)):
                 played_days[tid] += d
                 scored[tid] += pts
-    per_day = {}
+    near_day, per_day = {}, {}
     for tid, t in teams.items():
-        prior = (daily or {}).get(tid) or projected_daily(t)
+        healthy = projected_daily(t)
+        near = (daily or {}).get(tid) or healthy
         n = played_days[tid]
-        actual = scored[tid] / n if n else prior
         w = n / (n + PRIOR_DAYS)
-        per_day[tid] = w * actual + (1 - w) * prior
+        actual = scored[tid] / n if n else 0.0
+        near_day[tid] = w * actual + (1 - w) * near
+        per_day[tid] = w * actual + (1 - w) * healthy
+    last_near = league.current_matchup + NEAR_WEEKS - 1
 
     base = _standing_base(league, games)
     # picked games are simulated too, for their points; only the winner is fixed
@@ -251,9 +262,11 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
     for _ in range(runs):
         st = {tid: list(v) for tid, v in base.items()}   # wins, losses, ties, pf, pa
         h2h = defaultdict(float)
+        level = {tid: rng.gauss(1.0, TEAM_SPREAD) for tid in teams}
         for g in open_games:
-            mh = per_day[g.home] * days.get(g.week, 7)
-            ma = per_day[g.away] * days.get(g.week, 7)
+            rate = near_day if g.week <= last_near else per_day
+            mh = rate[g.home] * days.get(g.week, 7) * level[g.home]
+            ma = rate[g.away] * days.get(g.week, 7) * level[g.away]
             left = 1 - progress if g.live else 1.0
             hp = g.home_points + rng.gauss(mh * left, mh * SPREAD * left ** 0.5)
             ap = g.away_points + rng.gauss(ma * left, ma * SPREAD * left ** 0.5)
