@@ -29,14 +29,22 @@ Every read command supports `--json` and prints stable keys, ISO dates and names
 | Live score and projected final | `benchboss matchup --json` |
 | Roster, injuries, who plays today | `benchboss roster --json` |
 | Games per player this week | `benchboss activity --json` |
+| Any player's stats (season, last 7/15/30 days, projection, last season) | `benchboss players --json [--from fa\|rostered\|all\|watch] [--pos C] [--sort l7] [NAME]` |
+| The user's ESPN watch list | `benchboss watch --json` |
 | Best free agents for this week | `benchboss trash --json [-n 10] [POS]` |
 | Free agents by ownership / rising | `benchboss fa --json [POS]`, `benchboss trending --json` |
-| News and spins (last N days) | `benchboss news --json [--days 5] [PLAYER ...]` |
+| News and spins (last N days) | `benchboss news --json [--days 5] [--watch] [PLAYER ...]` |
 | Trade ideas | `benchboss trades --json [--need C] [--with TEAM]` |
 | Every team's positional balance | `benchboss trades --needs --json` |
-| Trade offers, claims, unread DMs | `benchboss alerts --json` |
+| Trade offers, claims, unread DMs, new watch-list news | `benchboss alerts --json` |
 | Standings | `benchboss standings --json` |
+| Playoff odds, and what if a game goes one way | `benchboss playoffs --json [--pick "Winner>Loser[@WEEK]"]` |
 | League chat or a DM (read) | `benchboss chat --json [--to TEAM]` |
+
+`roster`, `standings`, `activity`, `players` and `playoffs` also take `--view KEY` for a
+different table (`benchboss <command> -h` lists the keys). `benchboss alerts --mark-read`
+marks the watch-list news as read on this computer (nothing goes to ESPN): run it only when
+the user asks.
 
 Do not run `benchboss` with no command, `benchboss app` or `benchboss dash --watch`: they
 are interactive and never exit. Run `benchboss news --ai` only when the user asks for the AI
@@ -60,6 +68,7 @@ Write commands change the real league on ESPN. Protocol:
 | Release a player | `benchboss drop "Player" --yes` |
 | Send a trade offer | `benchboss trade --give "A" --get "B" --msg "text" --yes` |
 | Post in the league chat or a DM | `benchboss chat "text" [--to TEAM] --yes` |
+| Add or remove a player on the ESPN watch list | `benchboss watch add "Player" --yes`, `benchboss watch remove "Player" --yes` |
 
 Never chain several writes from one approval. Never retry a failed write without asking.
 
@@ -109,5 +118,8 @@ Rules:
 - New ESPN calls go through `espn/client.py`; document new endpoints in `docs/api/`.
 - Every new read command gets a `--json` output and a test in `tests/test_cli.py`.
 - Every write must go through a confirmation (`Ctx.confirm` in the CLI, the Apply button in the app).
+  The one exception is the watch-list star in the app's Player finder (space): it writes at
+  once, like the star in the ESPN app, because the list is the user's own and a second press
+  undoes it. `benchboss watch add/remove` still asks.
 - Never commit cookies, league ids of private leagues, or real manager names. Tests use the demo league.
 - Writing style for docs and UI text: plain English, no em dashes.

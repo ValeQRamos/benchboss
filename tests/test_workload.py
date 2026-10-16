@@ -264,18 +264,18 @@ def test_json_shape(session):
     data = workload.load(session)
     rows = workload.to_json(data)
     assert len(rows) == len(session.league().me.roster)
-    first = rows[0]
-    assert set(first) == {"name", "team", "positions", "slot", "games", "games_in_lineup",
-                          "games_left", "schedule"}
+    first = next(r for r in rows if r["player"] == "LaMelo Ball")
+    assert set(first) == {"player", "team", "positions", "slot", "games", "games_in_lineup",
+                          "games_left", "schedule", "days"}
     assert first["slot"] == "PG" and first["positions"]
-    assert len(first["schedule"]) == len(data.periods) == 7
-    day = first["schedule"][0]
+    assert len(first["days"]) == len(first["schedule"]) == len(data.periods) == 7
+    day = first["days"][0]
     assert set(day) == {"date", "opponent", "slot", "starting"}
     assert day["date"] == "2026-11-02" and day["slot"] == "PG" and day["starting"] is True
-    no_game = next(d for d in first["schedule"] if not d["opponent"])
+    no_game = next(d for d in first["days"] if not d["opponent"])
     assert no_game["opponent"] == ""
     bench = next(r for r in rows if r["slot"] == "BE")
-    assert bench["games_in_lineup"] == 0 and bench["schedule"][0]["starting"] is False
+    assert bench["games_in_lineup"] == 0 and bench["days"][0]["starting"] is False
     json.dumps(rows)
 
 
@@ -305,7 +305,7 @@ def test_a_lineups_failure_falls_back_to_plain_cells(session):
     assert "Could not reach ESPN (timed out)." in [line.strip() for line in narrow.splitlines()]
     rows = workload.to_json(data)
     assert all(r["games_in_lineup"] is None for r in rows)
-    assert all(d["starting"] is None and d["slot"] is None for r in rows for d in r["schedule"])
+    assert all(d["starting"] is None and d["slot"] is None for r in rows for d in r["days"])
 
 
 def test_views_activity_wrapper_still_works(session):

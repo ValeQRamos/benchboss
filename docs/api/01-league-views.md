@@ -438,6 +438,7 @@ VERIFIED (live). `deadlineDate` is Fri Feb 26, 2027 11:00 CT. `revisionHours: 24
 | `teams[].valuesByStat` | {statId: float} | `{"0": 0.0, "1": 0.0, ...}` | Season totals for the scoring stats |
 | `teams[].transactionCounter` | object | `{acquisitions, drops, trades, moveToActive, moveToIR, misc, acquisitionBudgetSpent, paid, teamCharges, matchupAcquisitionTotals: {matchupPeriodId: count}}` | `matchupAcquisitionTotals` keyed by matchup period (VERIFIED (live) in 2026) |
 | `teams[].tradeBlock.players` | {playerId: str} | `{"4432166": "UNTOUCHABLE"}` | Values from `tradeBlockStatusTypes`: `NORMAL`, `ON_THE_BLOCK`, `UNTOUCHABLE`. Empty object when nothing is set |
+| `teams[].watchList` | [int] | `[4432166]` | Player ids on your watch list. Only on your own team, and only once the list has been used. Written with `POST .../teams/{teamId}` ([04 §13](04-writes-transactions.md#13-watch-list)). VERIFIED (live) |
 | `teams[].pendingTransactions[]` | [transaction] | see section 12 | Only on teams involved, only while pending; key absent otherwise |
 | `teams[].draftStrategy` | object | `{keeperPlayerIds: []}` for other teams | The caller's own team also gets `draftList[{playerId, auctionValue}]` (1,095 rows), `excludedPlayerIds`, `futureKeeperPlayerIds` |
 

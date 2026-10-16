@@ -87,6 +87,10 @@ class Session:
         self._league_raw: dict | None = None
         self._lineups: dict[int, dict[int, int]] = {}
 
+    # The news on watch-list players you have seen (inbox.watch_spins): None keeps it in
+    # seen-news.json in the config folder; a dict keeps it in memory instead (the demo).
+    seen_news: dict | None = None
+
     @property
     def demo(self) -> bool:
         return False
@@ -292,7 +296,7 @@ class Session:
             pts, _ = week_projection(team, ahead, cal, lg.starter_slots)
             daily[tid] = pts / len(ahead) if ahead else 0.0
         return playoffs.race(lg, picks or {}, sims=sims, daily=daily, days_by_week=days,
-                             week_progress=progress)
+                             week_progress=progress, in_season=self.in_season)
 
     # --- features ------------------------------------------------------------------------------
 

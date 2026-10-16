@@ -130,8 +130,12 @@ def regular_season_weeks(league: League) -> int:
     return max(weeks) if weeks else 0
 
 
-def season_games(league: League) -> list[Game]:
-    """Every regular-season matchup between two real teams, with ESPN's results."""
+def season_games(league: League, in_season: bool = True) -> list[Game]:
+    """Every regular-season matchup between two real teams, with ESPN's results.
+
+    ``in_season``: the NBA season is under way. Before opening night ESPN's current matchup
+    is already week 1, but no game of it is live yet.
+    """
     last = regular_season_weeks(league)
     out, seen = [], set()
     for i, m in enumerate(league.matchups):
@@ -139,24 +143,26 @@ def season_games(league: League) -> list[Game]:
             continue
         gid = m.id if m.id and m.id not in seen else 100000 + i  # ids are missing in old payloads
         seen.add(gid)
-        out.append(_game(m, gid, league.current_matchup))
+        out.append(_game(m, gid, league.current_matchup, in_season))
     return out
 
 
-def _game(m: Matchup, gid: int, current: int) -> Game:
+def _game(m: Matchup, gid: int, current: int, in_season: bool = True) -> Game:
     winner = {"HOME": m.home.team_id, "AWAY": m.away.team_id, "TIE": 0}.get(m.winner)
     if winner is None and m.period < current and (m.home.points or m.away.points):
         # a past week without ESPN's verdict: the points decide it
         hp, ap = m.home.points, m.away.points
         winner = m.home.team_id if hp > ap else m.away.team_id if ap > hp else 0
     return Game(gid, m.period, m.home.team_id, m.away.team_id, m.home.points, m.away.points,
-                winner=winner, live=winner is None and m.period == current)
+                winner=winner, live=in_season and winner is None and m.period == current)
 
 
 def parse_picks(league: League, specs: list[str]) -> dict[int, int]:
     """'Winner>Loser' or 'Winner>Loser@WEEK' (team or manager names) -> {matchup id: winner}.
 
-    Without @WEEK it is the next game between the two that is not decided yet.
+    Without @WEEK it is the next game between the two that is not decided yet and not
+    picked by an earlier spec, so "A>B" twice means A wins their next two games. A spec
+    that would change an earlier pick of the same game is an error.
     """
     teams = list(league.teams.values())
     open_games = [g for g in season_games(league) if not g.decided]
@@ -176,10 +182,15 @@ def parse_picks(league: League, specs: list[str]) -> dict[int, int]:
             if not week.strip().isdigit():
                 raise BenchbossError(f"'{spec}': the week after @ must be a number")
             games = [g for g in games if g.week == int(week)]
-        if not games:
+        free = [g for g in games if g.id not in picks]
+        if not free:
             when = f" in week {week.strip()}" if week.strip() else ""
+            if games:  # an earlier spec took it: one result per game, never overwritten
+                raise BenchbossError(f"'{spec}': the game{'s' * (len(games) > 1)} between "
+                                     f"{win.name} and {lose.name}{when} "
+                                     f"{'are' if len(games) > 1 else 'is'} already picked")
             raise BenchbossError(f"{win.name} and {lose.name} have no game left to pick{when}")
-        game = min(games, key=lambda g: g.week)
+        game = min(free, key=lambda g: g.week)
         picks[game.id] = win.id
     return picks
 
@@ -198,21 +209,22 @@ def projected_daily(team: Team) -> float:
 
 def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, *,
          daily: dict[int, float] | None = None, days_by_week: dict[int, int] | None = None,
-         week_progress: float = 0.0, seed: int | None = 0) -> Race:
+         week_progress: float = 0.0, in_season: bool = True, seed: int | None = 0) -> Race:
     """Simulate the rest of the regular season.
 
     ``daily``: expected points per day for each team id over the next days, from its roster,
     the NBA schedule and today's injuries (the service builds it). It sets the level for this
     week and the next; later weeks use the roster's healthy projection, because a player out
     today is not out all season. ``days_by_week``: days in each matchup week (7 when missing);
-    ``week_progress``: the share of the current week already played (0..1).
+    ``week_progress``: the share of the current week already played (0..1); ``in_season``:
+    the NBA season is under way (before it, no week is live).
 
     Each simulated season also moves every team's level a little (TEAM_SPREAD) for all the
     weeks ahead: trades, injuries and waiver luck make a team better or worse for a stretch,
     not just for one week, and without it the odds of the best rosters come out too sure.
     """
     picks = dict(picks or {})
-    games = season_games(league)
+    games = season_games(league, in_season)
     by_id = {g.id: g for g in games}
     for gid, winner in picks.items():
         g = by_id.get(gid)

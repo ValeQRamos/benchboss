@@ -257,8 +257,11 @@ def seen_path() -> Path:
     return config_mod.config_dir() / SEEN_FILE
 
 
-def _read_seen() -> dict:
-    """The seen file as a dict; a missing, unreadable or broken file reads as empty."""
+def _read_seen(session) -> dict:
+    """The seen file as a dict; a missing, unreadable or broken file reads as empty. A
+    session that keeps it in memory (``Session.seen_news``, the demo) never reads the file."""
+    if session.seen_news is not None:
+        return dict(session.seen_news)
     try:
         raw = json.loads(seen_path().read_text())
     except (OSError, ValueError):
@@ -266,8 +269,12 @@ def _read_seen() -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
-def _write_seen(book: dict) -> None:
-    """Write the seen file atomically (a temp file, then a rename), like config.save."""
+def _write_seen(session, book: dict) -> None:
+    """Write the seen file atomically (a temp file, then a rename), like config.save; or
+    keep the book in memory when the session does (the demo)."""
+    if session.seen_news is not None:
+        session.seen_news = book
+        return
     path = seen_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
@@ -285,10 +292,10 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
     as (player name, NewsItem).
 
     What you have seen is kept per league in ``seen-news.json`` in the config folder (the
-    newest ``SEEN_KEEP`` ids). The first time a league is checked, news older than
-    ``FIRST_RUN_HOURS`` counts as seen, so a new install is not flooded. ``mark_seen=True``
-    records what this call returns (on that first check, the older news too). ESPN errors
-    propagate as BenchbossError.
+    newest ``SEEN_KEEP`` ids), or in memory for the demo. The first time a league is
+    checked, news older than ``FIRST_RUN_HOURS`` counts as seen, so a new install is not
+    flooded. ``mark_seen=True`` records what this call returns (on that first check, the
+    older news too). ESPN errors propagate as BenchbossError.
     """
     watched = list(session.watch_list())
     if not watched:
@@ -296,7 +303,7 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
     items = session.news(watched, SPIN_DAYS)
     key = str(session.client.league_id)
     with _seen_lock:
-        book = _read_seen()
+        book = _read_seen(session)
         entry = book.get(key)
         first = not isinstance(entry, list)
         known = [] if first else list(entry)
@@ -310,7 +317,7 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
             # oldest first, so the cap drops the oldest; ids compare as text, kept as given
             record = known + [i.id for i in reversed(new)]
             book[key] = list({str(x): x for x in record}.values())[-SEEN_KEEP:]
-            _write_seen(book)
+            _write_seen(session, book)
     if not new:
         return []
     ids = set(watched)

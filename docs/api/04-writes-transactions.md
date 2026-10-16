@@ -1,6 +1,6 @@
 # 04. Write operations, transactions and league communication
 
-Every write the ESPN web client can send for a Fantasy Basketball (`fba`) league, reconstructed from ESPN's own JavaScript bundles and cross-checked against live read-only responses; none of these writes was executed for this document.
+Every write the ESPN web client can send for a Fantasy Basketball (`fba`) league, reconstructed from ESPN's own JavaScript bundles and cross-checked against live read-only responses; none of these writes was executed for this document, except the watch list (section 13).
 All roster, lineup, waiver, trade and draft actions go through one endpoint (`POST .../transactions/`) with a typed body; a handful of side endpoints edit pending claims, waiver order and the Quick Lineup optimizer.
 The second half covers how to detect incoming trades and claims without writing anything (`mPendingTransactions`, `mTransactions2`, `kona_league_communication`, chat unread counts) and documents the chat API, including the type 271 trade card.
 
@@ -11,6 +11,7 @@ The second half covers how to detect incoming trades and claims without writing 
 | VERIFIED (bundle) | Read in ESPN's own bundle: kona web app build `7411ee0540f4-1.517` (`main-f2aedb781c45b792f61b.js` plus page bundles `team`, `team/trade`, `tradereview`, `rosterfix`, `recentactivity`, `league/waiverreport`, `league/waiverorder`, `league/transactioncounter`), or the community chat app build `927dc831b4be-1.0.67` (`chat-7847ae3f.js`). |
 | VERIFIED (live) | Seen in a live GET response for the reference league, season 2027, on 2026-10-14 or 2026-10-15. |
 | VERIFIED (live record) | The write itself was not executed for this document, but a record it produced (for example a transaction sent earlier by a non-browser client or by another league member) is visible in live read data. |
+| VERIFIED (live write) | The write was sent to the reference league with the team owner's approval, and the result was read back. |
 | UNVERIFIED | Inferred, seen in earlier client runs that were not repeated here, or general knowledge. Treat as a hypothesis. |
 
 Bundles were fetched as data and searched as text; they were never executed.
@@ -35,6 +36,7 @@ Bundles were fetched as data and searched as text; they were never executed.
 | POST | `{WRITES}/teams/{teamId}/recommendations?lineupScoringPeriodId=&recommendationTypeId=LINEUP&restOfWeek=` | ESPN "Quick Lineup" (server sets the optimal lineup) | espn_s2 + SWID | VERIFIED (bundle) |
 | GET | `{READS}/teams/{teamId}/recommendations?recommendationTypeId=LINEUP&view=recommend` | Read ESPN's suggested lineup (no write) | espn_s2 + SWID | VERIFIED (live) |
 | POST | `{WRITES}/teams?scoringPeriodId=0` | LM: set waiver order, transaction counters, team fields | LM cookies | VERIFIED (bundle) |
+| POST | `{WRITES}/teams/{teamId}` body `{"watchList": [...]}` | Replace your watch list | espn_s2 + SWID | VERIFIED (live write) |
 | GET | `{READS}?view=mPendingTransactions` | Pending trades and claims (source of truth for alerts) | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{READS}?view=mTransactions2` (+ `X-Fantasy-Filter: {"transactions":{...}}`) | Transaction log, filterable by type | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{COMM}/communication/?view=kona_league_communication` (+ filter) | Recent Activity topics (`ACTIVITY_TRANSACTIONS`, etc.) | espn_s2 + SWID | VERIFIED (live) |
@@ -706,6 +708,24 @@ How a non-browser client should match ESPN's web client. Rows marked VERIFIED (l
 - Map `details[].type` to friendly messages and show `resolution` when present.
 - Build alerts on `mPendingTransactions` plus `chat_unreads`, as in section 9.5.
 - Treat `teamId`s as opaque (this league uses 1, 2, 3, 6, 10, 11, 13, 14, 15, 16).
+
+---
+
+## 13. Watch list
+
+Status: VERIFIED (live write), 2026-10-16: one player added, then removed, with the team owner's approval.
+
+**Read.** `teams[].watchList` in `mTeam` ([01 §7](01-league-views.md#7-mteam)): the player ids on your watch list (the star in the ESPN app). Only your own team carries the key, and only after the list has been used once; an emptied list stays as `[]`.
+
+**Write.** `POST {WRITES}/teams/{teamId}` with the whole new list:
+
+```json
+{"watchList": [4432166, 3149673]}
+```
+
+ESPN answers with the team object, its `watchList` as saved. The list is replaced, not merged: read it fresh from `mTeam` first (it may have changed in the ESPN app), add or remove one id, and send the result.
+
+**How the app uses it.** `Session.set_watched` does exactly that and keeps ESPN's answer. `benchboss watch add/remove` asks first, like every other write. The app's Player finder stars a player on space with no Apply step, the way the ESPN app does: the list is your own and a second press undoes it.
 
 ---
 

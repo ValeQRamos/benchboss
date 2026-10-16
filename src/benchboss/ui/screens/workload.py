@@ -69,8 +69,12 @@ def load(session) -> WorkloadData:
 
 
 def to_json(data: WorkloadData) -> list[dict]:
+    """Most games first, with the keys ``dash --json`` uses for its activity (player, team,
+    games, games_left, and schedule as "vs MIL" / "@ HOU" / "" per day), as in 1.0.1. On top:
+    positions, today's slot, games in your lineup, and ``days`` with the date, opponent,
+    slot and whether he starts on each day."""
     out = []
-    for a in _ordered(data.acts, grouped=True):
+    for a in data.acts:
         days = []
         for i, sp in enumerate(data.periods):
             slot = a.slot_on(i)
@@ -78,11 +82,10 @@ def to_json(data: WorkloadData) -> list[dict]:
                          "opponent": _short(a.schedule[i]) if i < len(a.schedule) else "",
                          "slot": _slot_name(slot),
                          "starting": a.starting(i) if data.lineups_known else None})
-        out.append({"name": a.player.name, "team": a.player.pro_team,
-                    "positions": a.player.positions, "slot": _slot_name(a.slot_id),
-                    "games": a.games,
+        out.append({**a.to_dict(), "positions": a.player.positions,
+                    "slot": _slot_name(a.slot_id),
                     "games_in_lineup": a.games_in_lineup if data.lineups_known else None,
-                    "games_left": a.games_left, "schedule": days})
+                    "days": days})
     return out
 
 

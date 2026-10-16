@@ -2,7 +2,8 @@
 
 The demo league has a 4-player watch list and two news items on it, 16 and 22 hours old on
 the demo clock (Wed 2026-11-04 3:30 pm Eastern). Every test gets its own BENCHBOSS_HOME
-(conftest), so the seen file starts empty.
+(conftest), so the seen file starts empty. The demo keeps what you have seen in memory, so
+these tests use demo sessions set to keep it in the seen file, as a real league does.
 """
 
 import asyncio
@@ -16,6 +17,7 @@ from rich.console import Console
 from textual.widgets import Static
 
 from benchboss import config as config_mod
+from benchboss import demo as demo_mod
 from benchboss import inbox
 from benchboss.cli import main
 from benchboss.config import Config
@@ -28,6 +30,24 @@ from benchboss.ui.screens import news as news_screen
 from benchboss.ui.theme import DARK, LIGHT
 
 DEMIN, LIVELY = 5175643, 4683688  # the two watch-list players with demo news
+
+
+def on_disk(cfg=None) -> DemoSession:
+    """A demo session that keeps the news seen in seen-news.json, like a real league."""
+    s = demo_session(cfg)
+    s.seen_news = None
+    return s
+
+
+@pytest.fixture
+def session():
+    return on_disk()
+
+
+@pytest.fixture
+def disk_demo(monkeypatch):
+    """benchboss --demo (CLI and app) with the news seen on disk, so it lasts between runs."""
+    monkeypatch.setattr(demo_mod, "demo_session", on_disk)
 
 
 def seen_file() -> dict:
@@ -63,7 +83,7 @@ def test_demo_spins_show_once_with_mark_seen(session):
     assert [who for who, _ in first] == ["Egor Demin", "Dereck Lively II"]  # newest first
     assert first[0][1].headline.startswith("Demin is seeing more minutes")
     assert inbox.watch_spins(session) == []
-    assert inbox.watch_spins(demo_session(), mark_seen=True) == []  # remembered on disk
+    assert inbox.watch_spins(on_disk(), mark_seen=True) == []  # remembered on disk
     assert sorted(seen_file()[str(session.client.league_id)]) == sorted(i.id for _, i in first)
 
 
@@ -184,7 +204,7 @@ def test_cli_alerts_json_has_spins(capsys):
     assert data[0]["kind"] == "trade_offer"
 
 
-def test_cli_alerts_mark_read(capsys):
+def test_cli_alerts_mark_read(capsys, disk_demo):
     out = run(capsys, "--demo", "alerts")
     assert "★ Watch list · Egor Demin" in out and "--mark-read" in out
     out = run(capsys, "--demo", "alerts", "--mark-read")
@@ -195,14 +215,14 @@ def test_cli_alerts_mark_read(capsys):
                 if a["kind"] == "spin"]
 
 
-def test_cli_alerts_mark_read_with_nothing_new(capsys):
+def test_cli_alerts_mark_read_with_nothing_new(capsys, disk_demo):
     run(capsys, "--demo", "alerts", "--mark-read")
     out = run(capsys, "--demo", "alerts", "--mark-read")
     assert "No new watch list news to mark as read." in out and "Trade offer" in out
     assert "--mark-read marks" not in run(capsys, "--demo", "alerts")
 
 
-def test_cli_alerts_mark_read_json(capsys):
+def test_cli_alerts_mark_read_json(capsys, disk_demo):
     data = json.loads(run(capsys, "--demo", "--json", "alerts", "--mark-read"))
     assert len([a for a in data if a["kind"] == "spin"]) == 2
     assert len(seen_file()["424242"]) == 2
@@ -248,7 +268,7 @@ def test_cli_news_watch_with_an_empty_watch_list(capsys, monkeypatch):
 def test_cli_news_watch_and_names_do_not_mix(capsys):
     with pytest.raises(SystemExit) as e:
         main(["--demo", "news", "--watch", "Egor Demin"])
-    assert e.value.code == 1 and "not both" in capsys.readouterr().err
+    assert e.value.code == 2 and "not both" in capsys.readouterr().err
 
 
 # --- the news screen ---------------------------------------------------------------------------------
@@ -336,7 +356,7 @@ def test_app_news_screen_shows_roster_and_watch_list():
     drive(app, scenario)
 
 
-def test_app_toasts_each_demo_spin_once():
+def test_app_toasts_each_demo_spin_once(disk_demo):
     app = Benchboss(Config(), demo=True)
     toasts = []
     app.notify = lambda message, **kw: toasts.append((message, kw.get("title")))

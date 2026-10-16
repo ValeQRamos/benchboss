@@ -167,6 +167,8 @@ More in [docs/vscode.md](docs/vscode.md).
 
 Run `benchboss --help` or `benchboss <command> --help` for every flag. Read commands accept
 `--json`; write commands show what they will do and ask first (`--yes` skips the question).
+`roster`, `standings`, `activity`, `players` and `playoffs` take `--view` for their other
+tables.
 
 | Command | What it does |
 |---|---|
@@ -175,13 +177,16 @@ Run `benchboss --help` or `benchboss <command> --help` for every flag. Read comm
 | `benchboss matchup` | Live score, projected final, games left |
 | `benchboss roster` | Roster with slots, injuries, averages, projections, who plays today |
 | `benchboss activity` | Games per player this matchup week, day by day |
+| `benchboss players [NAME] [--from fa\|rostered\|all\|watch] [--pos C] [--sort l7]` | Player finder: every stat split side by side |
+| `benchboss watch [add\|remove PLAYER]` | Your ESPN watch list; add and remove ask first |
 | `benchboss optimize [today\|tomorrow\|week\|11-04]` | Best lineup for a day or the rest of the week (`--dry-run` to only look) |
 | `benchboss trash [POS] [-n N]` | Most valuable free agents for this week |
 | `benchboss fa [POS]` · `benchboss trending` | Free agents by % rostered, or rising the fastest |
-| `benchboss news [PLAYER ...] [--days 5] [--ai]` | News and spins for your roster or named players |
+| `benchboss news [PLAYER ...] [--watch] [--days 5] [--ai]` | News and spins for your roster, your watch list or named players |
 | `benchboss trades [--need C] [--with TEAM] [--needs]` | Trade ideas, or every team's positional balance |
-| `benchboss alerts` | Trade offers, accepted trades, pending claims, unread DMs |
+| `benchboss alerts [--mark-read]` | Trade offers, accepted trades, pending claims, unread DMs, new watch-list news |
 | `benchboss standings` | League table |
+| `benchboss playoffs [--pick "Winner>Loser"]` | Playoff odds, and what-if scenarios |
 | `benchboss add PLAYER [--drop PLAYER]` · `drop` | Sign a free agent or put in a claim; release a player |
 | `benchboss trade --give A --get B [--msg TEXT]` | Send a trade offer |
 | `benchboss chat [TEXT] [--to TEAM]` | Read or post in the league chat or a DM |
