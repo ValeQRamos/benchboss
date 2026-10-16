@@ -38,8 +38,10 @@ def at(session, day: int, hour: int, minute: int = 0):
 
 
 def expected_strip(pk, span, cal) -> str:
+    """● a game that adds points, ○ one he would sit on your bench for, · no game."""
     return "".join(" " if pk.best_day is None or d < pk.best_day
-                   else "●" if cal.plays(pk.player.pro_team_id, d) else "·" for d in span)
+                   else "●" if pk.added.get(d, 0) > 0
+                   else "○" if cal.plays(pk.player.pro_team_id, d) else "·" for d in span)
 
 
 def header_of(text: str) -> str:
@@ -67,7 +69,7 @@ def test_strip_matches_the_calendar(session, when):
     for pk in picks:
         strip = screen.games_strip(pk, span, cal, DARK)
         assert strip.plain == expected_strip(pk, span, cal)
-        assert strip.plain.count("●") == pk.games_left == len(pk.game_days(cal))
+        assert strip.plain.count("●") == pk.games_left == len(pk.game_days())
         if pk.best_day is not None:
             grab = span.index(pk.best_day)
             assert strip.plain[:grab].strip() == ""  # nothing before the grab day
@@ -89,12 +91,16 @@ def test_spaced_strip_sits_under_the_day_initials(session):
 
 def test_a_game_that_already_tipped_off_is_not_counted(session):
     cal = session.calendar
-    pk = next(p for p in session.trash(n=20)
-              if p.best_day == session.today_period and cal.plays(p.player.pro_team_id, p.best_day))
-    started = dataclasses.replace(pk, games_left=pk.games_left - 1)
-    assert started.game_days(cal) == pk.game_days(cal)[1:]
-    strip = screen.games_strip(started, screen.week_span([pk]), cal, DARK)
-    assert strip.plain[0] == "○" and strip.plain.count("●") == started.games_left
+    # a grab day game he would start, as if it had tipped off: it drops out of the games
+    # that count
+    pk = next(p for p in session.trash(n=20) if p.added.get(p.best_day))
+    started = dataclasses.replace(pk, added={d: v for d, v in pk.added.items() if d != pk.best_day})
+    started.games_left = len(started.game_days())
+    assert started.game_days() == pk.game_days()[1:]
+    span = screen.week_span([pk])
+    strip = screen.games_strip(started, span, cal, DARK)
+    grab = span.index(pk.best_day)
+    assert strip.plain[grab] == "○" and strip.plain.count("●") == started.games_left
 
 
 # --- width fitting -----------------------------------------------------------------------------

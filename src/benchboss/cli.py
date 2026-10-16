@@ -713,7 +713,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--view", metavar="VIEW", type=_view(workload), help="row order: " + _views(workload))
     p = add("players", cmd_players, "player finder: free agents, rostered players or your watch "
                                     "list with every stat split")
-    p.add_argument("query", nargs="*", help="part of a player's name")
+    p.add_argument("query", nargs="*", help="the start of a player's first, last or full name")
     p.add_argument("--from", dest="source", choices=["fa", "rostered", "all", "watch"], default="fa",
                    help="free agents (default), players on a team, everyone, or your watch list")
     p.add_argument("--pos", help="PG SG SF PF C G F")

@@ -101,6 +101,11 @@ def load(session, source: str = "fa", position: str | None = None, sort: str = D
          query: str | None = None, n: int = 100) -> FinderData:
     """One pool of players with every split. ``source``: fa, rostered, all or watch."""
     players = session.player_pool(source, position, n, sort, query)
+    if sort in SPLITS and sort != DEFAULT_SPLIT and players and not has_split(players, sort):
+        # nobody has numbers in that split yet (the preseason) and ESPN ranks an empty split
+        # in no useful order: rank by the projection instead (the title says so)
+        sort = DEFAULT_SPLIT
+        players = session.player_pool(source, position, n, sort, query)
     lg = session.league()
     teams = {t.id: (_abbrev(t.abbrev, t.name), t.name) for t in lg.teams.values()}
     return FinderData(players, source, tuple(session.watch_list()), position, sort, query, n,

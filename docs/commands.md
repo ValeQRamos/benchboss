@@ -115,7 +115,7 @@ benchboss players [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 
 | Option | Meaning |
 |---|---|
-| `query` | Part of a player's name |
+| `query` | The start of a player's first, last or full name |
 | `--from` | Free agents (default), players on a team, everyone, or your watch list |
 | `--pos` | PG SG SF PF C G F |
 | `--sort` | Rank by this split (fantasy points per game), % rostered or its change (default: the --view split, else proj) |

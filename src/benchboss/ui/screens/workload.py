@@ -270,8 +270,8 @@ def _day_cell(a: Activity, i: int, sp: int, data: WorkloadData, pal: Palette, la
     label = PLAYS if lay.glyphs else _short(opp)
     if data.lineups_known and a.benched(i):
         return Text(BENCHED if lay.glyphs else f"({label})", style=pal.dim)
-    if a.on_ir or (data.lineups_known and not a.starting(i)):
-        return Text(label, style=pal.dim)  # on IR, or not on your roster that day
+    if a.on_ir or a.out or (data.lineups_known and not a.starting(i)):
+        return Text(label, style=pal.dim)  # on IR, out, or not on your roster that day
     if sp < data.today:
         return Text(label, style=pal.dim)
     return Text(label, style=f"bold {pal.text}" if sp == data.today else pal.text)
