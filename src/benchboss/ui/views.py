@@ -15,14 +15,13 @@ from benchboss.core.trades import TradeIdea
 from benchboss.espn.constants import POSITION
 from benchboss.espn.models import League, Player
 from benchboss.inbox import Alert
-from benchboss.news import NewsItem
 from benchboss.ui.common import injury as _inj
 from benchboss.ui.common import num as _num
 from benchboss.ui.common import table as _table
 from benchboss.ui.screens.plan import plan
 from benchboss.ui.theme import Palette
 
-__all__ = ["activity", "alerts", "free_agents", "needs", "news", "plan", "roster", "standings",
+__all__ = ["activity", "alerts", "free_agents", "needs", "plan", "roster", "standings",
            "trades", "trash"]
 
 
@@ -98,22 +97,6 @@ def needs(balance: dict[str, dict[str, float]], my_team: str, pal: Palette) -> R
                  for p in positions]
         t.add_row(Text(team, style=f"bold {pal.accent}" if team == my_team else pal.text), *cells)
     return t
-
-
-def news(items: list[NewsItem], names: dict[int, str], pal: Palette, days: int) -> RenderableType:
-    if not items:
-        return Text(f"No news in the last {days} days.", style=pal.dim)
-    parts: list[RenderableType] = []
-    for it in items:
-        local = it.published.astimezone()
-        who = ", ".join(names.get(p, str(p)) for p in sorted(it.player_ids))
-        parts.append(Text.assemble((who, f"bold {pal.accent}"), (f"  {local:%a %b %d %I:%M %p}", pal.dim),
-                                   (f"  {it.source}", pal.dim)))
-        parts.append(Text(it.headline, style=pal.text))
-        if it.spin:
-            parts.append(Text.assemble(("Spin: ", f"bold {pal.dim}"), (it.spin, pal.dim)))
-        parts.append(Text(""))
-    return Group(*parts)
 
 
 def alerts(items: list[Alert], pal: Palette) -> RenderableType:

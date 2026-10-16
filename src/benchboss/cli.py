@@ -600,7 +600,15 @@ def _count(value: str) -> int:
     return n
 
 
+def _views(module) -> str:
+    """ "season (default), l7, l15": a screen's --view choices for the help text."""
+    keys = [k for k, _ in getattr(module, "VIEWS", ())]
+    return ", ".join([f"{keys[0]} (default)", *keys[1:]]) if keys else "none"
+
+
 def build_parser() -> argparse.ArgumentParser:
+    from benchboss.ui.screens import roster, standings, workload
+
     def global_options(suppress: bool) -> argparse.ArgumentParser:
         # the same flags work before or after the command; inside subcommands they default to
         # SUPPRESS so they never overwrite a value given before the command
@@ -640,13 +648,16 @@ def build_parser() -> argparse.ArgumentParser:
         p = add(name, cmd_status, "show config and check the connection to ESPN")
         p.add_argument("--offline", action="store_true", help="do not call ESPN")
 
-    p = add("roster", cmd_roster, "your roster with slots, injuries, averages and projections")
-    p.add_argument("--view", metavar="VIEW", help="which stats to show (see the app: v cycles them)")
-    p = add("standings", cmd_standings, "league table")
-    p.add_argument("--view", metavar="VIEW", help="which table to show")
+    p = add("roster", cmd_roster, "your roster: every stat split (season, last 7/15/30, "
+                                  "projection, last season) and the box score")
+    p.add_argument("--view", metavar="VIEW", help="the split for the box score: " + _views(roster))
+    p = add("standings", cmd_standings, "league table: record, points for and against, streaks, "
+                                        "playoff odds")
+    p.add_argument("--view", metavar="VIEW", help="which table: " + _views(standings))
     add("matchup", cmd_matchup, "this week's matchup: live score, projected final, games left")
-    p = add("activity", cmd_activity, "games per player this matchup week, day by day")
-    p.add_argument("--view", metavar="VIEW", help="which table to show")
+    p = add("activity", cmd_activity, "games per player this matchup week, day by day, and the "
+                                      "ones on your bench")
+    p.add_argument("--view", metavar="VIEW", help="row order: " + _views(workload))
     p = add("players", cmd_players, "player finder: free agents, rostered players or your watch "
                                     "list with every stat split")
     p.add_argument("query", nargs="*", help="part of a player's name")
@@ -668,7 +679,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help='fix a result, e.g. --pick "Monstars>Tune Squad" (add @WEEK for a '
                         "given week; repeat for more)")
     p.add_argument("--sims", type=_count, default=5000, help="simulated seasons (default 5000)")
-    p.add_argument("--view", metavar="VIEW", help="odds (default) or games: the matchups left")
+    p.add_argument("--view", metavar="VIEW", help="odds (default) or games, the matchups left")
     p = add("trash", cmd_trash, "most valuable free agents for this week (points added, best day to grab)")
     p.add_argument("pos", nargs="?", help="PG SG SF PF C G F")
     p.add_argument("-n", type=_count, default=10, help="how many (default 10)")

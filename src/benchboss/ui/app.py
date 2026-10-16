@@ -27,7 +27,7 @@ from textual.worker import get_current_worker
 from benchboss import __version__
 from benchboss import config as config_mod
 from benchboss.errors import BenchbossError
-from benchboss.ui import dashboard, views
+from benchboss.ui import common, dashboard, views
 from benchboss.ui.screens import SCREENS
 from benchboss.ui.theme import DARK, LIGHT, Palette, palette
 
@@ -434,15 +434,19 @@ class Benchboss(App):
             ideas = trades_mod.find_trades(lg, limit=8)
             bal = trades_mod.describe_needs(lg)
             return (lambda pal, w: Group(
-                Text("Trade ideas\n", style=f"bold {pal.accent}"), views.trades(ideas, pal),
-                Text(""), views.needs(bal, lg.me.name, pal),
+                common.title("Trade finder", pal, "fair 1-for-1 deals that fix a position"), Text(""),
+                views.trades(ideas, pal), Text(""), views.needs(bal, lg.me.name, pal),
                 Text("\nSend one from a terminal: benchboss trade --give \"A\" --get \"B\" --msg \"...\"",
                      style=pal.dim))), None
         if sid == "inbox":
             from benchboss import inbox
 
             items = inbox.alerts(s)
-            return (lambda pal, w: views.alerts(items, pal)), None
+            urgent = sum(1 for a in items if a.urgent)
+            note = (f"{urgent} need{'s' * (urgent == 1)} you" if urgent else "") if items else ""
+            return (lambda pal, w: Group(
+                common.title("Inbox", pal, "trade offers, claims, messages and watch list news", note),
+                Text(""), views.alerts(items, pal))), None
         raise BenchbossError(f"unknown screen {sid}")
 
     def _build_plan(self, s, sid: str) -> tuple[Draw, dict | None]:

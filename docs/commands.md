@@ -32,27 +32,57 @@ benchboss matchup [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 
 ### `benchboss roster`
 
-Your roster with slots, injuries, averages and projections.
+Your roster: every stat split (season, last 7/15/30, projection, last season) and the box score.
 
 ```text
 benchboss roster [-h] [--json] [--demo] [--theme {dark,light}] [-y]
+                        [--view VIEW]
 ```
+
+| Option | Meaning |
+|---|---|
+| `--view` | The split for the box score: season (default), l7, l15, l30, proj, last |
 
 ### `benchboss activity`
 
-Games per player this matchup week, day by day.
+Games per player this matchup week, day by day, and the ones on your bench.
 
 ```text
 benchboss activity [-h] [--json] [--demo] [--theme {dark,light}] [-y]
+                          [--view VIEW]
 ```
+
+| Option | Meaning |
+|---|---|
+| `--view` | Row order: lineup (default), games |
 
 ### `benchboss standings`
 
-League table.
+League table: record, points for and against, streaks, playoff odds.
 
 ```text
 benchboss standings [-h] [--json] [--demo] [--theme {dark,light}] [-y]
+                           [--view VIEW]
 ```
+
+| Option | Meaning |
+|---|---|
+| `--view` | Which table: league (default), divisions, moves |
+
+### `benchboss playoffs`
+
+Playoff race: odds, who is in or out, what-if scenarios.
+
+```text
+benchboss playoffs [-h] [--json] [--demo] [--theme {dark,light}] [-y]
+                          [--pick WINNER>LOSER] [--sims SIMS] [--view VIEW]
+```
+
+| Option | Meaning |
+|---|---|
+| `--pick` | Fix a result, e.g. --pick "Monstars>Tune Squad" (add @WEEK for a given week; repeat for more) |
+| `--sims` | Simulated seasons (default 5000) |
+| `--view` | Odds (default) or games, the matchups left |
 
 ## Find
 
@@ -70,6 +100,27 @@ benchboss trash [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 |---|---|
 | `pos` | PG SG SF PF C G F |
 | `-n` | How many (default 10) |
+
+### `benchboss players`
+
+Player finder: free agents, rostered players or your watch list with every stat split.
+
+```text
+benchboss players [-h] [--json] [--demo] [--theme {dark,light}] [-y]
+                         [--from {fa,rostered,all,watch}] [--pos POS]
+                         [--sort {proj,season,l7,l15,l30,last,own,change}]
+                         [--view VIEW] [-n N]
+                         [query ...]
+```
+
+| Option | Meaning |
+|---|---|
+| `query` | Part of a player's name |
+| `--from` | Free agents (default), players on a team, everyone, or your watch list |
+| `--pos` | PG SG SF PF C G F |
+| `--sort` | Rank by this split (fantasy points per game), % rostered or its change (default: the --view split, else proj) |
+| `--view` | Which split's box score to show: season l7 l15 l30 proj last |
+| `-n` | How many (default 50) |
 
 ### `benchboss fa`
 
@@ -100,17 +151,18 @@ benchboss trending [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 
 ### `benchboss news`
 
-Recent news and spins on your players (or on the players you name).
+Recent news and spins on your players, your watch list (--watch) or the players you name.
 
 ```text
 benchboss news [-h] [--json] [--demo] [--theme {dark,light}] [-y]
-                      [--days DAYS] [--ai]
+                      [--watch] [--days DAYS] [--ai]
                       [players ...]
 ```
 
 | Option | Meaning |
 |---|---|
 | `players` | Player names; default: your roster |
+| `--watch` | Your watch-list players instead of your roster |
 | `--days` | How many days back (default 5) |
 | `--ai` | AI briefing with web search (needs ANTHROPIC_API_KEY) |
 
@@ -134,11 +186,16 @@ benchboss trades [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 
 ### `benchboss alerts`
 
-Trade offers, accepted trades, pending claims, unread DMs.
+Trade offers, accepted trades, pending claims, unread DMs and new news on your watch-list players.
 
 ```text
 benchboss alerts [-h] [--json] [--demo] [--theme {dark,light}] [-y]
+                        [--mark-read]
 ```
+
+| Option | Meaning |
+|---|---|
+| `--mark-read` | Mark the watch list news shown as read, so it does not show again |
 
 ## Act (writes to ESPN, always asks first)
 
@@ -205,6 +262,22 @@ benchboss trade [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 | `--get` | Their player you want (repeat for more, all from one team) |
 | `--msg` | Note the other manager will see |
 | `--dry-run` | Show the offer, send nothing |
+
+### `benchboss watch`
+
+Your ESPN watch list: list it, or add / remove a player.
+
+```text
+benchboss watch [-h] [--json] [--demo] [--theme {dark,light}] [-y]
+                       [--dry-run]
+                       [{list,add,remove}] [player ...]
+```
+
+| Option | Meaning |
+|---|---|
+| `action` | Default: list |
+| `player` | The player to add or remove |
+| `--dry-run` | Show the change, send nothing |
 
 ### `benchboss chat`
 

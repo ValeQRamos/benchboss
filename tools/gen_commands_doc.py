@@ -9,9 +9,10 @@ from benchboss.cli import build_parser
 
 OUT = Path(__file__).resolve().parents[1] / "docs" / "commands.md"
 GROUPS = [
-    ("Look", ["dash", "matchup", "roster", "activity", "standings"]),
-    ("Find", ["trash", "fa", "trending", "news", "trades", "alerts"]),
-    ("Act (writes to ESPN, always asks first)", ["optimize", "add", "drop", "trade", "chat"]),
+    ("Look", ["dash", "matchup", "roster", "activity", "standings", "playoffs"]),
+    ("Find", ["trash", "players", "fa", "trending", "news", "trades", "alerts"]),
+    ("Act (writes to ESPN, always asks first)", ["optimize", "add", "drop", "trade", "watch",
+                                                 "chat"]),
     ("Account", ["setup", "login", "logout", "status", "app"]),
 ]
 
