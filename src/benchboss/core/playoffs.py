@@ -90,6 +90,8 @@ class Race:
     sims: int
     weeks_left: list[int]
     seeding_rule: str = ""
+    me: int | None = None          # your team id
+    baseline: Race | None = None   # the same race without the picks, when the caller ran it
 
     def odds(self, team_id: int) -> TeamOdds | None:
         return next((t for t in self.teams if t.team.id == team_id), None)
@@ -272,6 +274,11 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
             losses_sum[tid] += v[1]
 
     clinched, eliminated = certainties(league, games)
+    if n_seeds and not open_games:
+        # nothing left to play: only a coin flip on a perfect tie is random, so a team in (or
+        # out) in every simulation is certain; the bounds above miss ties broken by points
+        clinched |= {tid for tid in teams if made[tid] == runs}
+        eliminated |= {tid for tid in teams if made[tid] == 0}
     odds = []
     for tid, t in teams.items():
         w, lo, ti, pf, _ = base[tid]
@@ -284,7 +291,8 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
     odds.sort(key=lambda o: (o.mean_seed, -o.playoffs, -o.proj_wins, o.team.id))
     weeks_left = sorted({g.week for g in open_games})
     return Race(odds, open_games, {g.id: home_wins[g.id] / runs for g in open_games},
-                n_seeds, league.divisions, picks, runs, weeks_left, league.seeding_rule)
+                n_seeds, league.divisions, picks, runs, weeks_left, league.seeding_rule,
+                me=league.my_team_id)
 
 
 def _standing_base(league: League, games: list[Game]) -> dict[int, list[float]]:
