@@ -827,10 +827,11 @@ class FinderView(Vertical):
         msg.update(message or "")
         msg.set_class(message is not None, "visible")
 
-    def _scroll_columns(self, scroll_x: float, show: str | None) -> None:
+    def _scroll_columns(self, scroll_x: float, show: str | None, tries: int = 40) -> None:
         """Put the horizontal scroll back, then bring column ``show`` into view (the fixed
         columns, star and Player, never scroll). The scrolled part starts on a whole column,
-        so no stray half of one sits next to the names."""
+        so no stray half of one sits next to the names. Until the table has measured its new
+        columns it cannot scroll that far, so it tries again a moment later."""
         if not self._live():
             return
         t = self.query_one(DataTable)
@@ -848,6 +849,9 @@ class FinderView(Vertical):
                 x = left - fixed
         starts = [sum(widths[:j]) - fixed for j in range(t.fixed_columns, len(widths))]
         x = next((s for s in starts if s >= x), x)
+        if t.virtual_size.width < sum(widths) and tries > 0:  # columns not laid out yet
+            self.set_timer(0.05, lambda: self._scroll_columns(scroll_x, show, tries - 1))
+            return
         t.scroll_to(x=max(0, x), animate=False)
 
     def _render_detail(self) -> None:
