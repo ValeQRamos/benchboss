@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.3] - 2026-10-16
+
+A small patch on top of 1.0.2: a better ball and the loose ends the 1.0.2 audit left.
+
+### Added
+
+- `activity --json` rows have an `on_roster` key, false for a player who left your roster
+  during the week (see Workload below).
+
+### Changed
+
+- New pixel ball on the dashboard and in the README. It's bigger (15 by 15 pixels), has a
+  shine and a shaded side, and its seams curve the way they do on a real ball. It also gets
+  more room next to the team name. The app's top bar shows a round dot in the ball's color,
+  since one row of text is too short for a pixel ball.
+- Workload: a player you dropped or traded away this week stays at the bottom, marked
+  `gone`, with the games he played for you, so `In` and the daily counts add up.
+- Standings shows ESPN's own clinch tags, combined ones included (`yz` is division and bye,
+  `*z` top seed and bye).
+- The demo league's days already played get the lineup a manager setting it every morning
+  would have had, so Workload shows a few bench games instead of one lineup copied to every
+  day.
+
+### Fixed
+
+- Budget waivers (FAAB) are detected the way ESPN's own app does it, from
+  `isUsingAcquisitionBudget`. In a league with a budget, a claim on a player on waivers asks
+  for `--bid` (at least the league minimum), and in a league without one `--bid` is refused
+  instead of being sent.
+- Player finder: the table ends on the last column that fits, so a column cut off at the
+  right edge no longer shows a stray digit.
+
 ## [1.0.2] - 2026-10-16
 
 Most of this release answers the feature request in

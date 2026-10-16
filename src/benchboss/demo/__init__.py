@@ -20,6 +20,7 @@ from benchboss.errors import BenchbossError
 from benchboss.espn.constants import SLOT_ID
 from benchboss.news import NewsItem
 from benchboss.service import Session
+from benchboss.text import surname
 
 
 def load() -> dict:
@@ -53,13 +54,6 @@ def _values(flt: dict, key: str) -> list | None:
     if v is None:
         return None
     return list(v) if isinstance(v, (list, tuple, set)) else [v]
-
-
-def _last_name(name: str) -> str:
-    parts = name.split()
-    while len(parts) > 1 and parts[-1].rstrip(".") in ("Jr", "Sr", "II", "III", "IV"):
-        parts.pop()
-    return parts[-1]
 
 
 def _sort_value(name: str, spec: dict):
@@ -239,7 +233,23 @@ class DemoSession(Session):
         return SeasonCalendar.from_raw(self.data["schedule"])
 
     def roster_on(self, period: int):
-        return self.league().me.roster
+        """The demo's lineup on a day. Days already played get the lineup a manager who set
+        it every morning would have had (whoever had a game played), so the week shows a few
+        bench games rather than one lineup copied to every day. Today and later carry today's
+        lineup, as ESPN does when nothing is saved for a day."""
+        from benchboss.core.lineup import best_lineup, day_value
+        from benchboss.espn.constants import BENCH, IR
+        from benchboss.espn.models import RosterSpot
+
+        lg = self.league()
+        roster = lg.me.roster
+        if period >= self.today_period:
+            return roster
+        pool = [s for s in roster if s.slot_id != IR]
+        values = [day_value(s.player, period, self.calendar) for s in pool]
+        assign = best_lineup(pool, lg.slot_counts, values)
+        return ([RosterSpot(s.player, assign.get(i, BENCH)) for i, s in enumerate(pool)]
+                + [s for s in roster if s.slot_id == IR])
 
     def news(self, player_ids, days=5):
         """RotoWire-style items for 4 roster players and 2 watch-list players, newest first,
@@ -258,7 +268,7 @@ class DemoSession(Session):
             pid, name = who[idx]
             published = now - dt.timedelta(hours=hours)
             if published >= cutoff:
-                items.append(NewsItem(i, published, f"{_last_name(name)} {headline}", spin,
+                items.append(NewsItem(i, published, f"{surname(name)} {headline}", spin,
                                       "Demo", "Rotowire", "", {pid}))
         return sorted(items, key=lambda x: x.published, reverse=True)
 

@@ -10,6 +10,15 @@ from benchboss.errors import BenchbossError
 
 T = TypeVar("T")
 
+SUFFIXES = {"jr.", "jr", "sr.", "sr", "ii", "iii", "iv", "v"}
+
+
+def surname(name: str) -> str:
+    """ "Scotty Pippen Jr." -> "Pippen": the last name without a suffix, the way RotoWire
+    headlines and narrow tables name a player."""
+    parts = [p for p in name.split() if p.lower() not in SUFFIXES]
+    return parts[-1] if parts else name
+
 
 def norm(s: str) -> str:
     """Lowercase, no accents, no punctuation: 'Nikola Jokić' -> 'nikola jokic'."""

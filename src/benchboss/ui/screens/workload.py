@@ -31,6 +31,7 @@ VIEWS: tuple[tuple[str, str], ...] = (("lineup", "By lineup"), ("games", "Most g
 # A game he spends on your bench is dim and in parentheses, "(LAC)"; with no room for the
 # opponents the cells turn into dots: ● a game in your lineup, ○ on your bench.
 PLAYS, BENCHED, NO_GAME = "●", "○", "·"
+GONE = "gone"  # the Slot of a player who left your roster this week
 
 # SIMPLE_HEAD plus a rule above the footer, so the "Games" counts sit under a thin line
 _HEAD_FOOT = box.Box("    \n    \n ── \n    \n    \n ── \n    \n    \n")
@@ -62,8 +63,9 @@ def load(session) -> WorkloadData:
         except BenchbossError as e:
             error = str(e)
     # games left count from the real day: before the season every game is still ahead
+    former = session.former_players(periods) if lineups is not None else []
     acts = activity_mod.roster_activity(lg.me, cal, periods, today, lineups=lineups,
-                                        include_ir=True)
+                                        include_ir=True, former=former)
     return WorkloadData(acts, cal, periods, today, lg.starter_slots, lg.current_matchup,
                         lineups is not None, error)
 
@@ -83,7 +85,7 @@ def to_json(data: WorkloadData) -> list[dict]:
                          "slot": _slot_name(slot),
                          "starting": a.starting(i) if data.lineups_known else None})
         out.append({**a.to_dict(), "positions": a.player.positions,
-                    "slot": _slot_name(a.slot_id),
+                    "on_roster": not a.gone, "slot": _slot_name(a.slot_id),
                     "games_in_lineup": a.games_in_lineup if data.lineups_known else None,
                     "days": days})
     return out
@@ -143,10 +145,15 @@ def draw(data: WorkloadData, pal: Palette, width: int = 120, view: int = 0) -> R
     return Group(*parts)
 
 
+def _groups(acts: list[Activity]) -> list[list[Activity]]:
+    """Starters, bench, IR, then whoever left the roster this week."""
+    return [*activity_mod.by_lineup(acts), [a for a in acts if a.gone]]
+
+
 def _ordered(acts: list[Activity], grouped: bool) -> list[Activity]:
     if grouped:
-        return [a for group in activity_mod.by_lineup(acts) for a in group]
-    return sorted(acts, key=lambda a: (a.on_ir, *activity_mod.by_games(a)))
+        return [a for group in _groups(acts) for a in group]
+    return sorted(acts, key=lambda a: (a.gone, a.on_ir, *activity_mod.by_games(a)))
 
 
 # --- the table ------------------------------------------------------------------------------------
@@ -186,8 +193,8 @@ def _table(data: WorkloadData, pal: Palette, lay: _Layout, grouped: bool) -> Tab
     t.add_column("In", footer=Text(str(gin), style=pal.text) if data.lineups_known else "-", **right)
     t.add_column("Left", footer=str(left), **right)
 
-    if grouped:  # starters, bench, IR, with a blank line between them
-        groups = [g for g in activity_mod.by_lineup(data.acts) if g]
+    if grouped:  # starters, bench, IR, gone, with a blank line between them
+        groups = [g for g in _groups(data.acts) if g]
     else:
         groups = [_ordered(data.acts, grouped=False)]
     rows = [[_row(a, data, pal, lay) for a in group] for group in groups]
@@ -246,13 +253,16 @@ def _day_foot(data: WorkloadData, n: int, sp: int, lay: _Layout, pal: Palette) -
 
 
 def _row(a: Activity, data: WorkloadData, pal: Palette, lay: _Layout) -> list:
-    p, ir = a.player, a.on_ir
+    p, ir = a.player, a.on_ir or a.gone
     cells: list = [player_cell(p, pal, short=lay.short, team=lay.team,
                                style=pal.dim if ir else None)]
+    if a.gone and not lay.slot:  # the Slot column that says it is gone is dropped first
+        cells[0].append(f" {GONE}", style=pal.dim)
     if lay.pos:
         cells.append(Text(p.positions, style=pal.dim))
     if lay.slot:
-        cells.append(Text(_slot_name(a.slot_id) or "", style=pal.text if a.is_starting else pal.dim))
+        slot = GONE if a.gone else _slot_name(a.slot_id) or ""
+        cells.append(Text(slot, style=pal.text if a.is_starting else pal.dim))
     days = [_day_cell(a, i, sp, data, pal, lay) for i, sp in enumerate(data.periods)]
     cells += [Text("").join(days)] if lay.strip else days
     games = pal.dim if ir else pal.good if a.games >= 4 else pal.warn if a.games <= 2 else pal.text
@@ -265,7 +275,7 @@ def _row(a: Activity, data: WorkloadData, pal: Palette, lay: _Layout) -> list:
 
 def _day_cell(a: Activity, i: int, sp: int, data: WorkloadData, pal: Palette, lay: _Layout) -> Text:
     opp = a.schedule[i] if i < len(a.schedule) else ""
-    if not opp:
+    if not opp:  # no game, or (a player who left) a day he was not yours
         return Text(NO_GAME, style=pal.border)
     label = PLAYS if lay.glyphs else _short(opp)
     if data.lineups_known and a.benched(i):
@@ -298,6 +308,8 @@ def _legend(data: WorkloadData, pal: Palette, lay: _Layout, width: int) -> list[
     if known:
         items.append((BENCHED if lay.glyphs else "(LAC)", "on your bench", None))
     items += [("In", "games in your lineup", None), ("Left", "from today on", None)]
+    if any(a.gone for a in data.acts):
+        items.append((GONE, "no longer on your roster", None))
     spots, most = data.starter_slots, max(data.per_day(), default=0)
     if spots and most > spots and not lay.strip:
         key = str(most) if lay.glyphs else f"{most}/{spots}"

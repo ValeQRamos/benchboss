@@ -392,7 +392,7 @@ VERIFIED (live). See section 4 for how to turn `matchupPeriods` into days. `matc
 }
 ```
 
-VERIFIED (live). FAAB is off (`isUsingAcquisitionBudget: false`), so `bidAmount` is irrelevant for this league.
+VERIFIED (live). FAAB is off (`isUsingAcquisitionBudget: false`), so `bidAmount` is irrelevant for this league. ESPN's own app decides FAAB from `isUsingAcquisitionBudget === true` alone (`usesFAAB` in the kona main bundle), not from `acquisitionType`, and benchboss does the same: with it on, a claim on a player on waivers needs a `bidAmount` of at least `minimumBid`. VERIFIED (bundle).
 
 Observed behavior (VERIFIED (live), from the completed 2026 season of this league, which had identical `acquisitionSettings`): `matchupAcquisitionLimit: 1.0` does not mean one acquisition per day. Reading `mTransactions2` day by day for all 174 days of 2026 found free agent adds by one team in one scoring period of 1 (304 times), 2 (106), 3 (22), 4 (2) and 5 (1), up to 9 in one weekly matchup, and no `FAILED_MATCHUPACQUISITIONLIMIT` record. The limit is not binding in practice for this league; its exact semantics stay UNVERIFIED. Waiver claims were processed every day of the week (Mon 11, Tue 6, Thu 5, Fri 5, Wed 3, Sun 3 processed claims), always between 07:00 and 09:30 UTC (03:00 to 05:30 ET, the start of the ESPN day), not only on `waiverProcessDays: ["SUNDAY"]`.
 

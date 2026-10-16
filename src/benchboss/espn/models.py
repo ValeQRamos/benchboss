@@ -226,7 +226,7 @@ class Team:
     trades: int = 0
     playoff_pct: float | None = None       # ESPN's season simulation, 0..1
     division_win_pct: float | None = None
-    clinch: str = ""             # PLAYOFFS, DIVISION, BYE, TOP_SEED, ELIMINATED or ""
+    clinch: str = ""             # PLAYOFFS, DIVISION_BYE, TOP_SEED, ELIMINATED... or ""
     watch_list: tuple[int, ...] = ()       # only filled in for your own team
 
     @property
@@ -300,6 +300,8 @@ class League:
     scoring_type: str = "H2H_POINTS"
     acquisition_type: str = ""
     waiver_hours: int = 0
+    uses_faab: bool = False      # acquisitionSettings.isUsingAcquisitionBudget, as ESPN reads it
+    minimum_bid: int = 0
     roster_lock_type: str = ""   # rosterSettings.rosterLocktimeType, e.g. FIRSTGAME_SCORINGPERIOD
     playoff_teams: int = 0       # scheduleSettings.playoffTeamCount
     regular_season_weeks: int = 0  # scheduleSettings.matchupPeriodCount
@@ -398,7 +400,10 @@ def parse_team(t: dict, season: int, members: dict[str, str]) -> Team:
               for e in (t.get("roster") or {}).get("entries") or []]
     moves = t.get("transactionCounter") or {}
     sim = t.get("currentSimulationResults") or {}
-    clinch = t.get("playoffClinchType") or sim.get("playoffClinchType") or ""
+    # ESPN's standings take the team's own flag and fall back on the simulation's only when
+    # the team has none at all (an "UNKNOWN" there still counts, as in ESPN's bundle)
+    clinch = t.get("playoffClinchType")
+    clinch = (sim.get("playoffClinchType") if clinch is None else clinch) or ""
     return Team(
         id=t["id"], name=team_name(t), abbrev=t.get("abbrev", ""), owner_ids=owners,
         owner_name=members.get(owners[0], "") if owners else "",
@@ -468,6 +473,8 @@ def parse_league(raw: dict, my_team_id: int | None, swid: str | None = None,
         scoring_type=(settings.get("scoringSettings") or {}).get("scoringType", ""),
         acquisition_type=acq.get("acquisitionType", ""),
         waiver_hours=acq.get("waiverHours") or 0,
+        uses_faab=acq.get("isUsingAcquisitionBudget") is True,
+        minimum_bid=acq.get("minimumBid") or 0,
         roster_lock_type=roster_settings.get("rosterLocktimeType") or "",
         playoff_teams=sched.get("playoffTeamCount") or 0,
         regular_season_weeks=sched.get("matchupPeriodCount") or 0,
