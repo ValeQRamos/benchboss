@@ -112,6 +112,7 @@ class Benchboss(App):
         self.pending: dict | None = None  # the plan on screen that Apply would send
         self._last: tuple[str, Draw] | None = None  # (screen, draw) of what is on screen
         self._narrow: bool | None = None
+        self._panel_widget: Widget | None = None  # the interactive screen on #panel, if any
         self.views: dict[str, int] = {}  # screen id -> index into its module's VIEWS
 
     # --- layout --------------------------------------------------------------------------------
@@ -137,7 +138,8 @@ class Benchboss(App):
         self._fit_menu()  # also gives the focus to the menu, or to the screen when it is hidden
         self._top()
         self.action_show("dash")
-        self.set_interval(60, self._auto_refresh)
+        # not "_auto_refresh": Textual keeps its own attribute by that name on every node
+        self.set_interval(60, self._refresh_dashboard)
         self.set_timer(20, self.check_spins)
         self.set_interval(SPIN_CHECK, self.check_spins)
 
@@ -184,13 +186,21 @@ class Benchboss(App):
         panel = self.query_one("#panel")
         panel.remove_children()
         widget = mount.make()
+        self._panel_widget = widget
         panel.mount(widget)
         panel.add_class("visible")
         self.query_one("#content").add_class("hidden")
-        self.call_after_refresh(widget.focus)
+        self.call_after_refresh(self._focus_panel, widget)
+
+    def _focus_panel(self, widget: Widget) -> None:
+        """Give the keys to an interactive screen once it is drawn, unless a key pressed in
+        the meantime already took it off the screen (its parts may be gone by now)."""
+        if widget is self._panel_widget:
+            widget.focus()
 
     def _unmount_panel(self) -> None:
         panel = self.query_one("#panel")
+        self._panel_widget = None
         if panel.has_class("visible"):
             panel.remove_class("visible")
             panel.remove_children()
@@ -209,8 +219,8 @@ class Benchboss(App):
         menu = self.query_one("#menu", OptionList)
         if not menu.has_class("hidden"):
             menu.focus()
-        elif self.query_one("#panel").has_class("visible"):
-            self.query_one("#panel").focus()
+        elif self._panel_widget is not None:
+            self._panel_widget.focus()  # #panel itself cannot take the focus
         else:
             self.query_one("#content").focus()
 
@@ -233,11 +243,12 @@ class Benchboss(App):
         menu = 0 if self.query_one("#menu").has_class("hidden") else MENU_WIDTH
         return max(20, self.size.width - menu - 6)
 
-    def _set_menu(self, visible: bool) -> None:
+    def _set_menu(self, visible: bool, focus: bool = True) -> None:
         menu = self.query_one("#menu", OptionList)
         menu.set_class(not visible, "hidden")
         if visible:
-            menu.focus()
+            if focus:
+                menu.focus()
         elif self.focused is None or self.focused is menu:  # a hidden menu must not keep the keys
             self._focus_home()
 
@@ -246,7 +257,8 @@ class Benchboss(App):
         narrow = self.size.width < NARROW
         if narrow != self._narrow:  # only when the width crosses the line, so m sticks
             self._narrow = narrow
-            self._set_menu(not narrow)
+            # an interactive screen keeps the keys when a wider window brings the menu back
+            self._set_menu(not narrow, focus=self._panel_widget is None)
 
     # --- navigation ----------------------------------------------------------------------------
 
@@ -257,13 +269,14 @@ class Benchboss(App):
         self.current = sid
         self.pending = None
         self._last = None
+        # the screen being left goes first, so the keys never go back to it
+        self._show(Text("Loading...", style=self.pal.dim))
         if self._narrow:
             self._set_menu(False)  # on a narrow window the menu closes once you pick a screen
         menu = self.query_one("#menu", OptionList)
         idx = next((i for i, (s, _, _) in enumerate(MENU) if s == sid), None)
         if idx is not None and menu.highlighted != idx:
             menu.highlighted = idx
-        self._show(Text("Loading...", style=self.pal.dim))
         self._status("talking to ESPN..." if not self.demo else "demo data")
         self.load(sid)
 
@@ -283,7 +296,9 @@ class Benchboss(App):
         views_ = getattr(module, "VIEWS", ()) if module else ()
         if views_:
             i = self.views.get(self.current, 0) % len(views_)
-            nxt = views_[(i + 1) % len(views_)][1]
+            # an interactive screen may skip some views (the finder skips splits with no numbers)
+            following = getattr(self._panel_widget, "next_view", None)
+            nxt = views_[(following() if callable(following) else i + 1) % len(views_)][1]
             self._status(f"{views_[i][1]} · v for {nxt} · r refresh · ctrl+t light/dark · q quit")
 
     def action_toggle_menu(self) -> None:
@@ -315,7 +330,7 @@ class Benchboss(App):
         else:
             self._rerender()
 
-    def _auto_refresh(self) -> None:
+    def _refresh_dashboard(self) -> None:
         if self.current == "dash":
             self.load("dash")
 
@@ -368,14 +383,15 @@ class Benchboss(App):
 
     @work(thread=True, exclusive=True, group="spins", exit_on_error=False)
     def _check_spins(self) -> None:
-        """Toast every new spin on a watch-list player, each one once (inbox.watch_spins
-        remembers what was shown). A burst shows the newest few and one line for the rest.
+        """Toast every new spin on a watch-list player, each one once (inbox.toast_spins
+        remembers what was toasted, apart from what was read: a toast nobody noticed leaves
+        the news in the Inbox). A burst shows the newest few and one line for the rest.
         Errors stay quiet: this runs in the background and the user did not ask for it."""
         from benchboss import inbox
 
         most = 4  # toasts per check; one more counts the rest
         try:
-            items = inbox.watch_spins(self.session, mark_seen=True)
+            items = inbox.toast_spins(self.session)
             toasts = [f"{who}: {item.headline}" for who, item in items[:most]]
             if len(items) > most:
                 toasts.append(f"{len(items) - most} more on your watch list: press n for "

@@ -246,6 +246,7 @@ def alerts(session, include_chat: bool = True, include_spins: bool = True) -> li
 # --- watch list spins -----------------------------------------------------------------------------
 
 SEEN_FILE = "seen-news.json"  # {"<league id>": [news ids]}, oldest first
+TOASTED_FILE = "toasted-news.json"  # the same shape: the spins the app already toasted
 SEEN_KEEP = 500               # news ids remembered per league
 SPIN_DAYS = 3                 # how far back watch_spins looks
 FIRST_RUN_HOURS = 24          # on the first check of a league, older news counts as seen
@@ -257,18 +258,20 @@ def seen_path() -> Path:
     return config_mod.config_dir() / SEEN_FILE
 
 
-def _read_seen() -> dict:
-    """The seen file as a dict; a missing, unreadable or broken file reads as empty."""
+def _read_seen(path: Path | None = None) -> dict:
+    """The seen file (or ``path``) as a dict; a missing, unreadable or broken file reads as
+    empty."""
     try:
-        raw = json.loads(seen_path().read_text())
+        raw = json.loads((path or seen_path()).read_text())
     except (OSError, ValueError):
         return {}
     return raw if isinstance(raw, dict) else {}
 
 
-def _write_seen(book: dict) -> None:
-    """Write the seen file atomically (a temp file, then a rename), like config.save."""
-    path = seen_path()
+def _write_seen(book: dict, path: Path | None = None) -> None:
+    """Write the seen file (or ``path``) atomically (a temp file, then a rename), like
+    config.save."""
+    path = path or seen_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -320,6 +323,29 @@ def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
         who = [names.get(p, f"player {p}") for p in sorted(item.player_ids) if p in ids]
         out.append((", ".join(who) or "a watch-list player", item))
     return out
+
+
+def toast_spins(session) -> list[tuple[str, NewsItem]]:
+    """The unseen spins (``watch_spins``) the app has not toasted yet, newest first, recorded
+    as toasted in ``toasted-news.json``. A toast is not a read: the Inbox and ``benchboss
+    alerts`` keep listing the news until it is marked read (``alerts --mark-read``), since
+    nobody may have been looking when the toast showed. ESPN errors propagate."""
+    spins = watch_spins(session)
+    if not spins:
+        return []
+    key = str(session.client.league_id)
+    path = config_mod.config_dir() / TOASTED_FILE
+    with _seen_lock:
+        book = _read_seen(path)
+        entry = book.get(key)
+        known = list(entry) if isinstance(entry, list) else []
+        toasted = {str(x) for x in known}
+        new = [(who, item) for who, item in spins if str(item.id) not in toasted]
+        if new:
+            record = known + [item.id for _, item in reversed(new)]  # oldest first, like seen
+            book[key] = list({str(x): x for x in record}.values())[-SEEN_KEEP:]
+            _write_seen(book, path)
+    return new
 
 
 def spin_alerts(session, mark_seen: bool = False) -> list[Alert]:

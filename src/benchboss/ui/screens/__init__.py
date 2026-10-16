@@ -12,7 +12,9 @@ Every screen module exposes:
 An interactive screen also exposes ``widget(data, app) -> textual.widget.Widget``. The app
 mounts that widget in place of the static drawing (the CLI still uses ``draw``). The widget
 gets the keyboard focus; keys it does not bind fall through to the app, so the one-key menu
-(d t w a f p n x i s y o) keeps working unless an input box has the focus.
+(d t w a f p n x i s y o) keeps working unless an input box has the focus. A widget that
+cycles VIEWS itself and skips some may define ``next_view() -> int`` (the index v goes to),
+so the app's status line names the right one.
 
 Rules for every screen: ``load`` may raise BenchbossError (the app shows the message);
 ``draw`` never calls ESPN, so a resize or ctrl+t redraws from the same data; both themes

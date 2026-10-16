@@ -250,8 +250,12 @@ def empty_message(data: FinderData, pal: Palette, app: bool = False) -> Text:
     """What to say when there is nobody to show."""
     where = SOURCES.get(data.source, "this pool")
     if data.query:
-        tip = ("Press 4 to search everyone, or escape to clear the search." if app
-               else "Try --from all, or a shorter name.")
+        if data.source == "all":  # nowhere wider to look
+            tip = ("Try a shorter name, or press escape to clear the search." if app
+                   else "Try a shorter name.")
+        else:
+            tip = ("Press 4 to search everyone, or escape to clear the search." if app
+                   else "Try --from all, or a shorter name.")
         return Text.assemble((f'No players match "{data.query}" in {where}', pal.text),
                              (f"{' at ' + data.position if data.position else ''}. ", pal.text),
                              (tip, pal.dim))
@@ -546,9 +550,10 @@ class FinderView(Vertical):
     FinderView #finder-filters { height: auto; margin-top: 1; }
     FinderView #finder-message { height: auto; margin-top: 1; display: none; }
     FinderView #finder-message.visible { display: block; }
-    FinderView DataTable { height: 1fr; margin-top: 1; background: $background; }
+    /* the table keeps its header, 5 players and the scrollbar; the card shares the rest */
+    FinderView DataTable { height: 1fr; min-height: 7; margin-top: 1; background: $background; }
     FinderView DataTable > .datatable--fixed { background: $surface; }
-    FinderView #finder-detail { height: auto; max-height: 50%; display: none;
+    FinderView #finder-detail { height: 1fr; display: none;
                                 border-top: solid $accent; padding: 1 1 0 1; }
     FinderView #finder-detail.open { display: block; }
     FinderView #finder-hint { height: 1; margin-top: 1; }
@@ -584,7 +589,9 @@ class FinderView(Vertical):
         self.players: list[Player] = list(data.players)
         self.limit = data.n
         self.watched: set[int] = set(data.watch)
-        self.loading = False
+        # not "loading": that is Textual's own flag, which covers the whole widget
+        self.fetching = False
+        self._pool_sort = data.sort  # the sort ESPN ranked the players on screen by
         self.error = ""
         self.detail_id: int | None = None
         self._news: dict[int, list] = {}
@@ -618,7 +625,16 @@ class FinderView(Vertical):
             yield Static(id="finder-card")
         yield Static(id="finder-hint")
 
+    def _live(self) -> bool:
+        """Whether the app still shows this finder. A menu key can take it off the screen
+        while its parts are still being mounted, or while a callback scheduled earlier (a
+        focus, a scroll, a fetch) is on its way. Textual then removes the parts one by one,
+        so they may be gone already: there is nothing left to draw or focus."""
+        return self.is_attached and getattr(self._owner_app, "_panel_widget", self) is self
+
     def on_mount(self) -> None:
+        if not self._live():
+            return
         self.watch(self.app, "theme", self._theme_changed, init=False)
         if self.query_text:
             self.query_one("#finder-search", Input).value = self.query_text
@@ -631,7 +647,8 @@ class FinderView(Vertical):
                 self._maybe_refetch_sorted()
 
     def focus(self, scroll_visible: bool = True):
-        self.query_one(DataTable).focus(scroll_visible)
+        if self._live():
+            self.query_one(DataTable).focus(scroll_visible)
         return self
 
     def on_resize(self) -> None:
@@ -679,13 +696,13 @@ class FinderView(Vertical):
     def _render_header(self) -> None:
         pal = self.pal
         width = max(20, self.size.width or 100)
-        count = "" if self.loading else (f"{len(self.players)} player{'s' * (len(self.players) != 1)}"
-                                         if self.players else "")
+        count = "" if self.fetching else (f"{len(self.players)} player{'s' * (len(self.players) != 1)}"
+                                          if self.players else "")
         order = "▼" if self.sort_desc else "▲"
         self.query_one("#finder-title", Static).update(fit_title(
             pal, width, SOURCES[self.source], self.position, self.query_text,
             f"{SORT_LABEL.get(self.sort_key, self.sort_key)} {order}", count,
-            "Loading..." if self.loading else ""))
+            "Loading..." if self.fetching else ""))
         tabs, regions = self._tabs(pal, width)
         self.query_one("#finder-tabs", _Bar).show(tabs, regions)
         self.query_one("#finder-search", Input).styles.width = max(10, min(SEARCH_WIDTH,
@@ -803,7 +820,7 @@ class FinderView(Vertical):
             t.move_cursor(row=t.get_row_index(str(keep_id)))
         self.call_after_refresh(self._scroll_columns, scroll_x, show)
         message: Text | None = None
-        if self.loading and not self.players:
+        if self.fetching and not self.players:
             message = Text("Loading...", style=pal.dim)
         elif self.error:
             message = Text(self.error, style=pal.bad)
@@ -820,7 +837,7 @@ class FinderView(Vertical):
         """Put the horizontal scroll back, then bring column ``show`` into view (the fixed
         columns, star and Player, never scroll). The scrolled part starts on a whole column,
         so no stray half of one sits next to the names."""
-        if not self.is_attached:
+        if not self._live():
             return
         t = self.query_one(DataTable)
         x = scroll_x
@@ -850,7 +867,11 @@ class FinderView(Vertical):
         now = getattr(self.session, "now", None)
         card = detail(p, self._view_data(), self.split, p.id in self.watched, self.pal, width,
                       self._news.get(p.id), now, self._news_errors.get(p.id, ""))
-        self.query_one("#finder-card", Static).update(card)
+        box, shown = self.query_one("#finder-detail"), self.query_one("#finder-card", Static)
+        shown.update(card)
+        # never taller than what it shows: a short card leaves the rest to the table
+        box.styles.max_height = (shown.get_content_height(self.size, self.app.size, width)
+                                 + box.styles.gutter.height)
 
     # --- helpers -----------------------------------------------------------------------------------
 
@@ -904,13 +925,21 @@ class FinderView(Vertical):
         self.position = position
         self._refetch()
 
-    def action_next_split(self) -> None:
-        """v: the next split with numbers (in the preseason only Proj and Prev have any)."""
+    def _next_split(self) -> str:
+        """The split v goes to: the next one with numbers (in the preseason only Proj and Prev
+        have any)."""
         i = SPLIT_KEYS.index(self.split)
-        for k in SPLIT_KEYS[i + 1:] + SPLIT_KEYS[:i]:
-            if k == DEFAULT_SPLIT or not self.players or has_split(self.players, k):
-                self._set_split(k)
-                return
+        return next((k for k in SPLIT_KEYS[i + 1:] + SPLIT_KEYS[:i]
+                     if k == DEFAULT_SPLIT or not self.players or has_split(self.players, k)),
+                    self.split)
+
+    def next_view(self) -> int:
+        """The VIEWS index v goes to, for the app's status line ("v for Projected")."""
+        return SPLIT_KEYS.index(self._next_split())
+
+    def action_next_split(self) -> None:
+        """v: the next split with numbers."""
+        self._set_split(self._next_split())
 
     def _set_split(self, split: str) -> None:
         if split == self.split or split not in SPLITS:
@@ -1035,7 +1064,7 @@ class FinderView(Vertical):
             self.watched.add(pid)
         else:
             self.watched.discard(pid)
-        if not self.is_attached:
+        if not self._live():
             return
         t = self.query_one(DataTable)
         if str(pid) in t.rows and "star" in t.columns:
@@ -1071,17 +1100,21 @@ class FinderView(Vertical):
 
     def _maybe_refetch_sorted(self) -> None:
         """ESPN sends the top players by one sort: when the pool was cut there, a new sort
-        may bring in players who were not sent. Ask again, quietly, after a short pause."""
-        if len(self.players) < self.limit or self.source == "watch":
-            return
+        may bring in players who were not sent. Ask again, quietly, after a short pause; not
+        when ESPN already ranked the pool by it (Player, Start% and the box score sort by the
+        split)."""
         if self._refetch_timer is not None:
             self._refetch_timer.stop()
+            self._refetch_timer = None
+        if (len(self.players) < self.limit or self.source == "watch"
+                or self._fetch_sort() == self._pool_sort):
+            return
         self._refetch_timer = self.set_timer(0.4, lambda: self._refetch(quiet=True))
 
     def _refetch(self, quiet: bool = False) -> None:
         self._remember()
         self._gen += 1
-        self.loading = True
+        self.fetching = True
         self.error = ""
         self.limit = POOL_SIZE
         if not quiet:
@@ -1102,16 +1135,18 @@ class FinderView(Vertical):
             err = f"{type(e).__name__}: {e}"
         if get_current_worker().is_cancelled:
             return
-        self._owner_app.call_from_thread(self._fetched, gen, players, err)
+        self._owner_app.call_from_thread(self._fetched, gen, players, err, sort)
 
-    def _fetched(self, gen: int, players: list[Player], err: str) -> None:
-        if gen != self._gen or not self.is_attached:
+    def _fetched(self, gen: int, players: list[Player], err: str, sort: str) -> None:
+        if gen != self._gen or not self._live():
             return  # a newer request is on its way, or the finder is gone
         keep = self._current_id()
-        self.loading = False
+        self.fetching = False
         self.error = err
         if not err:
             self.players = players
+            self._pool_sort = sort
+            self._sync_app_view(announce=True)  # which splits v visits may have changed
         self._render_header()
         self._render_table(keep_id=keep, show=self.split if self.sort_key == self.split else None)
         self._render_detail()
@@ -1132,7 +1167,7 @@ class FinderView(Vertical):
         self._news[pid] = items
         if err:
             self._news_errors[pid] = err
-        if self.is_attached and self.detail_id == pid:
+        if self._live() and self.detail_id == pid:
             self._render_detail()
 
 
