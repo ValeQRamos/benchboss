@@ -45,11 +45,25 @@ class TrashPick:
     def net(self) -> float:
         return self.gain - self.drop_cost
 
+    def game_days(self, cal: SeasonCalendar) -> list[int]:
+        """The days he plays for you, from the grab day to the end of the week: ``games_left``
+        of them. The calendar may list one more, today's game when it has already tipped off
+        (it no longer counts), and that one is always the first."""
+        if self.best_day is None:
+            return []
+        days = [d for d in sorted(self.gain_by_day)
+                if d >= self.best_day and cal.plays(self.player.pro_team_id, d)]
+        return days[max(0, len(days) - self.games_left):]
+
     def to_dict(self, cal: SeasonCalendar | None = None) -> dict:
         best = None
         if self.best_day is not None:
             best = cal.date_of(self.best_day).isoformat() if cal else self.best_day
+        days = None
+        if cal is not None:
+            days = [cal.date_of(d).isoformat() for d in self.game_days(cal)]
         return {"player": self.player.to_dict(), "games_left": self.games_left,
+                "game_days": days,
                 "best_pickup_day": best, "week_gain": round(self.gain, 1),
                 "drop": self.drop.name if self.drop else None,
                 "drop_cost": round(self.drop_cost, 1), "net_gain": round(self.net, 1),
