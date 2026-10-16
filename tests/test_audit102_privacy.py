@@ -195,7 +195,7 @@ def test_configuration_doc_lists_the_seen_news_file():
 
 def test_changelog_describes_the_release():
     text = repo_text("CHANGELOG.md")
-    entry = text.split(f"## [{benchboss.__version__}]", 1)[1].split("\n## [", 1)[0]
+    entry = text.split("## [1.0.2]", 1)[1].split("\n## [", 1)[0]  # the release it audited
     assert "Work in progress" not in entry
     assert "### Added" in entry and "### Changed" in entry
     for needle in (inbox.SEEN_FILE, "benchboss watch add|remove", "without", "--mark-read",

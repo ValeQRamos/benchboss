@@ -86,8 +86,10 @@ those days (for example with `optimize week`).
   spots. `13/10` means 13 players play and only 10 can start, so at least 3 games go to the
   bench. IR players do not count, and neither do days before a player joined your roster.
 - If the daily reads fail, the grid falls back to plain opponents and **In** shows `-`.
+- A player you dropped or traded away during the week stays as a last row marked `gone`,
+  with only the days he was yours, so the games he played for you still add up in **In**.
 
-Rows come in lineup order (starters by slot, then the bench, then IR). `v` in the app, or
+Rows come in lineup order (starters by slot, then the bench, then IR, then anyone gone). `v` in the app, or
 `--view games`, sorts by most games instead.
 
 ## Best trash (free agent value)

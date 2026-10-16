@@ -23,8 +23,8 @@ argument-hint: optional position (PG SG SF PF C G F)
    a one-week stream, not an upgrade. `drop` is null only when the roster has an open spot.
 2. Cross-check volume with `benchboss activity --json` if the user cares about games played:
    `games`, `games_left`, and `games_in_lineup` (games in a starting slot, from the lineup
-   ESPN has saved for each day). Each `schedule` day has `date`, `opponent`, `slot` and
-   `starting`. To compare recent form, the player-finder skill
+   ESPN has saved for each day). Each entry of `days` has `date`, `opponent`, `slot` and
+   `starting`, and `on_roster` is false for a player who left the roster this week. To compare recent form, the player-finder skill
    (`benchboss players --json --sort l7`) has every stat split.
 3. Recommend at most three, each with one line of reasoning: net gain this week, games left,
    pickup day, injury flags. Mention waiver players cannot help until they clear.
