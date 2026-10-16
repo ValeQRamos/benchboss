@@ -34,6 +34,11 @@ def seen_file() -> dict:
     return json.loads((config_mod.config_dir() / "seen-news.json").read_text())
 
 
+def seen_news(s) -> list:
+    """The news ids the seen file has for the demo league."""
+    return seen_file()[str(s.client.league_id)]["news"]
+
+
 def item(nid: int, hours: float, s, who: int = DEMIN, headline: str = "") -> NewsItem:
     return NewsItem(nid, s.now - dt.timedelta(hours=hours), headline or f"news {nid}",
                     "the spin", "RotoWire", "Rotowire", "", {who})
@@ -64,7 +69,7 @@ def test_demo_spins_show_once_with_mark_seen(session):
     assert first[0][1].headline.startswith("Demin is seeing more minutes")
     assert inbox.watch_spins(session) == []
     assert inbox.watch_spins(demo_session(), mark_seen=True) == []  # remembered on disk
-    assert sorted(seen_file()[str(session.client.league_id)]) == sorted(i.id for _, i in first)
+    assert sorted(seen_news(session)) == sorted(i.id for _, i in first)
 
 
 def test_without_mark_seen_nothing_is_recorded(session):
@@ -78,7 +83,7 @@ def test_first_run_hides_news_older_than_a_day(session):
                    item(4, 60, session)])
     assert [i.id for _, i in inbox.watch_spins(session, mark_seen=True)] == [1, 2]
     # the old ones were recorded too, so they never show up later
-    assert sorted(seen_file()[str(session.client.league_id)]) == [1, 2, 3, 4]
+    assert sorted(seen_news(session)) == [1, 2, 3, 4]
     assert inbox.watch_spins(session) == []
     feed(session, [item(5, 0.5, session), item(1, 2, session), item(3, 30, session)])
     assert [i.id for _, i in inbox.watch_spins(session, mark_seen=True)] == [5]
@@ -90,7 +95,8 @@ def test_after_the_first_run_older_news_is_new_too(session):
     yet shows (say the app was closed for two days)."""
     feed(session, [])
     assert inbox.watch_spins(session, mark_seen=True) == []
-    assert seen_file() == {str(session.client.league_id): []}
+    assert seen_file() == {str(session.client.league_id): {
+        "news": [], "players": list(session.watch_list())}}
     feed(session, [item(7, 40, session)])
     assert [i.id for _, i in inbox.watch_spins(session)] == [7]
 
@@ -104,9 +110,9 @@ def test_the_seen_file_is_per_league_and_capped(session):
     assert [i.id for _, i in inbox.watch_spins(session, mark_seen=True)] == [1, 2]
     book = seen_file()
     assert book["999"] == [1, 2, 3]
-    assert len(book[key]) == inbox.SEEN_KEEP == 500
-    assert book[key][-2:] == [2, 1]          # oldest first: the newest stay at the end
-    assert book[key][0] == 1102              # the oldest ids were dropped
+    assert len(book[key]["news"]) == inbox.SEEN_KEEP == 500
+    assert book[key]["news"][-2:] == [2, 1]  # oldest first: the newest stay at the end
+    assert book[key]["news"][0] == 1102      # the oldest ids were dropped
     assert not list(path.parent.glob("*.tmp"))
 
 
@@ -115,7 +121,7 @@ def test_a_broken_seen_file_counts_as_a_first_run(session):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not json")
     assert len(inbox.watch_spins(session, mark_seen=True)) == 2
-    assert len(seen_file()[str(session.client.league_id)]) == 2
+    assert len(seen_news(session)) == 2
 
 
 def test_an_empty_watch_list_has_no_spins(session):

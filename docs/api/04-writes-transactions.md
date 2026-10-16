@@ -35,6 +35,7 @@ Bundles were fetched as data and searched as text; they were never executed.
 | POST | `{WRITES}/teams/{teamId}/recommendations?lineupScoringPeriodId=&recommendationTypeId=LINEUP&restOfWeek=` | ESPN "Quick Lineup" (server sets the optimal lineup) | espn_s2 + SWID | VERIFIED (bundle) |
 | GET | `{READS}/teams/{teamId}/recommendations?recommendationTypeId=LINEUP&view=recommend` | Read ESPN's suggested lineup (no write) | espn_s2 + SWID | VERIFIED (live) |
 | POST | `{WRITES}/teams?scoringPeriodId=0` | LM: set waiver order, transaction counters, team fields | LM cookies | VERIFIED (bundle) |
+| POST | `{WRITES}/teams/{teamId}` body `{"watchList": [...]}` | Replace your watch list (the star on a player), at most 50 players | espn_s2 + SWID | VERIFIED (bundle) |
 | GET | `{READS}?view=mPendingTransactions` | Pending trades and claims (source of truth for alerts) | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{READS}?view=mTransactions2` (+ `X-Fantasy-Filter: {"transactions":{...}}`) | Transaction log, filterable by type | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{COMM}/communication/?view=kona_league_communication` (+ filter) | Recent Activity topics (`ACTIVITY_TRANSACTIONS`, etc.) | espn_s2 + SWID | VERIFIED (live) |
@@ -709,6 +710,28 @@ How a non-browser client should match ESPN's web client. Rows marked VERIFIED (l
 
 ---
 
+## 13. Watch list
+
+Status: VERIFIED (bundle, `team.watchPlayer` in the kona main bundle); the read side VERIFIED (live). The write was not executed for this document.
+
+The watch list is the star on a player in the web app. It is private: `view=mTeam` returns `teams[].watchList` (player ids) only on the caller's own team, and the key is absent on every other team (VERIFIED, live, 2026-10-16; see [01 §7](01-league-views.md#7-mteam)).
+
+The web app changes it by sending the whole new list, one field in the body:
+
+```http
+POST {WRITES}/teams/{teamId}
+Content-Type: application/json
+
+{"watchList": [4278073, 3112335]}
+```
+
+- `watchPlayer(playerId)` toggles one id: it takes it out of the list when present, appends it otherwise, and posts `{watchList: [...]}` to `.../leagues/{leagueId}/teams/{teamId}` on `lm-api-writes` with the same POST helper as the other writes. VERIFIED (bundle).
+- The list is capped at `maxWatchListPlayers`, a constant `50`. At the cap the web app refuses the add without sending anything (`{error: "tooManyPlayers"}`) and shows "The Watch List is capped at {max} players. To add another player to your Watch List, please first remove a player." VERIFIED (bundle). Whether the server enforces the cap too is UNVERIFIED.
+- If the POST fails, the web app puts the star back and shows "Oops! Something went wrong, please try again". On success it only looks for an `error` key in the answer (the same check that shows the cap message). VERIFIED (bundle). What a successful answer holds is UNVERIFIED.
+- benchboss: `Client.update_team(team_id, {"watchList": ids})`, used by `Session.set_watched`. It reads `mTeam` fresh first (the list may have changed in the ESPN app), refuses an add at 50 like the web app, sends the whole list, and takes the new list from `watchList` in the answer when there is one (otherwise the list it sent). `benchboss watch add|remove` reports a failure when the player is not where he should be in that list.
+
+---
+
 ## Open questions
 
 1. Exact HTTP status codes for transaction errors (earlier client runs saw 409 for the position limit and for `ROSTER` on a non-current day); confirm with a real write and record the body.
@@ -721,3 +744,4 @@ How a non-browser client should match ESPN's web client. Rows marked VERIFIED (l
 8. Which parameter, if any, narrows `mTransactions2` by team? (`scoringPeriodId` narrows it by day on the completed 2026 season, but not in the 2027 preseason.)
 9. Origin and purpose of the legacy `CHAT` topic, and whether the server still notifies members about messages posted there.
 10. Whether `X-Fantasy-Platform` accepts arbitrary values (for example an app identifier) or only known clients.
+11. What `POST {WRITES}/teams/{teamId}` with `{"watchList": [...]}` answers on success (the team, or nothing), and whether the server itself refuses a 51st player.

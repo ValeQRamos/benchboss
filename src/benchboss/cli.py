@@ -239,6 +239,7 @@ def cmd_players(c: Ctx):
 
 def cmd_watch(c: Ctx):
     """benchboss watch: list the watch list; watch add/remove PLAYER changes it on ESPN."""
+    from benchboss.service import WATCH_LIST_FULL, WATCH_LIST_MAX
     from benchboss.ui.screens import finder
 
     a = c.args
@@ -259,9 +260,18 @@ def cmd_watch(c: Ctx):
         c.emit(Text(msg, style=c.pal.dim), {"summary": msg, "dry_run": bool(a.dry_run),
                                             "sent": False, "status": None, "error": None})
         return
+    if on and len(s.watch_list()) >= WATCH_LIST_MAX:  # set_watched checks again, fresh
+        raise BenchbossError(WATCH_LIST_FULL)
     summary = (f"Add {p.name} ({p.pro_team}) to your ESPN watch list" if on
                else f"Take {p.name} ({p.pro_team}) off your ESPN watch list")
-    _write(c, summary, lambda: f"watch list has {len(s.set_watched(p.id, on))} players")
+
+    def send() -> str:
+        ids = s.set_watched(p.id, on)
+        if (p.id in ids) != on:  # ESPN answered with the old list
+            return f"FAILED: {p.name} is {'not on' if on else 'still on'} the list ESPN sent back"
+        return f"watch list has {len(ids)} players"
+
+    _write(c, summary, send)
 
 
 def cmd_playoffs(c: Ctx):

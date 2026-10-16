@@ -383,6 +383,7 @@ def test_empty_watch_list_in_the_app_says_how_to_add_one():
     async def scenario(pilot, app, view):
         me = app.session.league().me
         me.watch_list = ()
+        view.watched.clear()  # the tab lists the finder's stars
         await pilot.press("3")
         await settle(pilot)
         msg = plain(view.query_one("#finder-message"))
@@ -607,6 +608,7 @@ def test_an_empty_pool_hides_the_table_header():
 
     async def scenario(pilot, app, view):
         app.session.league().me.watch_list = ()
+        view.watched.clear()  # the tab lists the finder's stars
         await pilot.press("3")
         await settle(pilot)
         assert not view.query_one(DataTable).show_header

@@ -250,8 +250,15 @@ def empty_message(data: FinderData, pal: Palette, app: bool = False) -> Text:
     """What to say when there is nobody to show."""
     where = SOURCES.get(data.source, "this pool")
     if data.query:
-        tip = ("Press 4 to search everyone, or escape to clear the search." if app
-               else "Try --from all, or a shorter name.")
+        # ESPN only matches the start of a name: "jok" finds Jokic, "okic" finds nobody
+        everyone = data.source == "all"
+        if app:
+            tip = ("Type the start of a first or last name, "
+                   + ("" if everyone else "press 4 to search everyone, ")
+                   + "or escape to clear the search.")
+        else:
+            tip = ("Type the start of a first or last name"
+                   + ("." if everyone else ", or try --from all."))
         return Text.assemble((f'No players match "{data.query}" in {where}', pal.text),
                              (f"{' at ' + data.position if data.position else ''}. ", pal.text),
                              (tip, pal.dim))
@@ -1088,14 +1095,18 @@ class FinderView(Vertical):
             self.players = []
             self.detail_id = None
         self._render_all()
-        self._fetch(self._gen, self.source, self.position, self._fetch_sort(), self.query_text)
+        # the watch list tab shows the stars as they are here: a star still waiting for its
+        # turn to reach ESPN is in it, and one just taken off is not
+        self._fetch(self._gen, self.source, self.position, self._fetch_sort(), self.query_text,
+                    tuple(self.watched))
 
     @work(thread=True, exclusive=True, group="finder-pool")
     def _fetch(self, gen: int, source: str, position: str | None, sort: str,
-               query: str | None) -> None:
+               query: str | None, watched: tuple[int, ...]) -> None:
         players, err = [], ""
         try:
-            players = self.session.player_pool(source, position, POOL_SIZE, sort, query)
+            players = self.session.player_pool(source, position, POOL_SIZE, sort, query,
+                                               watched=watched)
         except BenchbossError as e:
             err = str(e)
         except Exception as e:  # never let a bad payload kill the app
