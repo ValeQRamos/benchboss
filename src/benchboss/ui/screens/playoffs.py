@@ -571,7 +571,10 @@ class PlayoffBuilder(Widget, can_focus=True):
     def on_mount(self) -> None:
         self.watch(self.app, "theme", lambda _: self.repaint(), init=False)
         self._fit()
-        self.call_after_refresh(self._status_line)
+        # the app sets its own status line right after it mounts this widget, and Mount runs
+        # after that, so the line can change now: no frame shows the app's line, and nothing
+        # waits for a screen refresh that a slow machine may not have drawn yet
+        self._status_line()
 
     def on_resize(self) -> None:
         self._fit()

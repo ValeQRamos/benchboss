@@ -12,7 +12,7 @@
     "/\\s--y/": false,
     "/\\s-[A-Za-z]*y/": false,
     "/\\s--ai?(\\s|=|$)/": false,
-    "/\\s--w(a(t(ch?)?)?)?(\\s|=|$)/": false,
+    "/^benchboss dash\\b.*\\s--w(a(t(ch?)?)?)?(\\s|=|$)/": false,
     "/^benchboss (login|logout|setup)\\b/": false
   },
   "files.exclude": { "**/__pycache__": true, "**/.pytest_cache": true, "**/.ruff_cache": true }

@@ -87,6 +87,15 @@ def test_top_bar_has_the_pixel_mark_and_no_emoji():
     asyncio.run(run())
 
 
+def repo_file(rel: str) -> Path:
+    """A file from the repository; the sdist ships src and tests only, so a test that needs
+    one skips there (as in test_fix101_E)."""
+    path = ROOT / rel
+    if not path.exists():
+        pytest.skip(f"{rel} is not part of this checkout")
+    return path
+
+
 def decoded(png: bytes) -> tuple[bytes, bytes]:
     """IHDR and the raw scanlines of a one-IDAT PNG. The compressed bytes can differ from one
     zlib build to another (CI runs three systems), what they decode to cannot."""
@@ -94,7 +103,8 @@ def decoded(png: bytes) -> tuple[bytes, bytes]:
 
 
 def test_make_logo_writes_the_committed_png():
-    spec = importlib.util.spec_from_file_location("make_logo", ROOT / "tools" / "make_logo.py")
+    committed = repo_file("docs/images/logo.png")
+    spec = importlib.util.spec_from_file_location("make_logo", repo_file("tools/make_logo.py"))
     tool = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tool)
     data = tool.png(tool.rgba(logo.BALL, 16))
@@ -103,7 +113,7 @@ def test_make_logo_writes_the_committed_png():
     assert (width, height, depth, kind) == (16 * logo.BALL_WIDTH, 16 * len(logo.BALL), 8, 6)
     header, raw = decoded(data)
     assert raw[1:5] == b"\x00\x00\x00\x00"  # the top left corner is transparent
-    assert decoded((ROOT / "docs" / "images" / "logo.png").read_bytes()) == (header, raw)
+    assert decoded(committed.read_bytes()) == (header, raw)
 
 
 # --- the dashboard ------------------------------------------------------------------------------

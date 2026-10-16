@@ -173,6 +173,7 @@ AUTO = [
     "benchboss dash --json",
     "benchboss trash --json -n 10",
     "benchboss news --json --days 5",
+    "benchboss news --json --watch --days 5",
     "benchboss trades --json --with Monstars",
     "benchboss chat --json",
     "benchboss chat --json --to Monstars",

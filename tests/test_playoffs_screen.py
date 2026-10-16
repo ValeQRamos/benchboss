@@ -196,8 +196,7 @@ def test_a_pick_reruns_the_race_and_c_clears_it():
         before = odds_text(b)
         g = b.current()
         assert g.week == 3 and b.race.me in (g.home, g.away)  # lands on your game this week
-        await pilot.press("right")
-        assert b.busy and "simulating..." in b._draw_head(b.pal, 140, 1).plain
+        await pilot.press("right")  # "simulating..." while it runs: test_audit102_portability
         await settle(pilot)
         assert b.picks == {g.id: g.away}
         assert b.race is not b.initial and b.race.picks == b.picks
