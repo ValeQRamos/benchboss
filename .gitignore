@@ -14,3 +14,6 @@ CLAUDE.local.md
 credentials.json
 config.json
 .env
+
+# raw ESPN fetch used by tools/enrich_demo.py
+tools/.demo-cache/
