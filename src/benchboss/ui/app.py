@@ -173,7 +173,9 @@ class Benchboss(App):
         self.query_one("#top", Static).update(left)
 
     def _status(self, text: str) -> None:
-        self.query_one("#status", Static).update(Text(text, style=self.pal.dim))
+        # a worker can finish while the app shuts down, after the status line is gone
+        for status in self.query("#status").results(Static):
+            status.update(Text(text, style=self.pal.dim))
 
     def _show(self, renderable: RenderableType, actions: bool = False) -> None:
         self._unmount_panel()
