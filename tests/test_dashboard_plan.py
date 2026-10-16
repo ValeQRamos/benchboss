@@ -23,6 +23,8 @@ from benchboss.ui.app import Benchboss
 from benchboss.ui.screens import plan as plan_screen
 from benchboss.ui.theme import DARK, LIGHT
 
+CORNERS = "╭┌"  # rounded, or square where Rich swaps boxes for a legacy Windows console
+
 ROOT = Path(__file__).resolve().parents[1]
 WIDTHS = [46, 80, 120, 160]
 # emoji and pictographs; ★ (U+2605) is one of the glyphs the app uses on purpose
@@ -170,7 +172,7 @@ def test_news_count_and_wrapping(busy, width, count):
 def test_news_spans_the_full_width_on_wide_layouts(busy):
     out = text_of(dashboard.render(dashboard.collect(busy), DARK, 120), 120)
     news_top = next(x for x in out.splitlines() if "LATEST NEWS" in x)
-    assert news_top.startswith("╭") and cell_len(news_top.rstrip()) == 120
+    assert news_top[:1] in CORNERS and cell_len(news_top.rstrip()) == 120
 
 
 def test_watch_list_news_gets_a_dim_star(busy):
@@ -233,7 +235,7 @@ def test_columns_stay_inside_the_width_and_keep_the_matchup_first(session, width
     lines = out.splitlines()
     week = next(i for i, x in enumerate(lines) if "WEEK 3" in x)
     roster = next(i for i, x in enumerate(lines) if "ROSTER" in x)
-    assert lines[week].startswith("╭") and week < roster
+    assert lines[week][:1] in CORNERS and week < roster
 
 
 # --- the week view ------------------------------------------------------------------------------

@@ -172,6 +172,15 @@ async def settle(pilot):
     await pilot.pause()
 
 
+async def wait_until(pilot, ok, timeout: float = 5.0) -> bool:
+    """Pause until ``ok()`` holds (a slow CI runner lays out later than a laptop)."""
+    for _ in range(int(timeout / 0.05)):
+        if ok():
+            return True
+        await pilot.pause(0.05)
+    return ok()
+
+
 def drive(app, scenario, size=(140, 44)):
     async def run():
         async with app.run_test(size=size) as pilot:
@@ -273,15 +282,15 @@ def test_theme_and_width_changes_keep_the_builder():
 
     async def scenario(pilot):
         b = app.query_one(playoffs.PlayoffBuilder)
-        assert b.has_class("-stacked")  # 140 columns with the menu: odds under the games
+        # 140 columns with the menu: odds under the games
+        assert await wait_until(pilot, lambda: b.has_class("-stacked"))
         await pilot.press("ctrl+t")
         await settle(pilot)
         assert app.query_one(playoffs.PlayoffBuilder) is b and b.pal is LIGHT
         await pilot.resize_terminal(200, 50)
-        await pilot.pause()
-        assert not b.has_class("-stacked")
         games = b.query_one("#pb-games")
-        assert 40 <= games.size.width <= b.size.width // 2
+        assert await wait_until(pilot, lambda: not b.has_class("-stacked")
+                                and 40 <= games.size.width <= b.size.width // 2)
         assert "Week 3" in text_of(b._draw_games(b.pal, games.size.width, games.size.height))
 
     drive(app, scenario)

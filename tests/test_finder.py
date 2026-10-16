@@ -33,6 +33,15 @@ async def settle(pilot):
     await pilot.pause()
 
 
+async def wait_until(pilot, ok, timeout: float = 5.0) -> bool:
+    """Pause until ``ok()`` holds (a slow CI runner lays out later than a laptop)."""
+    for _ in range(int(timeout / 0.05)):
+        if ok():
+            return True
+        await pilot.pause(0.05)
+    return ok()
+
+
 def drive(scenario, size=(150, 48), theme="dark", app=None):
     app = app or Benchboss(Config(theme=theme), demo=True)
 
@@ -394,13 +403,15 @@ def test_empty_watch_list_in_the_app_says_how_to_add_one():
 
 def test_narrow_window_scrolls_the_selected_split_into_view():
     async def scenario(pilot, app, view):
-        await pilot.pause(0.3)
         t = view.query_one(DataTable)
-        keys = [c.key.value for c in t.ordered_columns]
-        widths = [c.get_render_width(t) for c in t.ordered_columns]
-        i = keys.index("proj")
-        right = sum(widths[:i + 1])
-        assert right <= t.scroll_x + t.scrollable_content_region.width
+
+        def in_view() -> bool:
+            keys = [c.key.value for c in t.ordered_columns]
+            widths = [c.get_render_width(t) for c in t.ordered_columns]
+            right = sum(widths[:keys.index("proj") + 1])
+            return right <= t.scroll_x + t.scrollable_content_region.width
+
+        assert await wait_until(pilot, in_view)
 
     drive(scenario, size=(90, 40))
 
@@ -582,7 +593,8 @@ def test_watch_pool_in_the_cli_has_no_star_column():
 
 def test_narrow_window_keeps_every_tab_and_split_and_scrolls_by_whole_columns():
     async def scenario(pilot, app, view):
-        await pilot.pause(0.3)
+        t = view.query_one(DataTable)
+        await wait_until(pilot, lambda: t.scroll_x > 0)
         tabs = view.query_one("#finder-tabs")
         search = view.query_one("#finder-search", Input)
         assert [r[4] for r in tabs.regions] == list(finder.TABS)
@@ -590,7 +602,6 @@ def test_narrow_window_keeps_every_tab_and_split_and_scrolls_by_whole_columns():
         filters = view.query_one("#finder-filters")
         assert filters.size.height == 2  # Pos on one line, Stats on the next
         assert {r[0] for r in filters.regions if r[3] == "split"} == {1}
-        t = view.query_one(DataTable)
         widths = [c.get_render_width(t) for c in t.ordered_columns]
         fixed = sum(widths[:t.fixed_columns])
         starts = {sum(widths[:j]) - fixed for j in range(t.fixed_columns, len(widths))}
