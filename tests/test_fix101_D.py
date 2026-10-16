@@ -148,7 +148,7 @@ def test_resize_and_theme_change_keep_the_screen_you_are_on():
         await settle(pilot)
         await pilot.resize_terminal(130, 40)
         await pilot.pause()
-        assert app.current == "standings" and isinstance(body(app), Table)
+        assert app.current == "standings" and "Brick City" in text_of(body(app))
         await pilot.press("o")
         await settle(pilot)
         assert body(app).header_style == f"bold {DARK.dim}"
