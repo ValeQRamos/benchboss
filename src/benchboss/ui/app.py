@@ -366,18 +366,25 @@ class Benchboss(App):
         if self._session is not None or self.demo:
             self._check_spins()
 
-    @work(thread=True, exclusive=True, group="spins")
+    @work(thread=True, exclusive=True, group="spins", exit_on_error=False)
     def _check_spins(self) -> None:
-        """Toast every new spin on a watch-list player (each one once, see inbox.watch_spins)."""
+        """Toast every new spin on a watch-list player, each one once (inbox.watch_spins
+        remembers what was shown). A burst shows the newest few and one line for the rest.
+        Errors stay quiet: this runs in the background and the user did not ask for it."""
         from benchboss import inbox
 
+        most = 4  # toasts per check; one more counts the rest
         try:
             items = inbox.watch_spins(self.session, mark_seen=True)
-        except Exception:  # a background check never bothers the user with errors
+            toasts = [f"{who}: {item.headline}" for who, item in items[:most]]
+            if len(items) > most:
+                toasts.append(f"{len(items) - most} more on your watch list: press n for "
+                              "Player news.")
+            for text in toasts:
+                self.call_from_thread(self.notify, text, title="Watch list news", timeout=12,
+                                      markup=False)
+        except Exception:  # never bother the user, never take the app down
             return
-        for who, item in items[:5]:
-            text = f"{who}: {item.headline}"
-            self.call_from_thread(self.notify, text, title="Watch list news", timeout=12)
 
     @staticmethod
     def _error(e) -> Draw:
@@ -403,25 +410,23 @@ class Benchboss(App):
             return self._build_plan(s, sid)
         if sid in ("news", "ainews"):
             from benchboss import news as news_mod
+            from benchboss.ui.common import title
+            from benchboss.ui.screens import news as news_screen
 
-            lg = s.league()
-            roster = [x.player for x in lg.me.roster]
             if sid == "ainews":
                 if self.demo:
                     raise BenchbossError("the AI briefing is not available with demo data")
+                roster = [x.player for x in s.league().me.roster]
                 text = news_mod.ai_digest(roster, 5)
                 return (lambda pal, w: Group(
-                    Text("AI briefing (Claude with web search), last 5 days\n", style=f"bold {pal.accent}"),
+                    title("AI briefing", pal, "Claude with web search", "last 5 days"), Text(""),
                     Text(text, style=pal.text))), None
-            names = {p.id: p.name for p in roster}
-            items = s.news([p.id for p in roster], 5)
             tip = ("Press g for an AI briefing with web search (sends your players' names to the "
                    "Anthropic API)." if news_mod.ai_available() and not self.demo else
                    "Want more? Set ANTHROPIC_API_KEY and press g for an AI briefing, or ask "
                    "Copilot Chat for news on your players (player-news skill).")
-            return (lambda pal, w: Group(
-                Text("News and spins on your players, last 5 days\n", style=f"bold {pal.accent}"),
-                views.news(items, names, pal, 5), Text(tip, style=pal.dim))), None
+            data = news_screen.load(s, news_screen.DAYS, ("roster", "watch"), tip=tip)
+            return (lambda pal, w: news_screen.draw(data, pal, w)), None
         if sid == "trades":
             from benchboss.core import trades as trades_mod
 

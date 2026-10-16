@@ -204,7 +204,7 @@ _WATCH_NEWS = [
             "the offense.",
      "His ownership is climbing for a reason. Worth a speculative add in deeper leagues "
      "while the role lasts."),
-    (2, 26, "practiced in full Tuesday and is expected to be available Wednesday.",
+    (2, 16, "practiced in full Tuesday and is expected to be available Wednesday.",
      "He has been efficient in limited minutes. A fine streamer if you need games this week."),
 ]
 

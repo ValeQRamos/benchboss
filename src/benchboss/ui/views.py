@@ -8,6 +8,7 @@ for older callers.
 from __future__ import annotations
 
 from rich.console import Group, RenderableType
+from rich.table import Table
 from rich.text import Text
 
 from benchboss.core.trades import TradeIdea
@@ -117,9 +118,22 @@ def news(items: list[NewsItem], names: dict[int, str], pal: Palette, days: int) 
 
 def alerts(items: list[Alert], pal: Palette) -> RenderableType:
     if not items:
-        return Text("Nothing new: no trade offers, pending claims or unread messages.", style=pal.dim)
-    return Group(*[Text.assemble(("● " if a.urgent else "· ", pal.accent if a.urgent else pal.dim),
-                                 (a.text, pal.text)) for a in items])
+        return Text("Nothing new: no trade offers, pending claims, unread messages or watch list "
+                    "news.", style=pal.dim)
+    grid = Table.grid(padding=(0, 1))  # a long alert wraps under its text, not under the mark
+    grid.add_column(no_wrap=True)
+    grid.add_column()
+    for a in items:
+        text = Text(a.text, style=pal.text)
+        prefix = "Watch list · "
+        if a.kind == "spin" and a.text.startswith(prefix):
+            text.stylize(pal.dim, 0, len(prefix))
+            text.stylize("bold", len(prefix), len(prefix) + len(a.player))
+            mark = Text("★", style=pal.accent)
+        else:
+            mark = Text("●" if a.urgent else "·", style=pal.accent if a.urgent else pal.dim)
+        grid.add_row(mark, text)
+    return grid
 
 
 def free_agents(players: list[Player], pal: Palette, title: str) -> RenderableType:

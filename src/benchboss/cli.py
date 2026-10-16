@@ -344,28 +344,56 @@ def _partner(s, q):
 
 
 def cmd_news(c: Ctx):
+    """News on your roster, on your watch list (--watch) or on the players you name."""
     from benchboss import news as news_mod
+    from benchboss.ui.screens import news as screen
 
+    a = c.args
     s = c.session
-    lg = s.league()
-    roster = [sp.player for sp in lg.me.roster]
-    if c.args.players:
-        roster = [s.find_player(q) for q in c.args.players]
-    names = {p.id: p.name for p in roster}
-    if c.args.ai:
+    if a.watch and a.players:
+        raise BenchbossError("name players or use --watch, not both")
+    named = [s.find_player(q) for q in a.players] if a.players else None
+    which = () if named else ("watch",) if a.watch else ("roster",)
+    if a.ai:
+        players = list({p.id: p for sec in screen.sections(s, which, named)
+                        for p in sec.players}.values())
+        if not players:
+            raise BenchbossError(f"{screen.EMPTY_WATCH} {screen.WATCH_ADD}" if a.watch else
+                                 "your roster is empty")
         with c.out.status("Asking Claude to search the web..."):
-            text = news_mod.ai_digest(roster, c.args.days)
+            text = news_mod.ai_digest(players, a.days)
         c.emit(text, {"digest": text})
         return
-    items = s.news([p.id for p in roster], c.args.days)
-    c.emit(views.news(items, names, c.pal, c.args.days), [i.to_dict(names) for i in items])
+    data = screen.load(s, a.days, which, named)
+    c.emit(screen.draw(data, c.pal, c.out.width), screen.to_json(data))
 
 
 def cmd_alerts(c: Ctx):
+    """Trade offers, claims and unread DMs, then unseen news on watch-list players;
+    --mark-read marks the news shown as seen."""
+    from rich.console import Group
+
     from benchboss import inbox
 
-    items = inbox.alerts(c.session)
-    c.emit(views.alerts(items, c.pal), [a.to_dict() for a in items])
+    s = c.session
+    mark = c.args.mark_read
+    items = inbox.alerts(s, include_spins=False)
+    try:
+        spins = inbox.spin_alerts(s, mark_seen=mark)  # one read, so what is marked is what shows
+    except BenchbossError as e:
+        if mark:
+            raise
+        spins = []
+        c.err.print(Text(f"Watch list news is not available right now ({e}).", style=c.pal.dim))
+    items += spins
+    n = len(spins)
+    if mark:  # with nothing at all to show, the "Nothing new" line says it already
+        note = (f"Marked {n} watch list item{'s' * (n != 1)} as read." if n else
+                "No new watch list news to mark as read." if items else "")
+    else:
+        note = "benchboss alerts --mark-read marks the watch list news as read." if n else ""
+    c.emit(Group(views.alerts(items, c.pal), *([Text(f"\n{note}", style=c.pal.dim)] if note else [])),
+           [x.to_dict() for x in items])
 
 
 # --- write ------------------------------------------------------------------------------------------
@@ -648,8 +676,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-n", type=_count, default=25, help="how many (default 25)")
     p = add("trending", cmd_fa, "free agents being added the most")
     p.add_argument("-n", type=_count, default=15, help="how many (default 15)")
-    p = add("news", cmd_news, "recent news and spins on your players (or on the players you name)")
+    p = add("news", cmd_news, "recent news and spins on your players, your watch list (--watch) "
+                              "or the players you name")
     p.add_argument("players", nargs="*", help="player names; default: your roster")
+    p.add_argument("--watch", action="store_true", help="your watch-list players instead of your roster")
     p.add_argument("--days", type=_count, default=5, help="how many days back (default 5)")
     p.add_argument("--ai", action="store_true", help="AI briefing with web search (needs ANTHROPIC_API_KEY)")
     p = add("trades", cmd_trades, "trade finder: fair 1-for-1 deals that fix positional needs")
@@ -659,7 +689,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fairness", type=float, default=0.85, help="minimum value match 0-1 (default 0.85)")
     p.add_argument("--needs", action="store_true", help="show every team's positional surplus and needs")
     p.add_argument("-n", type=_count, default=8, help="how many ideas (default 8)")
-    add("alerts", cmd_alerts, "trade offers, accepted trades, pending claims, unread DMs")
+    p = add("alerts", cmd_alerts, "trade offers, accepted trades, pending claims, unread DMs and "
+                                  "new news on your watch-list players")
+    p.add_argument("--mark-read", action="store_true",
+                   help="mark the watch list news shown as read, so it does not show again")
 
     p = add("optimize", cmd_optimize, "set the best lineup: today, tomorrow, week, or a date")
     p.add_argument("when", nargs="?", default="today", help="today (default), tomorrow, week, 11-04, 2026-11-04")
