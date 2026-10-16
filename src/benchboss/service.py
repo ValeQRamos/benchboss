@@ -92,6 +92,7 @@ class Session:
         self._league: League | None = None
         self._league_raw: dict | None = None
         self._lineups: dict[int, dict[int, int]] = {}
+        self._lineup_players: dict[int, Player] = {}  # everyone seen in those lineups
 
     # The news on watch-list players you have seen (inbox.watch_spins): None keeps it in
     # seen-news.json in the config folder; a dict keeps it in memory instead (the demo).
@@ -142,6 +143,7 @@ class Session:
     def league(self, refresh: bool = False) -> League:
         if self._league is None or refresh:
             self._lineups = {}
+            self._lineup_players = {}
             raw = self.client.league(*LEAGUE_VIEWS)
             self._league_raw = raw
             swid = self.client.cookies[1] if self.client.cookies else None
@@ -264,7 +266,17 @@ class Session:
                 rosters = list(pool.map(self.roster_on, todo))
             for p, roster in zip(todo, rosters, strict=True):
                 self._lineups[p] = {s.player.id: s.slot_id for s in roster}
+                for s in roster:
+                    self._lineup_players.setdefault(s.player.id, s.player)
         return {p: self._lineups[p] for p in periods}
+
+    def former_players(self, periods: list[int]) -> list[Player]:
+        """Players on your roster on one of these days who are not on it now (dropped or
+        traded away midweek), from the lineups already read (``lineups``)."""
+        now = {s.player.id for s in self.league().me.roster}
+        seen = dict.fromkeys(pid for p in periods for pid in self._lineups.get(p, {}))
+        return [self._lineup_players[pid] for pid in seen
+                if pid not in now and pid in self._lineup_players]
 
     def trending(self, n: int = 10) -> list[Player]:
         return self.free_agents(n, sort="sortPercChanged")

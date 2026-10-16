@@ -25,6 +25,7 @@ class Activity:
     # one entry per day: his lineup slot that day, None when he was not on your roster.
     # The whole list is None when the lineups are unknown (the read failed or was skipped).
     lineup: list[int | None] | None = None
+    gone: bool = False  # no longer on your roster (dropped or traded away this week)
 
     @property
     def on_ir(self) -> bool:
@@ -73,11 +74,13 @@ class Activity:
 
 def roster_activity(team: Team, cal: SeasonCalendar, periods: list[int], today_period: int,
                     lineups: dict[int, dict[int, int]] | None = None,
-                    include_ir: bool = False) -> list[Activity]:
+                    include_ir: bool = False, former: list[Player] = ()) -> list[Activity]:
     """Every rostered player, most games first, then by projection.
 
     ``lineups`` (period -> {player id: slot id}, see Session.lineups) fills in each player's
-    slot on every day of the week. IR players are left out unless ``include_ir``.
+    slot on every day of the week. IR players are left out unless ``include_ir``. ``former``
+    players (on the roster earlier in the week, gone now) come last, marked ``gone``, with
+    only the games of the days they were yours.
     """
     out = []
     for spot in team.roster:
@@ -93,6 +96,18 @@ def roster_activity(team: Team, cal: SeasonCalendar, periods: list[int], today_p
                             cal.games_in(p.pro_team_id, [x for x in periods if x >= today_period]),
                             sched, spot.slot_id, lineup))
     out.sort(key=by_games)
+    if lineups is None:
+        return out
+    for p in former:
+        lineup = [(lineups.get(sp) or {}).get(p.id) for sp in periods]
+        days = [i for i, slot in enumerate(lineup) if slot is not None]
+        if not days:
+            continue
+        sched = []
+        for i, sp in enumerate(periods):
+            g = cal.game(p.pro_team_id, sp) if i in days else None
+            sched.append(g.opponent(p.pro_team_id) if g else "")
+        out.append(Activity(p, sum(1 for x in sched if x), 0, sched, None, lineup, gone=True))
     return out
 
 
@@ -105,7 +120,7 @@ def by_lineup(acts: list[Activity]) -> tuple[list[Activity], list[Activity], lis
     """(starters in today's slot order, bench, IR), the best projection first within a slot."""
     starters = sorted((a for a in acts if a.is_starting),
                       key=lambda a: (a.slot_id, -a.player.proj))
-    bench = sorted((a for a in acts if not a.is_starting and not a.on_ir),
+    bench = sorted((a for a in acts if not a.is_starting and not a.on_ir and not a.gone),
                    key=lambda a: -a.player.proj)
     ir = sorted((a for a in acts if a.on_ir), key=lambda a: -a.player.proj)
     return starters, bench, ir

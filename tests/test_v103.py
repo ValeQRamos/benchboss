@@ -140,3 +140,38 @@ def test_the_menu_follows_the_window_width_and_m_sticks():
             assert await wait(pilot, lambda: not menu.has_class("hidden"))
 
     asyncio.run(run())
+
+
+def test_a_player_dropped_midweek_keeps_the_games_he_played_for_you(session, monkeypatch):
+    import json
+
+    from benchboss.espn.models import RosterSpot
+    from benchboss.ui.screens import workload
+
+    gone = next(p for p in session.free_agents(40)
+                if session.calendar.plays(p.pro_team_id, session.matchup_periods()[0]))
+    real = type(session).roster_on
+    first = session.matchup_periods()[0]
+
+    def roster_on(self, period):  # he started on Monday and was dropped after it
+        roster = real(self, period)
+        if period == first:
+            bench = next(s for s in roster if s.slot_id == BENCH)
+            roster = [s for s in roster if s is not bench] + [RosterSpot(gone, 0)]
+        return roster
+
+    monkeypatch.setattr(type(session), "roster_on", roster_on)
+    data = workload.load(session)
+    row = next(a for a in data.acts if a.player.id == gone.id)
+    assert row.gone and row.games == 1 and row.games_left == 0 and row.games_in_lineup == 1
+    out = text_of(workload.draw(data, DARK, 150), 150)
+    line = next(x for x in out.splitlines() if gone.name in x)
+    assert "gone" in line and "gone no longer on your roster" in " ".join(out.split())
+    assert out.splitlines().index(line) > max(i for i, x in enumerate(out.splitlines())
+                                              if "Pippen" in x)  # after the bench
+    # the footer counts his Monday game: In = every game played in a starting slot
+    assert sum(a.games_in_lineup or 0 for a in data.acts) == sum(
+        1 for a in data.acts for i, opp in enumerate(a.schedule) if opp and a.starting(i))
+    rows = workload.to_json(data)
+    assert [r["on_roster"] for r in rows].count(False) == 1
+    json.dumps(rows)
