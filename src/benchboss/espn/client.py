@@ -2,7 +2,8 @@
 
 Hosts (all under /apis/v3/games/fba):
   lm-api-reads          GET league and season data ("views")
-  lm-api-writes         POST transactions (lineup moves, adds, drops, trades)
+  lm-api-writes         POST transactions (lineup moves, adds, drops, trades) and team
+                        fields (the watch list)
   lm-api-communication  league chat and direct messages
 Private leagues need the espn_s2 and SWID cookies of a member. Public NBA data (news,
 injuries) comes from site.api.espn.com and needs no cookies.
@@ -149,6 +150,13 @@ class Client:
 
     def transaction(self, body: dict) -> dict:
         return http(WRITES + self._league_path() + "/transactions/", body=body,
+                    cookies=self.cookies)
+
+    def update_team(self, team_id: int, body: dict) -> dict:
+        """Change fields of a team, for example {"watchList": [player ids]} (docs/api/04,
+        section 13). Only the fields in ``body`` change (the web app sends one at a time).
+        What ESPN answers is unverified; callers read the team from it when it is one."""
+        return http(WRITES + self._league_path() + f"/teams/{team_id}", body=body,
                     cookies=self.cookies)
 
     # --- chat ----------------------------------------------------------------------------------

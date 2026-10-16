@@ -252,6 +252,42 @@ Example, one game (trimmed, live):
 - **League scoring is applied server side** on league paths. `leaguedefaults` uses ESPN default scoring (game entries there had `appliedTotal: null` on the hockey analog). Never mix the two.
 - **Previous season ids.** `00{season-1}` and `10{season-1}` stay available all season; windows of the previous season (`012026` and similar) only exist on the 2026 league path.
 
+### 4.5 The box score of a split (`averageStats`)
+
+Status: VERIFIED (live, 2026-10-16) unless marked. Checked on `002026` and `102027` entries from `kona_player_info`.
+
+- A season or window entry with games carries `averageStats` (per game) next to `stats` (totals), keyed by the same stat ids (section 5). Entries without games have `{}` for both.
+- Percentages (19 FG%, 20 FT%, 21 3P%) are fractions in both maps (`0.5689`), not 0 to 100.
+- `averageStats["40"]` (MIN) is minutes per game (`34.85`); `stats["40"]` is total minutes (`2265.0`).
+- `averageStats["42"]` (GP) is the **games count** (`65.0`), the same as `stats["42"]`, not a per-game value.
+- A projection entry (`10{season}`) has a smaller set: 0, 1, 2, 3, 6, 11, 13 to 21, 23 to 36, 40, 42. No OREB, DREB, DD, TD or GS.
+- A stat that is zero can be left out of the entry. 14 of the 60 best projected centers had no 17 (3PM) in their `102027` `averageStats`. Read a missing count as 0 when the entry has other stats.
+
+Example, Nikola Jokic's last season (trimmed, values rounded):
+
+```json
+{"id":"002026","appliedTotal":4310.0,
+ "averageStats":{"0":27.68,"19":0.5689,"20":0.8313,"21":0.3797,"40":34.85,"42":65.0},
+ "stats":{"13":644.0,"14":1132.0,"19":0.5689,"40":2265.0,"42":65.0}}
+```
+
+What benchboss reads (`espn/constants.py`, `espn/models.py` `StatLine`):
+
+| Split key | Entry id | Column |
+|---|---|---|
+| `season` | `00{season}` | Avg |
+| `l7` | `01{season}` | L7 |
+| `l15` | `02{season}` | L15 |
+| `l30` | `03{season}` | L30 |
+| `proj` | `10{season}` | Proj |
+| `last` | `00{season-1}` | Prev |
+
+It asks for all six with `filterStatsForTopScoringPeriodIds: {"value": 2, "additionalValue": [...]}`, which also brings the last two game entries (split 5); benchboss ignores those. For each split it keeps `appliedAverage` (fantasy points per game), `appliedTotal`, GP from `stats["42"]` and both maps. An entry with `appliedTotal` 0 counts as no data.
+
+Stat ids it uses by name: 0 PTS, 1 BLK, 2 STL, 3 AST, 4 OREB, 5 DREB, 6 REB, 11 TO, 13 FGM, 14 FGA, 15 FTM, 16 FTA, 17 3PM, 18 3PA, 19 FG%, 20 FT%, 21 3P%, 37 DD, 38 TD, 40 MIN, 41 GS, 42 GP. The screens show GP, MIN, PTS, REB, AST, STL, BLK, 3PM, TO, FG% and FT%. FG% and FT% are recomputed from the made and attempted totals (13/14, 15/16) when there are attempts, so they match the counts; otherwise the fraction from `averageStats` is used. `--json` prints `averageStats` in `stats.<split>.per_game`, keyed by name, for every id the entry has between 0 and 21 or 37 and 42.
+
+The player finder ranks a pool by a split with `sortAppliedStatAverage` and `value` set to the entry id (`"012027"` for the last 7 days), as in section 3.4.
+
 ---
 
 ## 5. NBA statId map

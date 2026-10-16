@@ -31,7 +31,7 @@ from benchboss.espn.models import Player, Team
 @dataclass
 class TrashPick:
     player: Player
-    games_left: int
+    games_left: int            # games from best_day on in which he adds points (game_days)
     gain_by_day: dict[int, float] = field(default_factory=dict)  # pickup period -> points added
     best_day: int | None = None
     gain: float = 0.0          # points added if picked up on best_day
@@ -40,16 +40,36 @@ class TrashPick:
     on_waivers: bool = False
     needs_drop: bool = True    # no open spot, so someone has to go
     drop_projects_higher: bool = False  # the drop scores more per game: a one-week stream
+    # every day he has a game that still counts (not tipped off yet) -> points he adds that
+    # day; 0 when he is no better than your weakest starter, so he would sit on your bench
+    added: dict[int, float] = field(default_factory=dict)
 
     @property
     def net(self) -> float:
         return self.gain - self.drop_cost
 
+    def _from_grab(self) -> list[int]:
+        return [] if self.best_day is None else sorted(d for d in self.added if d >= self.best_day)
+
+    def game_days(self) -> list[int]:
+        """The days he plays for you, from the grab day to the end of the week: ``games_left``
+        of them, the games in which he adds points."""
+        return [d for d in self._from_grab() if self.added[d] > 0]
+
+    def bench_days(self) -> list[int]:
+        """The days from the grab day on when he has a game but adds nothing: he would sit
+        on your bench."""
+        return [d for d in self._from_grab() if self.added[d] <= 0]
+
     def to_dict(self, cal: SeasonCalendar | None = None) -> dict:
         best = None
         if self.best_day is not None:
             best = cal.date_of(self.best_day).isoformat() if cal else self.best_day
+        days = None
+        if cal is not None:
+            days = [cal.date_of(d).isoformat() for d in self.game_days()]
         return {"player": self.player.to_dict(), "games_left": self.games_left,
+                "game_days": days,
                 "best_pickup_day": best, "week_gain": round(self.gain, 1),
                 "drop": self.drop.name if self.drop else None,
                 "drop_cost": round(self.drop_cost, 1), "net_gain": round(self.net, 1),
@@ -166,12 +186,12 @@ def scout(free_agents: list[Player], team: Team, cal: SeasonCalendar, periods: l
         lost = {sp: _contribution(drop.id, tables[sp], starters) for sp in days} if drop else {}
         gains = {d: sum((v for sp, v in added.items() if sp >= d), 0.0) for d in days}
         drop_cost = {d: sum((v for sp, v in lost.items() if sp >= d), 0.0) for d in days}
-        pick = TrashPick(fa, len(playable), gains, on_waivers=on_waivers, needs_drop=needs_drop,
-                         drop_projects_higher=higher)
+        pick = TrashPick(fa, 0, gains, on_waivers=on_waivers, needs_drop=needs_drop,
+                         drop_projects_higher=higher, added=added)
         if gains:
             pick.best_day = max(gains, key=lambda d: (gains[d] - drop_cost.get(d, 0.0), -d))
             pick.gain = gains[pick.best_day]
-            pick.games_left = sum(1 for sp in playable if sp >= pick.best_day)
+            pick.games_left = len(pick.game_days())  # a game on your bench adds no volume
             pick.drop = drop
             pick.drop_cost = drop_cost.get(pick.best_day, 0.0)
         picks.append(pick)

@@ -1,7 +1,9 @@
 # Configuration
 
-benchboss keeps two things on your computer: which league and team to drive (a small JSON
-file) and your ESPN session cookies (your keychain). `benchboss setup` writes both.
+benchboss keeps three things on your computer: which league and team to drive (a small JSON
+file), your ESPN session cookies (your keychain), both written by `benchboss setup`, and which
+news on your watch-list players you have already seen, so each spin alerts you once. It also
+caches the NBA schedule for a day. Demo mode (`--demo`) writes none of these.
 
 ## Files
 
@@ -9,8 +11,10 @@ file) and your ESPN session cookies (your keychain). `benchboss setup` writes bo
 |---|---|---|
 | Settings | `~/.config/benchboss/config.json` (or `$XDG_CONFIG_HOME/benchboss`) | `%APPDATA%\benchboss\config.json` |
 | Cache (NBA schedule, 24 h) | `~/.config/benchboss/cache/` | `%APPDATA%\benchboss\cache\` |
+| Watch-list news you have seen | `~/.config/benchboss/seen-news.json` | `%APPDATA%\benchboss\seen-news.json` |
 | Cookies | OS keychain, service `benchboss`, accounts `espn_s2` and `SWID` | Windows Credential Locker, same names |
 | Cookies fallback | `credentials.json` next to the settings, permissions 0600, only when no keychain is available | same |
+| Watch list news you have seen | `seen-news.json` next to the settings: the ids of the newest 500 news items per league id, nothing else | same |
 
 `config.json`:
 
@@ -33,6 +37,26 @@ file) and your ESPN session cookies (your keychain). `benchboss setup` writes bo
 - `team_id` is detected from your cookies during setup; set it only if you co-manage a team.
 - `theme` is `dark` or `light`; it matches the palette to your terminal background.
 
+## seen-news.json
+
+benchboss writes this file itself; you never need to edit it. It remembers which news items
+on your watch-list players you have already seen, so the app toasts each one once and
+`benchboss alerts` stops listing it. The app and the command line share it: an item the app
+has shown is no longer listed by `alerts`. One list of ESPN news ids per league id, oldest
+first, capped at the newest 500:
+
+```json
+{"12345678": [512345, 512377, 512401]}
+```
+
+- The app adds the items it shows as toasts. `benchboss alerts --mark-read` adds the items it
+  lists. Plain `benchboss alerts` only reads the file.
+- The first time a league is checked, news older than 24 hours is recorded as seen.
+- Deleting the file is safe. The next check starts over as if it were the first one, so news
+  from the last 24 hours can show up once more.
+- A file that cannot be read counts as empty. If `alerts --mark-read` cannot write it, the
+  command stops with an error and the news shows again next time.
+
 ## Environment variables
 
 Environment variables override the file. They are handy for scripts, CI and AI agents.
@@ -43,7 +67,7 @@ Environment variables override the file. They are handy for scripts, CI and AI a
 | `BENCHBOSS_TEAM_ID` | Your team id inside the league |
 | `BENCHBOSS_SEASON` | Season year, for example `2027` |
 | `BENCHBOSS_THEME` | `dark` or `light` |
-| `BENCHBOSS_HOME` | Use another folder for settings, cache and fallback cookies |
+| `BENCHBOSS_HOME` | Use another folder for settings, cache, `seen-news.json` and fallback cookies |
 | `ESPN_S2`, `ESPN_SWID` | Cookies from the environment instead of the keychain |
 | `ANTHROPIC_API_KEY` | Enables the AI briefing in `benchboss news --ai` and the app's news screen |
 | `BENCHBOSS_AI_MODEL` | Model for the AI briefing (default `claude-sonnet-5-5`) |

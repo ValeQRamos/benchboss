@@ -73,6 +73,23 @@ For each rostered player: games in the matchup week, games left from today, and 
 for each day (`@` means away). In daily leagues a four-game week is worth a lot more than a
 two-game week at the same average.
 
+A game only scores when the player is in a starting slot that day, so Workload also reads
+your lineup for every day of the week. That is one roster read per day (up to seven at a
+time), kept until you refresh. For days already played it is the lineup you had. For today
+and later days it is the lineup ESPN has saved, which includes moves you already sent for
+those days (for example with `optimize week`).
+
+- A game he spends on your bench is drawn dim in parentheses, `(LAC)`. On a narrow screen the
+  cells turn into dots: `●` a game in your lineup, `○` a game on your bench.
+- **G** is his games this week, **In** the ones in your lineup, **Left** the ones from today on.
+- The footer counts how many of your players have a game each day, against your starting
+  spots. `13/10` means 13 players play and only 10 can start, so at least 3 games go to the
+  bench. IR players do not count, and neither do days before a player joined your roster.
+- If the daily reads fail, the grid falls back to plain opponents and **In** shows `-`.
+
+Rows come in lineup order (starters by slot, then the bench, then IR). `v` in the app, or
+`--view games`, sorts by most games instead.
+
 ## Best trash (free agent value)
 
 The question is not "who is the best free agent" but "who adds the most points to *my*
@@ -128,11 +145,71 @@ When the first pickup day can be today:
 Each idea comes with a short note you can send with `benchboss trade ... --msg`. It only
 calls the deal "close in value" from 85% fairness up.
 
+## Stat splits (Roster and Player finder)
+
+ESPN keeps several stat lines for every player. benchboss asks for six of them and calls
+them splits:
+
+| Split | Column | What it is |
+|---|---|---|
+| `season` | Avg | This season so far |
+| `l7`, `l15`, `l30` | L7, L15, L30 | The last 7, 15 and 30 days |
+| `proj` | Proj | ESPN's projection for the season |
+| `last` | Prev | Last season, the only real numbers before opening night |
+
+For each split ESPN sends fantasy points per game, already scored with your league's
+settings, and a per-game box score. FG% and FT% are worked out from made and attempted shots,
+so they match the box score. A split with no games (every split but Proj and Prev in the
+preseason) is left out.
+
+In the Player finder, L7, L15 and L30 turn green when they run at least 15% and 2 points
+above the season average (or the projection before any game), and red when they run that
+far below. The app fetches the top 150 players of a pool from ESPN. When you sort by a split
+or by Rost% and the pool was cut at 150, it asks ESPN again for the top 150 by that column, so
+sorting free agents by L7 brings in the best free agents of the last 7 days.
+
+## Playoff race
+
+`benchboss playoffs` and the `y` screen play the rest of the regular season 5,000 times
+(the scenario builder in the app uses 2,000 per change, so it keeps up with your keys).
+
+**Expected points.** Each team gets a points-per-day rate. Its real points per day so far
+are blended with what its roster projects; the real results weigh `days / (days + 21)`, so
+after three weeks of games they count half. The roster projection comes in two flavors:
+
+- **This week and next**: the next 14 days of the NBA schedule. Each day the best players
+  with a game fill the starting spots (positions ignored), with today's injuries applied
+  (the same discount as the lineup optimizer).
+- **Later weeks**: the healthy roster. Every player not on IR at his projection, playing
+  about every other day, minus 8% for games that do not fit in the starting slots. A player
+  who is out today is not out in February.
+
+**One simulated season.** First every team gets a level for the whole season, drawn around
+1.0 with a 5% spread, because trades, injuries and waiver luck make a team better or worse
+for weeks at a time. Without it the best rosters look nearly locked in from opening night. Then each matchup score is drawn around rate x days in that week x level,
+with a 12% spread (a typical week to week swing in fantasy points). A week in progress keeps
+its live score and only simulates the days left. Results you pick with `--pick` or the arrow
+keys are fixed in every run.
+
+**Seeding** follows ESPN. The top `playoffTeamCount` teams get in. In a league with divisions
+the division winners are seeded first, then everyone else by record. Ties go to the league's
+tiebreaker setting (head-to-head record, points for, division record or points against), then
+head-to-head, points for, division record, points against and a coin flip.
+
+**What you see.** Playoff odds are the share of seasons a team gets in; seed and division
+title odds the same way; the projected record is the average final record. "Clinched" and
+"eliminated" are worked out from the games left, with no dice. Clinched means no mix of the
+open results can keep the team out; eliminated means none can get it in. That math is
+conservative, so a team can make it in every simulated season and still show as alive.
+ESPN's own odds (`currentSimulationResults.playoffPct`) are shown next to ours for reference;
+ESPN does not publish how it gets them.
+
 ## News
 
 `benchboss news` asks ESPN's public fantasy feed for every player on your roster at once and
-shows RotoWire's blurb plus its analysis (ESPN labels it "Spin"). With `--ai` and an
-`ANTHROPIC_API_KEY`, Claude searches the web for the last few days and writes a short
+shows RotoWire's blurb plus its analysis (ESPN labels it "Spin"). `--watch` does the same for
+your ESPN watch list, and the app's news screen shows both, in two sections. With `--ai` and
+an `ANTHROPIC_API_KEY`, Claude searches the web for the last few days and writes a short
 fantasy briefing per player. In VS Code, the `player-news` skill does the same with Copilot.
 
 ## Alerts
@@ -140,3 +217,19 @@ fantasy briefing per player. In VS Code, the `player-news` skill does the same w
 From ESPN's pending transactions: trade offers sent to you, your own offers waiting for an
 answer, accepted trades in their review period (with the time they process) and pending
 claims. From the chat service: direct messages you have not read.
+
+### Watch-list news
+
+Your ESPN watch list lives on your team in the league (the same list as the star in the ESPN
+app). benchboss checks the news feed for those players over the last 3 days and keeps what
+you have already seen in `seen-news.json` in the config folder: a list of news ids per
+league, the newest 500.
+
+- The app checks 20 seconds after it opens and then every 5 minutes. Each new item becomes a
+  toast and is marked as seen right away. A burst shows the newest 4 and one line for the
+  rest.
+- `benchboss alerts` lists the unseen items after the trades, claims and DMs, and does not
+  mark them. `benchboss alerts --mark-read` marks exactly the items it shows.
+- The first time a league is checked, news older than 24 hours counts as seen, so a fresh
+  install does not dump three days of news on you.
+- If the news feed is down, the other alerts still show.

@@ -66,8 +66,12 @@ def to_png(svg: Path) -> None:
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
+    # every image the README shows, plus optimize-done and dashboard-light; the finder (p) and
+    # the playoff builder (y) take the focus, and the next menu key still reaches the app
     asyncio.run(app_shots("dark", [("", "dashboard"), ("w", "optimize-week"), ("apply", "optimize-done"),
-                                   ("f", "trash"), ("x", "trades"), ("a", "workload"), ("n", "news")]))
+                                   ("f", "trash"), ("x", "trades"), ("a", "workload"), ("n", "news"),
+                                   ("p", "players"), ("s", "standings"), ("o", "roster"),
+                                   ("y", "playoffs")]))
     asyncio.run(app_shots("light", [("", "dashboard-light")]))
     side_panel()
     for svg in OUT.glob("*.svg"):

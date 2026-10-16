@@ -68,6 +68,11 @@ class Ctx:
         else:
             self.out.print(renderable)
 
+    def usage(self, message: str):
+        """Bad usage found after parsing: the command's usage line and ``message`` on stderr,
+        exit 2, the same as argparse's own checks."""
+        self.args.parser.error(message)
+
     def confirm(self, question: str = "Go ahead?") -> bool:
         if self.args.yes:
             return True
@@ -201,30 +206,124 @@ def _fit_height(console: Console, renderable, height: int, pal):
                       overflow="ellipsis"))
 
 
-def _period_today(s) -> int | None:
-    """Today's scoring period, or None before or after the season (today_period is clamped
-    to the season, so on its own it would point at opening night during the preseason)."""
-    sp = s.today_period
-    return sp if s.calendar.date_of(sp) == s.today else None
+def _screen(c: Ctx, module, **options) -> None:
+    """Print one of the app's screens (ui/screens) with its --view, or its JSON."""
+    from benchboss.ui.screens import view_index
+
+    view = view_index(module, getattr(c.args, "view", None))
+    data = module.load(c.session, **options)
+    if c.args.json:
+        print(json.dumps(module.to_json(data), indent=2, default=str))
+    else:
+        c.out.print(module.draw(data, c.pal, c.out.width, view))
 
 
 def cmd_roster(c: Ctx):
-    s = c.session
-    lg = s.league()
-    cal = s.calendar
-    sp_today = _period_today(s)
-    today = ({sp.player.id for sp in lg.me.roster if cal.plays(sp.player.pro_team_id, sp_today)}
-             if sp_today else set())
-    c.emit(views.roster(lg, c.pal, today),
-           [{"slot": sp.slot, "plays_today": sp.player.id in today, **sp.player.to_dict()}
-            for sp in lg.me.roster])
+    from benchboss.ui.screens import roster
+
+    _screen(c, roster)
 
 
 def cmd_standings(c: Ctx):
-    lg = c.session.league()
-    c.emit(views.standings(lg, c.pal),
-           [{"rank": i + 1, "team": t.name, "manager": t.owner_name, "record": t.record,
-             "points_for": t.points_for} for i, t in enumerate(lg.standings())])
+    from benchboss.ui.screens import standings
+
+    _screen(c, standings)
+
+
+def cmd_players(c: Ctx):
+    from benchboss.espn.constants import SPLITS
+    from benchboss.ui.screens import finder
+
+    a = c.args
+    # the stats shown follow --sort unless --view says otherwise, and the other way round
+    sort = a.sort or (a.view if a.view in SPLITS else "proj")
+    a.view = a.view or (sort if sort in SPLITS else "proj")
+    _screen(c, finder, source=a.source, position=a.pos, sort=sort,
+            query=" ".join(a.query) or None, n=a.n)
+
+
+def cmd_watch(c: Ctx):
+    """benchboss watch: list the watch list; watch add/remove PLAYER changes it on ESPN."""
+    from benchboss.service import WATCH_LIST_FULL, WATCH_LIST_MAX
+    from benchboss.ui.screens import finder
+
+    a = c.args
+    name = " ".join(a.player).strip()
+    if not a.action or a.action == "list":
+        if name:
+            c.usage("`watch list` takes no player; use `watch add` or `watch remove`")
+        a.view = "proj"  # benchboss watch has no --view: show the projections
+        _screen(c, finder, source="watch")
+        return
+    if not name:
+        c.usage(f"name the player: benchboss watch {a.action} \"Player\"")
+    s = c.session
+    on = a.action == "add"
+    p = _watch_target(s, name, on)
+    listed = p.id in s.watch_list()
+    if on == listed:
+        msg = f"{p.name} is {'already' if on else 'not'} on your watch list: nothing to do."
+        c.emit(Text(msg, style=c.pal.dim), {"summary": msg, "dry_run": bool(a.dry_run),
+                                            "sent": False, "status": None, "error": None})
+        return
+    if on and len(s.watch_list()) >= WATCH_LIST_MAX:  # set_watched checks again, fresh
+        raise BenchbossError(WATCH_LIST_FULL)
+    summary = (f"Add {p.name} ({p.pro_team}) to your ESPN watch list" if on
+               else f"Take {p.name} ({p.pro_team}) off your ESPN watch list")
+
+    def send() -> str:
+        if s.demo:
+            # the demo client takes watch-list edits in memory, for the app's star; a command
+            # would report a change that dies with it, so refuse like every other demo write
+            from benchboss.demo import REFUSED
+
+            raise BenchbossError(REFUSED)
+        ids = s.set_watched(p.id, on)
+        if (p.id in ids) != on:  # ESPN answered with the old list
+            return f"FAILED: {p.name} is {'not on' if on else 'still on'} the list ESPN sent back"
+        return f"watch list has {len(ids)} players"
+
+    _write(c, summary, send)
+
+
+def _watch_target(s, name: str, on: bool):
+    """The player `watch add/remove NAME` is about.
+
+    remove looks at the watch list first, so "Allen" is the Allen you watch. Otherwise the
+    players on every roster and ESPN's name search count together: a name that fits a
+    rostered player and a free agent matches several players, it is not quietly the
+    rostered one (Session.find_player looks at the rosters first).
+    """
+    from benchboss.text import match_one, norm
+
+    if not on:
+        watched = s.player_pool("watch")
+        if any(norm(name) in norm(p.name) for p in watched):
+            return match_one(watched, name, lambda p: p.name, where="your watch list")
+    lg = s.league()
+    found = {sp.player.id: sp.player for t in lg.teams.values() for sp in t.roster}
+    for p in s.player_pool("all", n=10, sort="own", query=name):
+        found.setdefault(p.id, p)
+    return match_one(found.values(), name, lambda p: p.name, where="your league or free agency")
+
+
+def cmd_playoffs(c: Ctx):
+    from benchboss.ui.screens import playoffs
+
+    _screen(c, playoffs, picks=_picks(c.session, c.args.pick), sims=c.args.sims)
+
+
+def _picks(s, specs: list[str] | None) -> dict[int, int]:
+    """--pick "Winner>Loser" (team or manager names) -> {matchup id: winning team id}.
+
+    The matchup is the first undecided regular-season game between those two teams, or the
+    one in the week given as "Winner>Loser@WEEK".
+    """
+    if not specs:
+        return {}
+    from benchboss.core import playoffs as playoffs_mod
+
+    return playoffs_mod.parse_picks(s.league(), specs)
 
 
 def cmd_matchup(c: Ctx):
@@ -237,12 +336,9 @@ def cmd_matchup(c: Ctx):
 
 
 def cmd_activity(c: Ctx):
-    s = c.session
-    acts = s.activity()
-    periods = s.matchup_periods()
-    # the real day, not clamped: before the season no column is marked as today
-    c.emit(views.activity(acts, s.calendar, periods, s.calendar.period_of(s.today), c.pal),
-           [a.to_dict() for a in acts])
+    from benchboss.ui.screens import workload
+
+    _screen(c, workload)
 
 
 def cmd_fa(c: Ctx):
@@ -267,7 +363,7 @@ def cmd_trades(c: Ctx):
     lg = s.league()
     if c.args.needs:
         bal = trades_mod.describe_needs(lg)
-        c.emit(views.needs(bal, lg.me.name, c.pal), bal)
+        c.emit(views.needs(bal, lg.me.name, c.pal, c.out.width), bal)
         return
     ideas = trades_mod.find_trades(lg, need=c.args.need, limit=c.args.n,
                                    min_fairness=c.args.fairness,
@@ -291,28 +387,58 @@ def _partner(s, q):
 
 
 def cmd_news(c: Ctx):
+    """News on your roster, on your watch list (--watch) or on the players you name."""
     from benchboss import news as news_mod
+    from benchboss.ui.screens import news as screen
 
+    a = c.args
     s = c.session
-    lg = s.league()
-    roster = [sp.player for sp in lg.me.roster]
-    if c.args.players:
-        roster = [s.find_player(q) for q in c.args.players]
-    names = {p.id: p.name for p in roster}
-    if c.args.ai:
+    if a.watch and a.players:
+        c.usage("name players or use --watch, not both")
+    named = [s.find_player(q) for q in a.players] if a.players else None
+    which = () if named else ("watch",) if a.watch else ("roster",)
+    if a.ai:
+        players = list({p.id: p for sec in screen.sections(s, which, named)
+                        for p in sec.players}.values())
+        if not players:
+            raise BenchbossError(f"{screen.EMPTY_WATCH} {screen.WATCH_ADD}" if a.watch else
+                                 "your roster is empty")
         with c.out.status("Asking Claude to search the web..."):
-            text = news_mod.ai_digest(roster, c.args.days)
+            text = news_mod.ai_digest(players, a.days)
         c.emit(text, {"digest": text})
         return
-    items = s.news([p.id for p in roster], c.args.days)
-    c.emit(views.news(items, names, c.pal, c.args.days), [i.to_dict(names) for i in items])
+    data = screen.load(s, a.days, which, named)
+    c.emit(screen.draw(data, c.pal, c.out.width), screen.to_json(data))
 
 
 def cmd_alerts(c: Ctx):
+    """Trade offers, claims and unread DMs, then unseen news on watch-list players;
+    --mark-read marks the news shown as seen."""
+    from rich.console import Group
+
     from benchboss import inbox
 
-    items = inbox.alerts(c.session)
-    c.emit(views.alerts(items, c.pal), [a.to_dict() for a in items])
+    s = c.session
+    mark = c.args.mark_read
+    items = inbox.alerts(s, include_spins=False)
+    try:
+        spins = inbox.spin_alerts(s, mark_seen=mark)  # one read, so what is marked is what shows
+    except BenchbossError as e:
+        if mark:
+            raise
+        spins = []
+        c.err.print(Text(f"Watch list news is not available right now ({e}).", style=c.pal.dim))
+    items += spins
+    n = len(spins)
+    if mark:  # with nothing at all to show, the "Nothing new" line says it already
+        note = (f"Marked {n} watch list item{'s' * (n != 1)} as read." if n else
+                "No new watch list news to mark as read." if items else "")
+        if n and s.demo:  # the frozen demo keeps what was seen in memory (inbox.watch_spins)
+            note += " Demo mode does not save it: the next run shows them again."
+    else:
+        note = "benchboss alerts --mark-read marks the watch list news as read." if n else ""
+    c.emit(Group(views.alerts(items, c.pal), *([Text(f"\n{note}", style=c.pal.dim)] if note else [])),
+           [x.to_dict() for x in items])
 
 
 # --- write ------------------------------------------------------------------------------------------
@@ -519,7 +645,29 @@ def _count(value: str) -> int:
     return n
 
 
+def _views(module) -> str:
+    """ "season (default), l7, l15": a screen's --view choices for the help text."""
+    keys = [k for k, _ in getattr(module, "VIEWS", ())]
+    return ", ".join([f"{keys[0]} (default)", *keys[1:]]) if keys else "none"
+
+
+def _view(module):
+    """argparse type for --view: one of the screen's view keys, else bad usage (exit 2)."""
+    from benchboss.ui.screens import view_index
+
+    def check(key: str) -> str:
+        try:
+            view_index(module, key)
+        except BenchbossError as e:
+            raise argparse.ArgumentTypeError(str(e)) from None
+        return key
+
+    return check
+
+
 def build_parser() -> argparse.ArgumentParser:
+    from benchboss.ui.screens import finder, playoffs, roster, standings, workload
+
     def global_options(suppress: bool) -> argparse.ArgumentParser:
         # the same flags work before or after the command; inside subcommands they default to
         # SUPPRESS so they never overwrite a value given before the command
@@ -543,7 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
     def add(name, fn, help_, **kw):
         p = sub.add_parser(name, parents=[common], help=help_,
                            description=help_.replace("%%", "%"), **kw)
-        p.set_defaults(fn=fn)
+        p.set_defaults(fn=fn, parser=p)
         return p
 
     add("app", cmd_app, "open the interactive app (same as running benchboss with no command)")
@@ -559,10 +707,41 @@ def build_parser() -> argparse.ArgumentParser:
         p = add(name, cmd_status, "show config and check the connection to ESPN")
         p.add_argument("--offline", action="store_true", help="do not call ESPN")
 
-    add("roster", cmd_roster, "your roster with slots, injuries, averages and projections")
-    add("standings", cmd_standings, "league table")
+    p = add("roster", cmd_roster, "your roster: every stat split (season, last 7/15/30, "
+                                  "projection, last season) and the box score")
+    p.add_argument("--view", metavar="VIEW", type=_view(roster),
+                   help="the split for the box score: " + _views(roster))
+    p = add("standings", cmd_standings, "league table: record, points for and against, streaks, "
+                                        "playoff odds")
+    p.add_argument("--view", metavar="VIEW", type=_view(standings),
+                   help="which table: " + _views(standings))
     add("matchup", cmd_matchup, "this week's matchup: live score, projected final, games left")
-    add("activity", cmd_activity, "games per player this matchup week, day by day")
+    p = add("activity", cmd_activity, "games per player this matchup week, day by day, and the "
+                                      "ones on your bench")
+    p.add_argument("--view", metavar="VIEW", type=_view(workload), help="row order: " + _views(workload))
+    p = add("players", cmd_players, "player finder: free agents, rostered players or your watch "
+                                    "list with every stat split")
+    p.add_argument("query", nargs="*", help="the start of a player's first, last or full name")
+    p.add_argument("--from", dest="source", choices=["fa", "rostered", "all", "watch"], default="fa",
+                   help="free agents (default), players on a team, everyone, or your watch list")
+    p.add_argument("--pos", help="PG SG SF PF C G F")
+    p.add_argument("--sort", choices=["proj", "season", "l7", "l15", "l30", "last", "own", "change"],
+                   help="rank by this split (fantasy points per game), %% rostered or its change "
+                        "(default: the --view split, else proj)")
+    p.add_argument("--view", metavar="VIEW", type=_view(finder),
+                   help="which split's box score to show: season l7 l15 l30 proj last")
+    p.add_argument("-n", type=_count, default=50, help="how many (default 50)")
+    p = add("watch", cmd_watch, "your ESPN watch list: list it, or add / remove a player")
+    p.add_argument("action", nargs="?", choices=["list", "add", "remove"], help="default: list")
+    p.add_argument("player", nargs="*", help="the player to add or remove")
+    p.add_argument("--dry-run", action="store_true", help="show the change, send nothing")
+    p = add("playoffs", cmd_playoffs, "playoff race: odds, who is in or out, what-if scenarios")
+    p.add_argument("--pick", action="append", metavar="WINNER>LOSER",
+                   help='fix a result, e.g. --pick "Monstars>Tune Squad" (add @WEEK for a '
+                        "given week; repeat for more)")
+    p.add_argument("--sims", type=_count, default=5000, help="simulated seasons (default 5000)")
+    p.add_argument("--view", metavar="VIEW", type=_view(playoffs),
+                   help="odds (default) or games, the matchups left")
     p = add("trash", cmd_trash, "most valuable free agents for this week (points added, best day to grab)")
     p.add_argument("pos", nargs="?", help="PG SG SF PF C G F")
     p.add_argument("-n", type=_count, default=10, help="how many (default 10)")
@@ -571,8 +750,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-n", type=_count, default=25, help="how many (default 25)")
     p = add("trending", cmd_fa, "free agents being added the most")
     p.add_argument("-n", type=_count, default=15, help="how many (default 15)")
-    p = add("news", cmd_news, "recent news and spins on your players (or on the players you name)")
+    p = add("news", cmd_news, "recent news and spins on your players, your watch list (--watch) "
+                              "or the players you name")
     p.add_argument("players", nargs="*", help="player names; default: your roster")
+    p.add_argument("--watch", action="store_true", help="your watch-list players instead of your roster")
     p.add_argument("--days", type=_count, default=5, help="how many days back (default 5)")
     p.add_argument("--ai", action="store_true", help="AI briefing with web search (needs ANTHROPIC_API_KEY)")
     p = add("trades", cmd_trades, "trade finder: fair 1-for-1 deals that fix positional needs")
@@ -582,7 +763,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fairness", type=float, default=0.85, help="minimum value match 0-1 (default 0.85)")
     p.add_argument("--needs", action="store_true", help="show every team's positional surplus and needs")
     p.add_argument("-n", type=_count, default=8, help="how many ideas (default 8)")
-    add("alerts", cmd_alerts, "trade offers, accepted trades, pending claims, unread DMs")
+    p = add("alerts", cmd_alerts, "trade offers, accepted trades, pending claims, unread DMs and "
+                                  "new news on your watch-list players")
+    p.add_argument("--mark-read", action="store_true",
+                   help="mark the watch list news shown as read, so it does not show again")
 
     p = add("optimize", cmd_optimize, "set the best lineup: today, tomorrow, week, or a date")
     p.add_argument("when", nargs="?", default="today", help="today (default), tomorrow, week, 11-04, 2026-11-04")

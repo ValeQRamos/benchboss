@@ -1,4 +1,5 @@
-"""League chat, direct messages and alerts (trade offers, accepted trades, waiver claims).
+"""League chat, direct messages and alerts (trade offers, accepted trades, waiver claims,
+news on your watch-list players).
 
 ESPN's in-app chat lives on lm-api-communication. The league chat is one topic of type
 CHAT_ALL_MEMBERS (the older CHAT type is a legacy topic the app never shows); each direct
@@ -10,11 +11,20 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import json
+import os
+import threading
 import weakref
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
+from benchboss import config as config_mod
 from benchboss.errors import BenchbossError
 from benchboss.text import norm
+
+if TYPE_CHECKING:
+    from benchboss.news import NewsItem
 
 DM = "CHAT_DIRECT_MESSAGE"
 LEAGUE_CHAT = "CHAT_ALL_MEMBERS"
@@ -27,12 +37,20 @@ MESSAGE_KIND = {188: "[lineup move]", 239: "[roster drop]", 259: "[sticker]", 26
 
 @dataclass
 class Alert:
-    kind: str       # trade_offer, trade_sent, trade_accepted, waiver, dm
+    kind: str       # trade_offer, trade_sent, trade_accepted, waiver, dm, spin
     text: str
     urgent: bool = False
+    news: NewsItem | None = None  # a spin alert's news item
+    player: str = ""              # a spin alert's watch-list player(s)
 
     def to_dict(self) -> dict:
-        return {"kind": self.kind, "text": self.text, "urgent": self.urgent}
+        out = {"kind": self.kind, "text": self.text, "urgent": self.urgent}
+        if self.news is not None:
+            n = self.news
+            out.update(player=self.player, headline=n.headline, spin=n.spin or None,
+                       published=n.published.isoformat(), source=n.source,
+                       link=n.link or None, news_id=n.id)
+        return out
 
 
 def people(session) -> dict[str, str]:
@@ -180,7 +198,10 @@ def pending_transactions(session) -> list[dict]:
         me in (i.get("fromTeamId"), i.get("toTeamId")) for i in tx.get("items") or [])]
 
 
-def alerts(session, include_chat: bool = True) -> list[Alert]:
+def alerts(session, include_chat: bool = True, include_spins: bool = True) -> list[Alert]:
+    """Trade offers, claims and unread DMs, then news on watch-list players you have not
+    seen yet (``spin_alerts``; listing them does not mark them seen). The news feed is a
+    nicety here: when it cannot be reached, the other alerts still come back."""
     lg = session.league()
     me = lg.my_team_id
     pending = pending_transactions(session)
@@ -216,4 +237,134 @@ def alerts(session, include_chat: bool = True) -> list[Alert]:
                 who = ", ".join(ppl.get(x, "someone") for x in t.get("viewableBy") or [] if x != swid)
                 out.append(Alert("dm", f"{unread} unread message{'s' * (unread > 1)} from {who}",
                                  urgent=True))
+    if include_spins:
+        with contextlib.suppress(BenchbossError):
+            out += spin_alerts(session)
     return out
+
+
+# --- watch list spins -----------------------------------------------------------------------------
+
+SEEN_FILE = "seen-news.json"  # {"<league id>": {"news": [ids, oldest first], "players": [ids]}}
+TOASTED_FILE = "toasted-news.json"  # {"<league id>": [ids, oldest first]}: what the app toasted
+SEEN_KEEP = 500               # news ids remembered per league
+SPIN_DAYS = 3                 # how far back watch_spins looks
+FIRST_RUN_HOURS = 24          # for a player new to the watch list, older news counts as seen
+
+_seen_lock = threading.Lock()  # the app checks in a worker thread while screens read
+
+
+def seen_path() -> Path:
+    return config_mod.config_dir() / SEEN_FILE
+
+
+def _read_seen(session, name: str = SEEN_FILE) -> dict:
+    """The seen file (or the toasted one, ``name``) as a dict; a missing, unreadable or broken
+    file reads as empty. A session that keeps them in memory (``Session.seen_news``, the
+    demo) never reads the file."""
+    if session.seen_news is not None:
+        return dict(session.seen_news.get(name) or {})
+    try:
+        raw = json.loads((config_mod.config_dir() / name).read_text())
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _write_seen(session, book: dict, name: str = SEEN_FILE) -> None:
+    """Write the seen file (or ``name``) atomically (a temp file, then a rename), like
+    config.save; or keep the book in memory when the session does (the demo)."""
+    if session.seen_news is not None:
+        session.seen_news[name] = book
+        return
+    path = config_mod.config_dir() / name
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(book) + "\n")
+        tmp.replace(path)
+    except OSError as e:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise BenchbossError(f"could not save the news you have seen to {path} ({e})") from e
+
+
+def watch_spins(session, mark_seen: bool = False) -> list[tuple[str, NewsItem]]:
+    """News ("spins") on your watch-list players that you have not seen yet, newest first,
+    as (player name, NewsItem).
+
+    What you have seen is kept per league in ``seen-news.json`` in the config folder (in
+    memory for the demo, so every run of the demo shows the same spins): the newest
+    ``SEEN_KEEP`` news ids, and the watch list as it was at the last recorded check.
+    News on a player new to the list (every player, the first time a league is checked)
+    older than ``FIRST_RUN_HOURS`` counts as seen, so neither a new install nor a player
+    you just starred brings days of old news. Anything else not seen yet is new, however
+    old (say the app was closed for two days). ``mark_seen=True`` records what this call
+    returns, that older news and the list. ESPN errors propagate as BenchbossError.
+    """
+    watched = list(session.watch_list())
+    if not watched:
+        return []
+    items = session.news(watched, SPIN_DAYS)
+    key = str(session.client.league_id)
+    with _seen_lock:
+        book = _read_seen(session)
+        entry = book.get(key)
+        if isinstance(entry, list):  # the first format kept only the news ids
+            entry = {"news": entry, "players": watched}
+        if not isinstance(entry, dict):
+            entry = {}
+        news, players = entry.get("news"), entry.get("players")
+        known = list(news) if isinstance(news, list) else []
+        before = {x for x in players if isinstance(x, int)} if isinstance(players, list) else set()
+        added = set(watched) - before
+        if added:  # their older news counts as seen, unless it is on a player watched before
+            cutoff = session.now - dt.timedelta(hours=FIRST_RUN_HOURS)
+            known += [i.id for i in sorted(items, key=lambda i: i.published)
+                      if i.published < cutoff and i.player_ids & set(watched) <= added]
+        seen = {str(x) for x in known}
+        new = sorted((i for i in items if str(i.id) not in seen),
+                     key=lambda i: i.published, reverse=True)
+        if mark_seen and (new or set(watched) != before):
+            # oldest first, so the cap drops the oldest; ids compare as text, kept as given
+            record = known + [i.id for i in reversed(new)]
+            book[key] = {"news": list({str(x): x for x in record}.values())[-SEEN_KEEP:],
+                         "players": watched}
+            _write_seen(session, book)
+    if not new:
+        return []
+    ids = set(watched)
+    names = player_names(session, ids)
+    out = []
+    for item in new:
+        who = [names.get(p, f"player {p}") for p in sorted(item.player_ids) if p in ids]
+        out.append((", ".join(who) or "a watch-list player", item))
+    return out
+
+
+def toast_spins(session) -> list[tuple[str, NewsItem]]:
+    """The unseen spins (``watch_spins``) the app has not toasted yet, newest first, recorded
+    as toasted in ``toasted-news.json``. A toast is not a read: the Inbox and ``benchboss
+    alerts`` keep listing the news until it is marked read (``alerts --mark-read``), since
+    nobody may have been looking when the toast showed. ESPN errors propagate."""
+    spins = watch_spins(session)
+    if not spins:
+        return []
+    key = str(session.client.league_id)
+    with _seen_lock:
+        book = _read_seen(session, TOASTED_FILE)
+        entry = book.get(key)
+        known = list(entry) if isinstance(entry, list) else []
+        toasted = {str(x) for x in known}
+        new = [(who, item) for who, item in spins if str(item.id) not in toasted]
+        if new:
+            record = known + [item.id for _, item in reversed(new)]  # oldest first, like seen
+            book[key] = list({str(x): x for x in record}.values())[-SEEN_KEEP:]
+            _write_seen(session, book, TOASTED_FILE)
+    return new
+
+
+def spin_alerts(session, mark_seen: bool = False) -> list[Alert]:
+    """One alert per unseen spin on a watch-list player (see ``watch_spins``), not urgent."""
+    return [Alert("spin", f"Watch list · {who}: {item.headline}", news=item, player=who)
+            for who, item in watch_spins(session, mark_seen)]

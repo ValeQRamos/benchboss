@@ -146,6 +146,8 @@ def test_app_survives_a_dropped_connection_during_apply(monkeypatch):
             await pilot.pause(2)
             await pilot.press("w")
             await pilot.pause(2)
+            app.query_one("#apply").scroll_visible(animate=False)  # the week plan is tall
+            await pilot.pause()
             await pilot.click("#apply")
             await pilot.pause(2)
             assert calls

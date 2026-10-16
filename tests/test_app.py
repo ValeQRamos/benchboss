@@ -13,6 +13,9 @@ def test_app_boots_and_navigates_in_demo_mode():
             await pilot.press("w")
             await pilot.pause(2)
             assert app.query_one("#actions").has_class("visible")
+            # a week of moves is taller than the window: scroll to Apply like a user would
+            app.query_one("#apply").scroll_visible(animate=False)
+            await pilot.pause()
             await pilot.click("#apply")
             await pilot.pause(1)
             await pilot.press("f")

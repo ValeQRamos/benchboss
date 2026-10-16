@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from functools import cached_property
 from pathlib import Path
@@ -23,10 +24,19 @@ from benchboss.core.lineup import DayPlan, plan_day
 from benchboss.core.projection import MatchupOutlook, matchup_outlook
 from benchboss.errors import BenchbossError
 from benchboss.espn.client import Client
-from benchboss.espn.constants import SLOT_ID
+from benchboss.espn.constants import SLOT_ID, SPLITS, split_ids
 from benchboss.espn.models import League, Player, parse_league, parse_player, parse_team
 
-LEAGUE_VIEWS = ("mRoster", "mTeam", "mSettings", "mMatchupScore", "mStatus")
+# mStandings adds ESPN's playoff simulation (currentSimulationResults) and clinch flags
+LEAGUE_VIEWS = ("mRoster", "mTeam", "mSettings", "mMatchupScore", "mStatus", "mStandings")
+
+# The player finder's pools (kona_player_info filterStatus; "watch" is your watch list)
+POOLS = {"fa": ["FREEAGENT", "WAIVERS"], "rostered": ["ONTEAM"], "all": None, "watch": None}
+
+# ESPN's web app refuses a 51st watch-list player (maxWatchListPlayers in its bundle)
+WATCH_LIST_MAX = 50
+WATCH_LIST_FULL = (f"your watch list is full (ESPN allows {WATCH_LIST_MAX} players): "
+                   "take one off first")
 
 
 def eastern() -> dt.tzinfo:
@@ -81,6 +91,11 @@ class Session:
         self.cache = DiskCache(config_mod.cache_dir() / f"{client.league_id}-{client.season}")
         self._league: League | None = None
         self._league_raw: dict | None = None
+        self._lineups: dict[int, dict[int, int]] = {}
+
+    # The news on watch-list players you have seen (inbox.watch_spins): None keeps it in
+    # seen-news.json in the config folder; a dict keeps it in memory instead (the demo).
+    seen_news: dict | None = None
 
     @property
     def demo(self) -> bool:
@@ -126,6 +141,7 @@ class Session:
 
     def league(self, refresh: bool = False) -> League:
         if self._league is None or refresh:
+            self._lineups = {}
             raw = self.client.league(*LEAGUE_VIEWS)
             self._league_raw = raw
             swid = self.client.cookies[1] if self.client.cookies else None
@@ -156,16 +172,99 @@ class Session:
                     sort: str = "sortPercOwned") -> list[Player]:
         lg = self.league()
         flt: dict = {"filterStatus": {"value": ["FREEAGENT", "WAIVERS"]}, "limit": n,
-                     sort: {"sortPriority": 1, "sortAsc": False},
-                     "filterStatsForTopScoringPeriodIds": {
-                         "value": 2, "additionalValue": [f"00{lg.season}", f"10{lg.season}",
-                                                         f"02{lg.season}", f"00{lg.season - 1}"]}}
+                     sort: {"sortPriority": 1, "sortAsc": False}, **self._with_stats()}
         if position:
-            pos = position.upper()
-            if pos not in SLOT_ID:
-                raise BenchbossError(f"unknown position '{position}' (PG SG SF PF C G F UT)")
-            flt["filterSlotIds"] = {"value": [SLOT_ID[pos]]}
+            flt["filterSlotIds"] = {"value": [_slot_id(position)]}
         return [parse_player(x, lg.season) for x in self.client.players(flt, lg.scoring_period)]
+
+    def _with_stats(self) -> dict:
+        """The filter part that makes ESPN send every split in constants.SPLITS."""
+        return {"filterStatsForTopScoringPeriodIds": {
+            "value": 2, "additionalValue": split_ids(self.league().season)}}
+
+    def player_pool(self, source: str = "fa", position: str | None = None, n: int = 100,
+                    sort: str = "proj", query: str | None = None,
+                    watched: Iterable[int] | None = None) -> list[Player]:
+        """Players for the finder, with every stat split.
+
+        ``source``: "fa" (free agents and waivers), "rostered" (on a team in this league),
+        "all", or "watch" (your ESPN watch list). ``sort`` picks which ``n`` players ESPN sends:
+        a split key (proj, season, l7, l15, l30, last) ranks by fantasy points per game in
+        that split, "own" by % rostered, "change" by the change in % rostered. Callers sort
+        the result again however they like. ``watched`` replaces the saved watch list for
+        "watch": the finder passes its stars, some of them still on their way to ESPN.
+        """
+        if source not in POOLS:
+            raise BenchbossError(f"unknown player pool '{source}' (fa, rostered, all, watch)")
+        lg = self.league()
+        flt: dict = {"limit": n, **self._with_stats()}
+        if source == "watch":
+            ids = list(self.watch_list() if watched is None else watched)
+            if not ids:
+                return []
+            flt["filterIds"] = {"value": ids}
+            flt["limit"] = min(n, len(ids))  # ESPN sorts the list first: the best n of it
+        elif POOLS[source]:
+            flt["filterStatus"] = {"value": POOLS[source]}
+        if sort == "own":
+            flt["sortPercOwned"] = {"sortPriority": 1, "sortAsc": False}
+        elif sort == "change":
+            flt["sortPercChanged"] = {"sortPriority": 1, "sortAsc": False}
+        else:
+            ids = dict(zip(SPLITS, split_ids(lg.season), strict=True))
+            if sort not in ids:
+                raise BenchbossError(f"unknown sort '{sort}' (proj season l7 l15 l30 last own change)")
+            flt["sortAppliedStatAverage"] = {"sortPriority": 1, "sortAsc": False, "value": ids[sort]}
+        if position:
+            flt["filterSlotIds"] = {"value": [_slot_id(position)]}
+        if query:
+            flt["filterName"] = {"value": query}
+        return [parse_player(x, lg.season) for x in self.client.players(flt, lg.scoring_period)]
+
+    # --- watch list ------------------------------------------------------------------------------
+
+    def watch_list(self) -> tuple[int, ...]:
+        """Player ids on your ESPN watch list (the "Watch List" of the ESPN app)."""
+        return self.league().me.watch_list
+
+    def set_watched(self, player_id: int, watched: bool) -> tuple[int, ...]:
+        """Add a player to your ESPN watch list or take him off; returns the new list.
+
+        The list is read fresh first (it may have changed in the ESPN app) and ESPN gets the
+        whole new list, which is how its web app does it. Like the web app, an add to a full
+        list (``WATCH_LIST_MAX``) is refused without sending anything.
+        """
+        lg = self.league()
+        raw = self.client.league("mTeam")
+        mine = next((t for t in raw.get("teams") or [] if t.get("id") == lg.my_team_id), {})
+        ids = [int(x) for x in mine.get("watchList") or []]
+        if watched == (player_id in ids):
+            lg.me.watch_list = tuple(ids)
+            return lg.me.watch_list
+        if watched and len(ids) >= WATCH_LIST_MAX:
+            lg.me.watch_list = tuple(ids)
+            raise BenchbossError(WATCH_LIST_FULL)
+        ids = ids + [player_id] if watched else [x for x in ids if x != player_id]
+        team = self.client.update_team(lg.my_team_id, {"watchList": ids})
+        got = team.get("watchList") if isinstance(team, dict) else None
+        lg.me.watch_list = tuple(int(x) for x in got) if got is not None else tuple(ids)
+        return lg.me.watch_list
+
+    def lineups(self, periods: list[int]) -> dict[int, dict[int, int]]:
+        """Your lineup on each of these days: period -> {player id: slot id}.
+
+        One ESPN read per day, in parallel, kept for the life of the session. Future days
+        include the moves already saved for them.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        todo = [p for p in dict.fromkeys(periods) if p not in self._lineups]
+        if todo:
+            with ThreadPoolExecutor(max_workers=min(7, len(todo))) as pool:
+                rosters = list(pool.map(self.roster_on, todo))
+            for p, roster in zip(todo, rosters, strict=True):
+                self._lineups[p] = {s.player.id: s.slot_id for s in roster}
+        return {p: self._lineups[p] for p in periods}
 
     def trending(self, n: int = 10) -> list[Player]:
         return self.free_agents(n, sort="sortPercChanged")
@@ -190,6 +289,38 @@ class Session:
 
         return news.fetch(player_ids, days)
 
+    def playoff_race(self, picks: dict[int, int] | None = None, sims: int = 5000):
+        """Playoff odds and who is in or out, with the results you pick fixed (see
+        core.playoffs.race: ``picks`` maps a matchup id to the team id you say wins it)."""
+        from benchboss.core import playoffs
+        from benchboss.core.projection import not_started, week_projection
+
+        lg, cal = self.league(), self.calendar
+        weeks = range(1, playoffs.regular_season_weeks(lg) + 1)
+        days = {w: len(cal.matchup_periods(w, lg.matchup_periods)) for w in weeks}
+        current = cal.matchup_periods(lg.current_matchup, lg.matchup_periods)
+        today, now = self.today_period, self.now
+        done = 0.0
+        if self.in_season:
+            done = sum(1 for p in current if p < today)
+            if today in current:  # today's games that tipped off are in the live score
+                playing = [t for t in cal.games if cal.plays(t, today)]
+                tipped = sum(1 for t in playing if not not_started(cal, t, today, now))
+                done += tipped / len(playing) if playing else 1.0
+        progress = done / len(current) if current else 0.0
+        # what each team still adds to the live score, counted like the matchup projection
+        left = [p for p in current if p >= today]
+        live_left = {tid: week_projection(team, left, cal, lg.starter_slots, today, now)[0]
+                     for tid, team in lg.teams.items()}
+        ahead = [p for p in range(today, today + 14) if p <= cal.final_period]
+        daily = {}
+        for tid, team in lg.teams.items():
+            pts, _ = week_projection(team, ahead, cal, lg.starter_slots)
+            daily[tid] = pts / len(ahead) if ahead else 0.0
+        return playoffs.race(lg, picks or {}, sims=sims, daily=daily, days_by_week=days,
+                             week_progress=progress, live_left=live_left,
+                             in_season=self.in_season)
+
     # --- features ------------------------------------------------------------------------------
 
     def matchup_periods(self) -> list[int]:
@@ -200,8 +331,10 @@ class Session:
         return matchup_outlook(self.league(), self.calendar, self.today_period, self.now)
 
     def activity(self) -> list[activity_mod.Activity]:
+        # games left count from the real day, not clamped: after the season none are left
         return activity_mod.roster_activity(self.league().me, self.calendar,
-                                            self.matchup_periods(), self.today_period)
+                                            self.matchup_periods(),
+                                            self.calendar.period_of(self.today))
 
     def trash(self, n: int = 10, position: str | None = None, pool: int = 60) -> list[trash_mod.TrashPick]:
         lg = self.league()
@@ -283,6 +416,13 @@ class Session:
         if status.startswith("FAILED"):
             return OptimizeResult(plan, status=status, error=f"ESPN answered {status}")
         return OptimizeResult(plan, status=status)
+
+
+def _slot_id(position: str) -> int:
+    pos = position.upper()
+    if pos not in SLOT_ID:
+        raise BenchbossError(f"unknown position '{position}' (PG SG SF PF C G F UT)")
+    return SLOT_ID[pos]
 
 
 def periods_for(session: Session, when: str) -> list[int]:

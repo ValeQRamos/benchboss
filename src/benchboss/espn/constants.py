@@ -44,11 +44,32 @@ STAT = {0: "PTS", 1: "BLK", 2: "STL", 3: "AST", 4: "OREB", 5: "DREB", 6: "REB", 
         16: "FTA", 17: "3PM", 18: "3PA", 19: "FG%", 20: "FT%", 21: "3P%", 37: "DD",
         38: "TD", 39: "QD", 40: "MIN", 41: "GS", 42: "GP"}
 
+# Box score stat ids, by name (the keys of stats[].averageStats and stats[].stats). In
+# averageStats the percentages are fractions (0.46) and MIN is minutes per game.
+PTS, BLK, STL, AST, OREB, DREB, REB, TO = 0, 1, 2, 3, 4, 5, 6, 11
+FGM, FGA, FTM, FTA, TPM, TPA, FG_PCT, FT_PCT, TP_PCT = 13, 14, 15, 16, 17, 18, 19, 20, 21
+DD, TD, MIN, GS, GP = 37, 38, 40, 41, 42
+
 # stats[].id is "{statSourceId}{statSplitTypeId}{seasonId}": source 0 = actual, 1 = projected;
 # split 0 = season, 1 = last 7 days, 2 = last 15, 3 = last 30.
 SOURCE_ACTUAL, SOURCE_PROJECTED = 0, 1
 SPLIT_SEASON, SPLIT_LAST7, SPLIT_LAST15, SPLIT_LAST30 = 0, 1, 2, 3
 
+# The stat splits benchboss reads for every player: key -> (source, split, seasons back).
+# "last" is last season's actual average, the only real numbers before opening night.
+SPLITS = {"season": (SOURCE_ACTUAL, SPLIT_SEASON, 0), "l7": (SOURCE_ACTUAL, SPLIT_LAST7, 0),
+          "l15": (SOURCE_ACTUAL, SPLIT_LAST15, 0), "l30": (SOURCE_ACTUAL, SPLIT_LAST30, 0),
+          "proj": (SOURCE_PROJECTED, SPLIT_SEASON, 0), "last": (SOURCE_ACTUAL, SPLIT_SEASON, 1)}
+SPLIT_LABEL = {"season": "Season", "l7": "Last 7", "l15": "Last 15", "l30": "Last 30",
+               "proj": "Projected", "last": "Last season"}
+SPLIT_SHORT = {"season": "Avg", "l7": "L7", "l15": "L15", "l30": "L30", "proj": "Proj",
+               "last": "Prev"}
+
 
 def stat_key(source: int, split: int, season: int) -> str:
     return f"{source}{split}{season}"
+
+
+def split_ids(season: int) -> list[str]:
+    """The stats[].id of every split in SPLITS, for filterStatsForTopScoringPeriodIds."""
+    return [stat_key(src, split, season - back) for src, split, back in SPLITS.values()]

@@ -148,7 +148,7 @@ def test_resize_and_theme_change_keep_the_screen_you_are_on():
         await settle(pilot)
         await pilot.resize_terminal(130, 40)
         await pilot.pause()
-        assert app.current == "standings" and isinstance(body(app), Table)
+        assert app.current == "standings" and "Brick City" in text_of(body(app))
         await pilot.press("o")
         await settle(pilot)
         assert body(app).header_style == f"bold {DARK.dim}"
@@ -233,7 +233,7 @@ def test_trash_names_the_drop_when_its_column_goes(session):
     assert "Drop" not in narrow.splitlines()[2]
     assert drop.split()[0] in narrow and "the suggested drop" in narrow
     wide = text_of(views.trash(picks, session.calendar, DARK, 120), 120)
-    assert "Drop" in wide and "Own%" in wide
+    assert "Drop" in wide and "Rost%" in wide
 
 
 def test_cli_trash_at_80_columns(capsys, monkeypatch):
@@ -273,7 +273,7 @@ def test_outside_the_season_nobody_plays_today(day):
     draw, _ = app._build("roster")
     assert "●" not in text_of(draw(DARK, 120))
     draw, _ = app._build("activity")
-    table = draw(DARK, 120)
+    table = table_in(draw(DARK, 120))
     assert all(c.header_style != f"bold {DARK.accent}" for c in table.columns)
     draw, pending = app._build("today")
     assert pending is None
@@ -285,8 +285,15 @@ def test_outside_the_season_nobody_plays_today(day):
 
 def test_in_season_today_is_highlighted(session):
     app = Benchboss(Config(), demo=True, session=session)
-    table = app._build("activity")[0](DARK, 120)
+    table = table_in(app._build("activity")[0](DARK, 120))
     assert sum(c.header_style == f"bold {DARK.accent}" for c in table.columns) == 1
+
+
+def table_in(renderable) -> Table:
+    """The table in a screen's drawing (the workload draws a title, the table and a legend)."""
+    if isinstance(renderable, Table):
+        return renderable
+    return next(r for r in renderable.renderables if isinstance(r, Table))
 
 
 def test_dashboard_trash_card_skips_picks_that_add_nothing(session):
