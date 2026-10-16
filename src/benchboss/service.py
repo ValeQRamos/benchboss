@@ -277,8 +277,22 @@ class Session:
         """Playoff odds and who is in or out, with the results you pick fixed (see
         core.playoffs.race: ``picks`` maps a matchup id to the team id you say wins it)."""
         from benchboss.core import playoffs
+        from benchboss.core.projection import week_projection
 
-        return playoffs.race(self.league(), picks or {}, sims=sims)
+        lg, cal = self.league(), self.calendar
+        weeks = range(1, playoffs.regular_season_weeks(lg) + 1)
+        days = {w: len(cal.matchup_periods(w, lg.matchup_periods)) for w in weeks}
+        current = cal.matchup_periods(lg.current_matchup, lg.matchup_periods)
+        today = self.today_period
+        done = sum(1 for p in current if p < today) if self.in_season else 0
+        progress = done / len(current) if current else 0.0
+        ahead = [p for p in range(today, today + 14) if p <= cal.final_period]
+        daily = {}
+        for tid, team in lg.teams.items():
+            pts, _ = week_projection(team, ahead, cal, lg.starter_slots)
+            daily[tid] = pts / len(ahead) if ahead else 0.0
+        return playoffs.race(lg, picks or {}, sims=sims, daily=daily, days_by_week=days,
+                             week_progress=progress)
 
     # --- features ------------------------------------------------------------------------------
 
