@@ -645,6 +645,7 @@ class FinderView(Vertical):
 
     def on_resize(self) -> None:
         self._render_header()
+        self.call_after_refresh(self._fit_width)
         if self.detail_id is not None:
             self._render_detail()
 
@@ -857,6 +858,32 @@ class FinderView(Vertical):
         starts = [sum(widths[:j]) - fixed for j in range(t.fixed_columns, len(widths))]
         x = next((s for s in starts if s >= x), x)
         t.scroll_to(x=max(0, x), animate=False)
+        self._fit_width(max(0, x))
+
+    def _fit_width(self, scroll_x: float | None = None) -> None:
+        """End the table on the last column that fits whole. A column cut off at the right
+        edge shows a stray digit or two (the "1" of a "10.2"); with the table one column
+        narrower the cut never shows, and the columns past it are a scroll away."""
+        if not self._live():
+            return
+        t = self.query_one(DataTable)
+        widths = [c.get_render_width(t) for c in t.ordered_columns]
+        room = self.content_region.width - t.styles.scrollbar_size_vertical
+        if not widths or room <= 0:
+            return
+        scroll_x = t.scroll_x if scroll_x is None else scroll_x
+        used = sum(widths[:t.fixed_columns])
+        j, skipped = t.fixed_columns, 0
+        while j < len(widths) and skipped < scroll_x:  # the columns scrolled out on the left
+            skipped += widths[j]
+            j += 1
+        while j < len(widths) and used + widths[j] <= room:
+            used += widths[j]
+            j += 1
+        if j >= len(widths):  # everything to the right fits: the table takes the whole row
+            t.styles.width = None
+        else:
+            t.styles.width = used + t.styles.scrollbar_size_vertical
 
     def _render_detail(self) -> None:
         p = self._player(self.detail_id)
