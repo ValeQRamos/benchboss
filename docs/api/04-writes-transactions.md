@@ -35,6 +35,7 @@ Bundles were fetched as data and searched as text; they were never executed.
 | POST | `{WRITES}/teams/{teamId}/recommendations?lineupScoringPeriodId=&recommendationTypeId=LINEUP&restOfWeek=` | ESPN "Quick Lineup" (server sets the optimal lineup) | espn_s2 + SWID | VERIFIED (bundle) |
 | GET | `{READS}/teams/{teamId}/recommendations?recommendationTypeId=LINEUP&view=recommend` | Read ESPN's suggested lineup (no write) | espn_s2 + SWID | VERIFIED (live) |
 | POST | `{WRITES}/teams?scoringPeriodId=0` | LM: set waiver order, transaction counters, team fields | LM cookies | VERIFIED (bundle) |
+| POST | `{WRITES}/teams/{teamId}` body `{"watchList": [playerIds]}` | Replace your watch list (the star next to a player) | espn_s2 + SWID | VERIFIED (bundle) |
 | GET | `{READS}?view=mPendingTransactions` | Pending trades and claims (source of truth for alerts) | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{READS}?view=mTransactions2` (+ `X-Fantasy-Filter: {"transactions":{...}}`) | Transaction log, filterable by type | espn_s2 + SWID | VERIFIED (live) |
 | GET | `{COMM}/communication/?view=kona_league_communication` (+ filter) | Recent Activity topics (`ACTIVITY_TRANSACTIONS`, etc.) | espn_s2 + SWID | VERIFIED (live) |
@@ -709,6 +710,25 @@ How a non-browser client should match ESPN's web client. Rows marked VERIFIED (l
 
 ---
 
+## 13. Watch list: `POST {WRITES}/teams/{teamId}`
+
+Status: VERIFIED (bundle, `watchPlayer`); the read side VERIFIED (live, 2026-10-16).
+
+The watch list (the star next to a player in the ESPN app) is a field of your own team, not a transaction. The web client reads the current list, adds or removes one player id, and posts the whole new list:
+
+```json
+POST {WRITES}/teams/3
+{"watchList": [4432166, 1111111]}
+```
+
+- **Read it** from `view=mTeam`: `teams[].watchList` is a list of player ids, present only on the caller's own team (an empty list when nothing is watched) and absent on the others. VERIFIED (live)
+- **Send the whole list.** No envelope, no `type`, no `memberId`. Re-read the list right before writing, because the ESPN app may have changed it since (benchboss `Session.set_watched` does). The change is private to you and reversible.
+- **Answer.** benchboss reads `watchList` from the response when it is there and otherwise keeps the list it sent; the exact response shape is UNVERIFIED.
+- **Cap.** The web client refuses an add once the list holds `config.maxWatchListPlayers` players ("The Watch List is capped at {max} players. To add another player to your Watch List, please first remove..."). VERIFIED (bundle) The number lives in the web app's own config, not in the league settings (`mSettings` has no such key, VERIFIED live), and whether the server enforces it is UNVERIFIED. benchboss does not check it: an add past the cap gets whatever ESPN answers, shown as the write's result.
+- benchboss: `benchboss watch add|remove "Player"` (asks first, `--dry-run` sends nothing) and the space key in the app's player finder (`client.update_team`).
+
+---
+
 ## Open questions
 
 1. Exact HTTP status codes for transaction errors (earlier client runs saw 409 for the position limit and for `ROSTER` on a non-current day); confirm with a real write and record the body.
@@ -721,3 +741,4 @@ How a non-browser client should match ESPN's web client. Rows marked VERIFIED (l
 8. Which parameter, if any, narrows `mTransactions2` by team? (`scoringPeriodId` narrows it by day on the completed 2026 season, but not in the 2027 preseason.)
 9. Origin and purpose of the legacy `CHAT` topic, and whether the server still notifies members about messages posted there.
 10. Whether `X-Fantasy-Platform` accepts arbitrary values (for example an app identifier) or only known clients.
+11. The value of `maxWatchListPlayers` for basketball, and whether the server rejects a `watchList` longer than it (section 13).

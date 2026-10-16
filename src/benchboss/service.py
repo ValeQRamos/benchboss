@@ -191,7 +191,7 @@ class Session:
             if not ids:
                 return []
             flt["filterIds"] = {"value": ids}
-            flt["limit"] = len(ids)
+            flt["limit"] = min(n, len(ids))  # ESPN sorts the list first: the best n of it
         elif POOLS[source]:
             flt["filterStatus"] = {"value": POOLS[source]}
         if sort == "own":
@@ -304,8 +304,10 @@ class Session:
         return matchup_outlook(self.league(), self.calendar, self.today_period, self.now)
 
     def activity(self) -> list[activity_mod.Activity]:
+        # games left count from the real day, not clamped: after the season none are left
         return activity_mod.roster_activity(self.league().me, self.calendar,
-                                            self.matchup_periods(), self.today_period)
+                                            self.matchup_periods(),
+                                            self.calendar.period_of(self.today))
 
     def trash(self, n: int = 10, position: str | None = None, pool: int = 60) -> list[trash_mod.TrashPick]:
         lg = self.league()

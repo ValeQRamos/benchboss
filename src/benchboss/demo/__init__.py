@@ -38,6 +38,14 @@ def _fold(s: str) -> str:
                    if not unicodedata.combining(c)).lower()
 
 
+def _name_hit(query: str, player: dict) -> bool:
+    """ESPN's ``filterName``: the query starts the first, last or full name, ignoring case
+    and accents (docs/api/02-players-projections.md). "Alexander" finds Cliff Alexander and
+    Nickeil Alexander-Walker, not Shai Gilgeous-Alexander; "lexander" finds nobody."""
+    names = (player.get("firstName"), player.get("lastName"), player.get("fullName"))
+    return any(_fold(n).startswith(query) for n in names if n)
+
+
 def _values(flt: dict, key: str) -> list | None:
     """``{"value": [...]}`` or ``{"value": x}`` as a list; None when the filter is absent."""
     f = flt.get(key)
@@ -104,11 +112,12 @@ class DemoClient:
 
     def players(self, flt: dict, scoring_period=None) -> list:
         """kona_player_info. Filters: ``filterStatus`` (any of FREEAGENT, WAIVERS, ONTEAM;
-        absent = everyone), ``filterIds``, ``filterName`` (case and accent insensitive
-        substring), ``filterSlotIds``. Sorts by ``sortPriority``: ``sortPercOwned``,
-        ``sortPercChanged``, ``sortAppliedStatAverage`` and ``sortAppliedStatTotal`` with
-        ``value`` a split id such as "002027" (descending unless ``sortAsc``; players without
-        the value go last). ``limit`` (0 = all) and ``offset`` page the result."""
+        absent = everyone), ``filterIds``, ``filterName`` (a case and accent insensitive
+        prefix of the first, last or full name, as on ESPN), ``filterSlotIds``. Sorts by
+        ``sortPriority``: ``sortPercOwned``, ``sortPercChanged``, ``sortAppliedStatAverage``
+        and ``sortAppliedStatTotal`` with ``value`` a split id such as "002027" (descending
+        unless ``sortAsc``; players without the value go last). ``limit`` (0 = all) and
+        ``offset`` page the result."""
         sorts = sorted(((k, v if isinstance(v, dict) else {}) for k, v in flt.items()
                         if k.startswith("sort")), key=lambda kv: kv[1].get("sortPriority", 99))
         if flt.get("limit") and not sorts:
@@ -126,7 +135,7 @@ class DemoClient:
         out = [x for x in pool
                if (statuses is None or x.get("status") in statuses)
                and (ids is None or x["id"] in ids)
-               and (not name or name in _fold(x["player"].get("fullName", "")))
+               and (not name or _name_hit(name, x["player"]))
                and (not slots or slots & set(x["player"].get("eligibleSlots") or []))]
         for sort, spec in reversed(sorts):  # stable sorts, the main one (priority 1) last
             value = _sort_value(sort, spec)

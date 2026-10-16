@@ -18,6 +18,7 @@ TITLE = "Best trash"
 VIEWS: tuple[tuple[str, str], ...] = ()
 
 GAME, NO_GAME, TIPPED = "●", "·", "○"   # the games strip: one glyph per day
+BENCHED = TIPPED                         # ○ is any game that adds nothing for you
 WIDE = 110                               # below this the position and ownership columns go
 HINT = 'benchboss add "Player" --drop "Player"'
 
@@ -57,10 +58,11 @@ def week_span(picks: list[TrashPick]) -> list[int]:
 def games_strip(pk: TrashPick, span: list[int], cal: SeasonCalendar, pal: Palette,
                 spaced: bool = False) -> Text:
     """One glyph per day of ``span``: blank before the grab day, then ● for a game he plays for
-    you and · for a day off. The grab day is drawn in the accent color; ○ is a game today that
-    has already tipped off (it does not count). ``spaced`` puts a space between the days so
-    they line up under the day initials ("W T F S S")."""
-    mine = set(pk.game_days(cal))
+    you and · for a day off. The grab day is drawn in the accent color; ○ is a game that adds
+    nothing: he would sit on your bench, or it is today's and has already tipped off.
+    ``spaced`` puts a space between the days so they line up under the day initials
+    ("W T F S S")."""
+    mine = set(pk.game_days())
     out = Text(no_wrap=True)
     for i, d in enumerate(span):
         if spaced and i:
@@ -73,6 +75,13 @@ def games_strip(pk: TrashPick, span: list[int], cal: SeasonCalendar, pal: Palett
         style = pal.accent if d == pk.best_day else pal.text if d in mine else pal.dim
         out.append(glyph, style=style)
     return out
+
+
+def _tipped_off(pk: TrashPick, cal: SeasonCalendar) -> bool:
+    """He has a game from the grab day on that no longer counts: today's, already tipped off."""
+    return pk.best_day is not None and any(
+        d >= pk.best_day and d not in pk.added and cal.plays(pk.player.pro_team_id, d)
+        for d in pk.gain_by_day)
 
 
 def strip_header(span: list[int], cal: SeasonCalendar, spaced: bool) -> str:
@@ -309,14 +318,16 @@ def trash(picks: list[TrashPick], cal: SeasonCalendar, pal: Palette,
     columns = [lay.names(short, room) if k == "Player" else lay.column(k)[0] for k in lay.keys]
     for row in zip(*columns, strict=True):
         t.add_row(*row)
-    tipped = "Games" in lay.keys and any(TIPPED in c.plain for c in lay.column("Games")[0])
-    t.caption = _caption(_legend(picks, lay.keys, drops, pal, tipped), pal,
+    strip = "Games" in lay.keys
+    tipped = strip and any(_tipped_off(pk, cal) for pk in picks)
+    benched = strip and any(pk.bench_days() for pk in picks)
+    t.caption = _caption(_legend(picks, lay.keys, drops, pal, tipped, benched), pal,
                          lay.need(min(room, lay.widest(short))))
     return Group(head, t)
 
 
 def _legend(picks: list[TrashPick], keys: list[str], drops: set[str], pal: Palette,
-            tipped: bool) -> list[tuple[str | Text, Meaning]]:
+            tipped: bool, benched: bool) -> list[tuple[str | Text, Meaning]]:
     """(key, meaning) pairs for the caption; an empty key is a plain note."""
     items: list[tuple[str | Text, Meaning]] = []
     added = ("points over your weakest starter", "points added")
@@ -331,7 +342,11 @@ def _legend(picks: list[TrashPick], keys: list[str], drops: set[str], pal: Palet
     items.append(("G", "games he plays for you"))
     if "Games" in keys and "Grab" not in keys:
         items.append((Text(GAME, style=pal.accent), "grab day"))
-    if tipped:
+    if benched:
+        items.append((Text(BENCHED, style=pal.dim),
+                      ("on your bench or already tipped off", "adds nothing") if tipped else
+                      ("a game on your bench, adds nothing", "on your bench")))
+    elif tipped:
         items.append((Text(TIPPED, style=pal.dim), "already tipped off"))
     flagged = sum(1 for pk in picks if pk.drop_projects_higher)
     every = flagged == sum(1 for pk in picks if pk.drop)

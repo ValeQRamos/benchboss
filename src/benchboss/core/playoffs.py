@@ -83,7 +83,7 @@ class TeamOdds:
 
 @dataclass
 class Race:
-    teams: list[TeamOdds]          # best projected seed first
+    teams: list[TeamOdds]          # best playoff odds first, then best projected seed
     games: list[Game]              # regular-season games not played yet (picked ones included)
     home_win: dict[int, float]     # game id -> share of simulations the home team won
     playoff_teams: int
@@ -190,10 +190,16 @@ def _label(t: Team) -> str:
 
 # --- the simulation -----------------------------------------------------------------------------
 
-def projected_daily(team: Team) -> float:
-    """A rough points-per-day for a roster when the caller has no schedule-based estimate."""
-    total = sum(s.player.proj for s in team.roster if s.slot_id != IR)
-    return total * GAMES_PER_DAY * BENCH_LOSS
+def projected_daily(team: Team, spots: int | None = None) -> float:
+    """A rough healthy points-per-day for a roster, for the weeks past the near term.
+
+    Injuries are temporary, so a player on IR counts too: when he comes back he takes one of
+    the ``spots`` active roster spots (every slot but IR) from the weakest player. Without
+    ``spots`` it keeps as many players as are off IR now.
+    """
+    keep = spots or sum(1 for s in team.roster if s.slot_id != IR)
+    best = sorted((s.player.proj for s in team.roster), reverse=True)[:keep]
+    return sum(best) * GAMES_PER_DAY * BENCH_LOSS
 
 
 def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, *,
@@ -203,9 +209,10 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
 
     ``daily``: expected points per day for each team id over the next days, from its roster,
     the NBA schedule and today's injuries (the service builds it). It sets the level for this
-    week and the next; later weeks use the roster's healthy projection, because a player out
-    today is not out all season. ``days_by_week``: days in each matchup week (7 when missing);
-    ``week_progress``: the share of the current week already played (0..1).
+    week and the next; later weeks use the roster's healthy projection (``projected_daily``,
+    IR included), because a player out today is not out all season. ``days_by_week``: days
+    in each matchup week (7 when missing); ``week_progress``: the share of the current week
+    already played (0..1).
 
     Each simulated season also moves every team's level a little (TEAM_SPREAD) for all the
     weeks ahead: trades, injuries and waiver luck make a team better or worse for a stretch,
@@ -237,8 +244,9 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
                 played_days[tid] += d
                 scored[tid] += pts
     near_day, per_day = {}, {}
+    spots = sum(n for slot, n in league.slot_counts.items() if slot != IR)
     for tid, t in teams.items():
-        healthy = projected_daily(t)
+        healthy = projected_daily(t, spots)
         near = (daily or {}).get(tid) or healthy
         n = played_days[tid]
         w = n / (n + PRIOR_DAYS)
@@ -301,7 +309,9 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
             seeds=[c / runs for c in seed_count[tid]], division=div_count[tid] / runs,
             status="clinched" if tid in clinched else "eliminated" if tid in eliminated else "",
             espn=t.playoff_pct, weekly=per_day[tid] * 7))
-    odds.sort(key=lambda o: (o.mean_seed, -o.playoffs, -o.proj_wins, o.team.id))
+    # by playoff odds, not mean seed: a team that either wins its division or misses can
+    # have a better mean seed than a wildcard that is far likelier to get in
+    odds.sort(key=lambda o: (-o.playoffs, o.mean_seed, -o.proj_wins, o.team.id))
     weeks_left = sorted({g.week for g in open_games})
     return Race(odds, open_games, {g.id: home_wins[g.id] / runs for g in open_games},
                 n_seeds, league.divisions, picks, runs, weeks_left, league.seeding_rule,

@@ -68,11 +68,12 @@ def test_individual_game_leagues_keep_the_per_player_rule(session):
     for pick in session.trash(n=60):
         team = pick.player.pro_team_id
         plays_later = cal.plays(team, today) and not_started(cal, team, today, session.now)
+        counted = len(pick.game_days() + pick.bench_days())  # the games that still count
         if pick.best_day == today and plays_later:
             counted_today += 1
-            assert pick.games_left == cal.games_in(team, [today, today + 1])
+            assert counted == cal.games_in(team, [today, today + 1])
         elif pick.best_day is not None:
-            assert pick.games_left == cal.games_in(team, [today + 1])
+            assert counted == cal.games_in(team, [today + 1])
     assert counted_today
 
 

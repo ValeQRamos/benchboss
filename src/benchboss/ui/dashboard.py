@@ -46,6 +46,7 @@ class Dashboard:
     today_period: int
     week: tuple[dt.date, dt.date] | None = None
     days_to_start: int = 0
+    in_season: bool = True    # today is a day of the NBA regular season
     outlook: MatchupOutlook | None = None
     activity: list[Activity] = field(default_factory=list)
     trash: list[TrashPick] = field(default_factory=list)
@@ -112,8 +113,10 @@ def collect(session, with_trash: bool = True, with_alerts: bool = True,
     d.days_to_start = max(0, (cal.day_one - session.today).days)
     d.outlook = _try(d, "matchup", session.outlook, None)
     d.activity = _try(d, "activity", session.activity, [])
-    for s in league.me.roster:
-        g = cal.game(s.player.pro_team_id, d.today_period) if d.days_to_start == 0 else None
+    d.in_season = session.in_season
+    day = cal.period_of(session.today)  # not clamped: before or after the season nobody plays
+    for s in league.me.roster if d.in_season else ():
+        g = cal.game(s.player.pro_team_id, day)
         if g:
             d.plays_today.add(s.player.id)
             d.opponents_today[s.player.id] = g.opponent(s.player.pro_team_id)
@@ -277,7 +280,7 @@ def roster_card(d: Dashboard, pal: Palette) -> Panel:
         t.add_row(Text(s.slot, style=pal.dim), Text("●" if today else " ", style=pal.good),
                   player_cell(p, pal, short=True, style=pal.dim if bench else pal.text),
                   Text(f"{p.proj:.1f}" if p.proj else "", style=pal.dim if bench else pal.text))
-    note = f"{playing} play today" if not d.days_to_start else "proj. pts"
+    note = f"{playing} play today" if d.in_season else "proj. pts"
     return _panel(t, "ROSTER", pal, note)
 
 

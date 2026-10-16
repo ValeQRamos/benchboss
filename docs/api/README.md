@@ -315,6 +315,7 @@ None of these were executed for this reference. Bodies and rules are in [04](04-
 | POST | `{W}/transactions/` type `DRAFT` | Offline draft entry and keepers (league manager) | league manager cookies | VERIFIED (bundle) | [04 §8](04-writes-transactions.md#8-draft-draft-lm-only) |
 | POST | `{W}/teams/{teamId}/recommendations?lineupScoringPeriodId=&recommendationTypeId=LINEUP&restOfWeek=` | Apply ESPN's Quick Lineup | cookies + SWID | VERIFIED (bundle) | [04 §4](04-writes-transactions.md#4-quick-lineup-espn-optimizer) |
 | POST | `{W}/teams?scoringPeriodId=0` | Waiver order and counters (league manager) | league manager cookies | VERIFIED (bundle) | [04 §6.6](04-writes-transactions.md#66-league-waiver-order-lm-only) |
+| POST | `{W}/teams/{teamId}` body `{"watchList": [...]}` | Replace your watch list | cookies + SWID | VERIFIED (bundle) | [04 §13](04-writes-transactions.md#13-watch-list-post-writesteamsteamid) |
 | POST, DELETE | `{W}/communication/topics...` | Legacy message board, polls, league email, reminders | cookies + SWID | VERIFIED (bundle) | [04 §10](04-writes-transactions.md#kona-message-board-writes) |
 
 ### Chat (`lm-api-communication`)

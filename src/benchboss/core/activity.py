@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from benchboss.core.calendar import SeasonCalendar
-from benchboss.espn.constants import BENCH, IR
+from benchboss.espn.constants import BENCH, INJURY_FACTOR, IR
 from benchboss.espn.models import Player, Team
 
 
@@ -34,6 +34,12 @@ class Activity:
     def is_starting(self) -> bool:
         return self.slot_id is not None and self.slot_id not in (BENCH, IR)
 
+    @property
+    def out(self) -> bool:
+        """Out (OUT, suspended: constants.INJURY_FACTOR 0), so his games are not games he
+        can play for you. ESPN only gives today's status, so it holds for the whole week."""
+        return INJURY_FACTOR.get(self.player.injury_status or "", 1.0) == 0
+
     def starting(self, day: int) -> bool | None:
         """In your lineup on day ``day`` (index into the week)? None when the lineups are
         unknown. A day he was not on your roster counts as not starting."""
@@ -43,8 +49,9 @@ class Activity:
         return slot is not None and slot not in (BENCH, IR)
 
     def benched(self, day: int) -> bool:
-        """He has a game that day but sits on your bench: a game you lose."""
-        return day < len(self.schedule) and bool(self.schedule[day]) and self.slot_on(day) == BENCH
+        """He has a game that day but sits on your bench: a game you lose (not when he is out)."""
+        return (not self.out and day < len(self.schedule) and bool(self.schedule[day])
+                and self.slot_on(day) == BENCH)
 
     def slot_on(self, day: int) -> int | None:
         if self.lineup is None or day >= len(self.lineup):
@@ -107,14 +114,14 @@ def by_lineup(acts: list[Activity]) -> tuple[list[Activity], list[Activity], lis
 def games_per_day(acts: list[Activity], days: int) -> list[int]:
     """How many of your players have a game on each day of the week.
 
-    IR players do not count (they cannot play for you), nor does anyone on a day he was not
-    on your roster when the lineups are known.
+    IR players and players who are out (``Activity.out``) do not count (they cannot play for
+    you), nor does anyone on a day he was not on your roster when the lineups are known.
     """
     out = []
     for i in range(days):
         n = 0
         for a in acts:
-            if i >= len(a.schedule) or not a.schedule[i]:
+            if a.out or i >= len(a.schedule) or not a.schedule[i]:
                 continue
             slot = a.slot_id if a.lineup is None else a.slot_on(i)
             if slot is not None and slot != IR:
