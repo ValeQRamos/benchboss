@@ -212,6 +212,12 @@ benchboss was built to live in the VS Code integrated terminal.
 
 More in [docs/vscode.md](docs/vscode.md).
 
+## Using it from a server or a phone
+
+Run benchboss on a small always-on Linux server and open it over SSH from your Mac or your
+phone, with `tmux` keeping the session alive. Setup, SSH keys, how users and cookies fit
+together and troubleshooting are in [docs/server.md](docs/server.md).
+
 ## Commands
 
 Run `benchboss --help` or `benchboss <command> --help` for every flag. Read commands accept
