@@ -6,6 +6,7 @@ import re
 import sys
 import urllib.parse
 from collections.abc import Container
+from dataclasses import dataclass
 
 from rich.markup import escape
 
@@ -44,6 +45,47 @@ def parse_league_id(text: str) -> int:
     if not m:
         raise BenchbossError("paste the league URL (it contains leagueId=...) or just the number")
     return int(m.group(1))
+
+
+@dataclass
+class Connection:
+    """A league reached with the cookies. ``team_id`` is None when none of its teams is yours:
+    pick one from ``teams`` (id, name, owner)."""
+    league_id: int
+    season: int
+    league_name: str
+    team_id: int | None
+    team_name: str
+    teams: list[tuple[int, str, str]]
+
+
+def find_leagues(cookies: tuple[str, str]) -> list[dict]:
+    """Your basketball leagues of the current season, or all of them when none match."""
+    season = config_mod.current_season()
+    found = discover(cookies)
+    return [lg for lg in found if lg["season"] in (None, season)] or found
+
+
+def connect(cookies: tuple[str, str], league_id: int, season: int,
+            team_id: int | None = None) -> Connection:
+    """Read the league with the cookies and find your team in it (no terminal needed)."""
+    raw = Client(league_id, season, cookies).league("mTeam", "mSettings", "mStatus")
+    lg = parse_league(raw, team_id, cookies[1], strict=False)
+    mine = team_id is not None or any(cookies[1] in t.owner_ids for t in lg.teams.values())
+    teams = [(t.id, t.name, t.owner_name) for t in sorted(lg.teams.values(), key=lambda t: t.id)]
+    return Connection(league_id, season, lg.name, lg.my_team_id if mine else None,
+                      lg.me.name if mine else "", teams)
+
+
+def save(cfg: config_mod.Config, cookies: tuple[str, str], conn: Connection) -> str:
+    """Store the cookies and the league settings; returns where the cookies went."""
+    where = credentials.store(*cookies)
+    cfg.league_id, cfg.team_id = conn.league_id, conn.team_id
+    # no season for the current one, so benchboss follows the league into next season
+    cfg.season = None if conn.season == config_mod.current_season() else conn.season
+    cfg.league_name, cfg.team_name = conn.league_name, conn.team_name
+    config_mod.save(cfg)
+    return where
 
 
 def _ask(c, prompt: str, default: str = "") -> str:

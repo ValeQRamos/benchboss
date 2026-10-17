@@ -283,6 +283,6 @@ def test_every_command_is_in_agents_md():
     """A new command must be classified for agents (a read or a write)."""
     agents = repo_text("AGENTS.md")
     sub = next(a for a in build_parser()._actions if a.dest == "cmd")
-    human_only = {"app", "setup", "login", "logout", "doctor"}  # interactive or account
+    human_only = {"app", "web", "setup", "login", "logout", "doctor"}  # interactive or account
     missing = [c for c in sub.choices if c not in human_only and f"benchboss {c}" not in agents]
     assert not missing

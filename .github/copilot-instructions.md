@@ -10,7 +10,9 @@ are in [AGENTS.md](../AGENTS.md); these rules are the non-negotiable part.
   `standings`, `playoffs` (`--pick "Winner>Loser"` only changes the simulation), `chat`
   (without text), `status`. `--view` only changes the text output; `--json` has everything.
 - Writes change the real league: `optimize`, `add`, `drop`, `trade`, `watch add`,
-  `watch remove`, `chat "text"`. Show the plan first with `--dry-run`, wait for the user's
+  `watch remove`, `chat "text"`, and `login --to` (it sends the user's cookies to a server over
+  SSH: the user runs that one themselves, an agent never does). Show the plan first with
+  `--dry-run`, wait for the user's
   explicit yes in chat, then run the same command with `--yes` and quote the `ESPN: ...` line.
   One approval covers one action. (The app's watch-list star skips this on purpose, because
   the list is private and the same key undoes it. From the terminal, `watch add "Player"` and
@@ -19,7 +21,7 @@ are in [AGENTS.md](../AGENTS.md); these rules are the non-negotiable part.
   back in `alerts` or in the app's toasts. Run it only when the user says they have read them.
 - Never run a write command without `--yes` or `--dry-run`: it waits for keyboard input and
   hangs the agent terminal. For the same reason never run `benchboss` with no command,
-  `benchboss app` or `dash --watch` (they are interactive and never exit).
+  `benchboss app`, `benchboss web` or `dash --watch` (they are interactive and never exit).
 - `news --ai` calls the Anthropic API with the user's key and costs money: run it only when
   the user asks for the AI briefing.
 - Never ask for, print or pass ESPN cookies. If `benchboss` exits with code 3, ask the user to

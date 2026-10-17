@@ -47,9 +47,10 @@ text drawing; the JSON always has everything. On `players`, `--sort` picks which
 sends (`proj`, `season`, `l7`, `l15`, `l30`, `last`, `own`, `change`), and without it the
 `--view` split is used.
 
-Do not run `benchboss` with no command, `benchboss app` or `benchboss dash --watch`: they
-are interactive and never exit. Run `benchboss news --ai` only when the user asks for the AI
-briefing: it calls the Anthropic API with their key and costs money.
+Do not run `benchboss` with no command, `benchboss app`, `benchboss web` or
+`benchboss dash --watch`: they are interactive and never exit. Run `benchboss news --ai` only
+when the user asks for the AI briefing: it calls the Anthropic API with their key and costs
+money.
 Run `benchboss alerts --mark-read` only when the user asks (they say they read the news). It
 writes nothing to ESPN, but the watch-list items it lists then never come back in `alerts` or
 in the app's toasts.
@@ -73,6 +74,7 @@ Write commands change the real league on ESPN. Protocol:
 | Send a trade offer | `benchboss trade --give "A" --get "B" --msg "text" --yes` |
 | Post in the league chat or a DM | `benchboss chat "text" [--to TEAM] --yes` |
 | Add a player to the ESPN watch list, or take him off | `benchboss watch add "Player" --yes`, `benchboss watch remove "Player" --yes` |
+| Send the user's ESPN cookies to their server over SSH | `benchboss login --to user@host --yes`: the user runs this themselves, an agent never does |
 
 Never chain several writes from one approval. Never retry a failed write without asking.
 

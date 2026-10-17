@@ -1,0 +1,17 @@
+[Unit]
+Description=benchboss web app (listens on localhost, a reverse proxy with a login sits in front)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=bb
+WorkingDirectory=/home/bb
+# Replace the address with the public URL people type in the browser.
+ExecStart=/home/bb/.local/bin/benchboss web --host 127.0.0.1 --port 8000 --url https://bb.example.com
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -7,13 +7,15 @@ import contextlib
 import datetime as dt
 import getpass
 import json
+import re
+import subprocess
 import sys
 import time
 
 from rich.console import Console
 from rich.text import Text
 
-from benchboss import __version__, credentials
+from benchboss import __version__, credentials, web
 from benchboss import config as config_mod
 from benchboss.errors import BenchbossError, ConfigError, NotConfirmed, WriteFailed
 from benchboss.ui import views
@@ -99,6 +101,9 @@ def _not_in_demo(c: Ctx) -> None:
 def cmd_login(c: Ctx):
     _not_in_demo(c)
     a = c.args
+    if a.to:
+        _login_to(c)
+        return
     if a.manual or (not a.chrome and sys.platform != "darwin"):
         c.out.print("Paste your ESPN cookies (they are hidden while you type).\n"
                     "Find them at espn.com: DevTools > Application > Cookies > espn.com")
@@ -111,6 +116,57 @@ def cmd_login(c: Ctx):
     c.out.print(f"[{c.pal.good}]✓[/] Cookies from {source} saved to {where}.")
     if not c.cfg.league_id:
         c.out.print("Next: [bold]benchboss setup[/] to pick your league and team.")
+
+
+_SSH_TARGET = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._@-]*")  # never an option: no leading dash
+# the remote side of `login --to`: the cookies arrive on stdin, never in a command line
+_REMOTE_STORE = ('umask 077; d="${BENCHBOSS_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/benchboss}"; '
+                 'mkdir -p "$d" && cat > "$d/credentials.json" && chmod 600 "$d/credentials.json"')
+
+
+def _login_to(c: Ctx):
+    """Send the cookies to another computer over SSH (a server running benchboss)."""
+    a = c.args
+    if not _SSH_TARGET.fullmatch(a.to):
+        c.usage("--to must look like user@host or host")
+    if a.manual:
+        source = "manual entry"
+        s2, swid = getpass.getpass("espn_s2: "), getpass.getpass("SWID: ")
+    elif a.chrome or (not credentials.get() and sys.platform == "darwin"):
+        source, s2, swid = credentials.from_chrome()
+    elif credentials.get():
+        source = "saved on this computer"
+        s2, swid = credentials.get()
+    else:
+        c.usage("no saved cookies: run `benchboss login` first, or add --manual")
+    s2, swid = s2.strip().strip('"'), credentials.normalize_swid(swid)
+    if not s2 or not swid:
+        raise BenchbossError("both espn_s2 and SWID are required")
+    c.out.print(Text(f"Send your ESPN cookies ({source}) to {a.to}: its benchboss settings "
+                     "folder, credentials.json, permissions 0600, over SSH."))
+    if a.dry_run:
+        c.out.print(Text("Dry run: nothing was sent.", style=c.pal.dim))
+        return
+    if not c.confirm("Send them?"):
+        return
+    argv = ["ssh"]
+    if a.ssh_port:
+        argv += ["-p", str(a.ssh_port)]
+    if a.identity:
+        argv += ["-i", a.identity]
+    argv += [a.to, _REMOTE_STORE]
+    try:
+        r = subprocess.run(argv, input=json.dumps({"espn_s2": s2, "SWID": swid}),
+                           capture_output=True, text=True, timeout=120)
+    except FileNotFoundError:
+        raise BenchbossError("ssh is not installed on this computer") from None
+    except subprocess.TimeoutExpired:
+        raise BenchbossError(f"ssh to {a.to} timed out") from None
+    if r.returncode:
+        raise BenchbossError(f"ssh to {a.to} failed ({r.returncode}): "
+                             f"{(r.stderr or '').strip()[-300:] or 'no message'}")
+    c.out.print(f"[{c.pal.good}]✓[/] Cookies sent to {a.to}. There, run [bold]benchboss setup[/] "
+                "(or open the web app) to pick the league and team.")
 
 
 def cmd_logout(c: Ctx):
@@ -632,6 +688,29 @@ def cmd_app(c: Ctx):
     run(c.cfg, demo=c.args.demo)
 
 
+def cmd_web(c: Ctx):
+    """Serve the app in a browser. It has no login of its own: keep it on localhost and put
+    a reverse proxy with a login in front of it (docs/server.md)."""
+    from benchboss import web
+
+    a = c.args
+    if a.host not in web.LOOPBACK and not a.allow_remote:
+        raise BenchbossError(f"{a.host} would let other computers reach the app, and the app "
+                             "has no login: keep --host 127.0.0.1 behind a proxy with a login, "
+                             "or add --allow-remote if you know what you are doing")
+    try:
+        from textual_serve.server import Server
+    except ImportError:
+        raise BenchbossError("benchboss web needs the web extra: install it with "
+                             "`uv tool install --with textual-serve benchboss` or "
+                             "`pip install 'benchboss[web]'`") from None
+    command = web.session_command(demo=a.demo, theme=getattr(a, "theme", None))
+    shown = a.url or f"http://{a.host}:{a.port}"
+    c.err.print(Text(f"benchboss web: serving {'demo data' if a.demo else 'your league'} at {shown}",
+                     style=c.pal.dim))
+    Server(command, host=a.host, port=a.port, title="benchboss", public_url=a.url).serve()
+
+
 # --- parser -------------------------------------------------------------------------------------------
 
 def _count(value: str) -> int:
@@ -695,13 +774,28 @@ def build_parser() -> argparse.ArgumentParser:
         return p
 
     add("app", cmd_app, "open the interactive app (same as running benchboss with no command)")
+    p = add("web", cmd_web, "serve the app in a browser (needs the web extra); put a proxy "
+                            "with a login in front of it")
+    p.add_argument("--host", default="127.0.0.1", help="address to listen on (default 127.0.0.1)")
+    p.add_argument("--port", type=int, default=8000, help="port to listen on (default 8000)")
+    p.add_argument("--url", metavar="URL", help="the public address people type, for example "
+                                              "https://bb.example.com (behind a proxy)")
+    p.add_argument("--allow-remote", action="store_true",
+                   help="allow --host to be an address other computers can reach")
     p = add("dash", cmd_dash, "the dashboard: matchup, roster, workload, trash, standings")
     p.add_argument("--watch", nargs="?", type=int, const=60, metavar="SECONDS",
                    help="keep it open and refresh (default every 60 s)")
     add("setup", cmd_setup, "first-run wizard: cookies, league, team, colors")
-    p = add("login", cmd_login, "save your ESPN cookies (from Chrome on macOS, or pasted)")
+    p = add("login", cmd_login, "save your ESPN cookies (from Chrome on macOS, or pasted), "
+                                "or send them to a server with --to")
     p.add_argument("--chrome", action="store_true", help="import from Google Chrome (macOS)")
     p.add_argument("--manual", action="store_true", help="paste espn_s2 and SWID by hand")
+    p.add_argument("--to", metavar="[USER@]HOST",
+                   help="send the cookies over SSH to a server running benchboss, instead of "
+                        "saving them here")
+    p.add_argument("--identity", metavar="FILE", help="with --to: the SSH key file to use")
+    p.add_argument("--ssh-port", type=int, metavar="PORT", help="with --to: the SSH port")
+    p.add_argument("--dry-run", action="store_true", help="with --to: show what would be sent, send nothing")
     add("logout", cmd_logout, "forget the saved cookies")
     for name in ("status", "doctor"):
         p = add(name, cmd_status, "show config and check the connection to ESPN")
@@ -813,7 +907,7 @@ def main(argv: list[str] | None = None) -> None:
     if not args.cmd or args.cmd == "app":
         if args.json:
             ap.error("--json needs a command, for example `benchboss dash --json`")
-        if not (_isatty(sys.stdin) and _isatty(sys.stdout)):
+        if not (_isatty(sys.stdin) and _isatty(sys.stdout)) and not web.in_web_session():
             ap.error("the interactive app needs a terminal; run a command instead, "
                      "for example `benchboss dash` (see `benchboss -h`)")
         args.cmd, args.fn = "app", cmd_app

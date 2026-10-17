@@ -308,17 +308,22 @@ benchboss setup [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 
 ### `benchboss login`
 
-Save your ESPN cookies (from Chrome on macOS, or pasted).
+Save your ESPN cookies (from Chrome on macOS, or pasted), or send them to a server with --to.
 
 ```text
 benchboss login [-h] [--json] [--demo] [--theme {dark,light}] [-y]
-                       [--chrome] [--manual]
+                       [--chrome] [--manual] [--to [USER@]HOST]
+                       [--identity FILE] [--ssh-port PORT] [--dry-run]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--chrome` | Import from Google Chrome (macOS) |
 | `--manual` | Paste espn_s2 and SWID by hand |
+| `--to` | Send the cookies over SSH to a server running benchboss, instead of saving them here |
+| `--identity` | With --to: the SSH key file to use |
+| `--ssh-port` | With --to: the SSH port |
+| `--dry-run` | With --to: show what would be sent, send nothing |
 
 ### `benchboss logout`
 
@@ -348,3 +353,19 @@ Open the interactive app (same as running benchboss with no command).
 ```text
 benchboss app [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 ```
+
+### `benchboss web`
+
+Serve the app in a browser (needs the web extra); put a proxy with a login in front of it.
+
+```text
+benchboss web [-h] [--json] [--demo] [--theme {dark,light}] [-y]
+                     [--host HOST] [--port PORT] [--url URL] [--allow-remote]
+```
+
+| Option | Meaning |
+|---|---|
+| `--host` | Address to listen on (default 127.0.0.1) |
+| `--port` | Port to listen on (default 8000) |
+| `--url` | The public address people type, for example https://bb.example.com (behind a proxy) |
+| `--allow-remote` | Allow --host to be an address other computers can reach |

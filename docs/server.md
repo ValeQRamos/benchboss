@@ -194,17 +194,18 @@ To remove a device, delete its line from `~/.ssh/authorized_keys` on the server.
 
 ## 5. Give the server your ESPN cookies
 
-`benchboss login` reads cookies from a browser on the same computer, so it cannot work on a
-server. Send the cookies from your Mac without printing them:
+`benchboss login` reads cookies from a browser on the same computer, so it cannot import them on
+a server. Send them from your Mac, over SSH, with one command (it reads Chrome, or the
+cookies already saved on the Mac, and never prints them):
 
 ```bash
-python3 -c 'import json,subprocess as s;g=lambda a:s.check_output(["security","find-generic-password","-s","benchboss","-a",a,"-w"],text=True).strip();print(json.dumps({"espn_s2":g("espn_s2"),"SWID":g("SWID")}))' \
-  | ssh -i ~/.ssh/benchboss_ssh bb@SERVER_IP 'umask 077; mkdir -p ~/.config/benchboss; cat > ~/.config/benchboss/credentials.json'
+benchboss login --to bb@SERVER_IP --identity ~/.ssh/benchboss_ssh
 ```
 
-This reads the macOS Keychain entries benchboss created and writes `credentials.json` on the
-server with `0600` permissions. Do not paste the values into chat or tickets. Then, on the
-server:
+It shows what it will do and asks first (add `--dry-run` to only look, `--yes` to skip the
+question). The cookies travel on SSH's standard input, never in a command line, and land in
+`~/.config/benchboss/credentials.json` on the server with `0600` permissions. macOS may ask
+once for permission to read Chrome's cookies. Then, on the server:
 
 ```bash
 benchboss setup          # finds the cookies, then asks for the league and your team
@@ -213,6 +214,72 @@ benchboss status --json  # "connected": true means ESPN accepted the server
 
 Cookies expire now and then. When `benchboss` exits with code 3, repeat this step. If you
 ever paste cookies somewhere by accident, sign out of ESPN everywhere to invalidate them.
+
+## 6. Use it in a browser (optional)
+
+Instead of SSH and `tmux`, the server can serve the app as a web page. You get a link you can
+open from any browser, including a phone.
+
+```mermaid
+flowchart LR
+    B[Browser] -->|HTTPS, user and password| C[Caddy]
+    C -->|127.0.0.1:8000| W[benchboss web]
+```
+
+**The app has no login of its own.** Anyone who reaches the page acts as the ESPN account on
+the server and can press Apply. So `benchboss web` listens on `127.0.0.1` only (it refuses any
+other `--host` unless you add `--allow-remote`), and a reverse proxy with a login and HTTPS
+sits in front. This is built for one person: everyone who knows the login is the same ESPN
+account.
+
+### Install and run
+
+```bash
+uv tool install --force --with textual-serve "benchboss @ https://github.com/ValeQRamos/benchboss/archive/refs/heads/main.zip"
+benchboss --demo web          # try it with the fictional league first
+```
+
+`--demo` sends nothing to ESPN. Leave off `--demo` to serve your real league.
+
+To keep it running and restart it after a reboot, use the systemd unit in
+[deploy/benchboss-web.service](../deploy/benchboss-web.service) (put your public address in
+`--url`):
+
+```bash
+sudo cp deploy/benchboss-web.service /etc/systemd/system/
+sudo systemctl enable --now benchboss-web
+```
+
+### Put a login and HTTPS in front
+
+Use [Caddy](https://caddyserver.com). It gets and renews the certificate by itself. You need a
+name that points at the server: your own domain, or a free name such as
+`SERVER-IP-WITH-DASHES.sslip.io` (for `203.0.113.7`, `203-0-113-7.sslip.io`).
+
+```bash
+sudo apt-get install -y caddy
+pw=$(openssl rand -base64 24 | tr -d '=+/' | cut -c1-24)   # a long random password
+echo "$pw" > ~/.bb-web-password && chmod 600 ~/.bb-web-password
+caddy hash-password --plaintext "$pw"                     # the hash goes in the Caddyfile
+```
+
+Copy [deploy/Caddyfile.example](../deploy/Caddyfile.example) to `/etc/caddy/Caddyfile`, set
+your name and paste the hash, then open ports 80 and 443 and reload:
+
+```bash
+sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
+sudo systemctl reload caddy
+```
+
+Read the password with `cat ~/.bb-web-password` over SSH when you need it. Use a long random
+password: basic auth has no lockout of its own. Never serve the app over plain `http://`.
+
+### First run
+
+In a browser session with no ESPN cookies or no league, the app opens a setup screen with two
+hidden fields (`espn_s2` and `SWID`), then picks your league and team the same way
+`benchboss setup` does. If you already sent the cookies with `login --to`, you only choose the
+league and team. A terminal session never shows this screen and behaves as before.
 
 ## Known limits
 
@@ -257,4 +324,6 @@ The second command should show `passwordauthentication no` and `permitrootlogin 
 - Private keys stay out of git, chat and cloud-synced folders.
 - Reach SSH over Tailscale and close port 22 to the internet once that works.
 - No cookies or keys in the provisioning script or in user data.
+- If you use the web app: a login and HTTPS in front of it, `benchboss web` on `127.0.0.1`,
+  port 8000 closed to the internet, and a long random password.
 - Keep a spare way in (the provider's web console) in case you lock yourself out.

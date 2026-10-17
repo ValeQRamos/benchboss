@@ -155,7 +155,7 @@ def test_the_real_lookup_still_treats_the_null_backend_as_no_keychain(monkeypatc
 
 # --- release notes and agent docs ---------------------------------------------------------------
 
-FOR_HUMANS = {"app", "setup", "login", "logout", "doctor"}  # interactive or account commands
+FOR_HUMANS = {"app", "web", "setup", "login", "logout", "doctor"}  # interactive or account commands
 
 
 def commands() -> dict[str, argparse.ArgumentParser]:

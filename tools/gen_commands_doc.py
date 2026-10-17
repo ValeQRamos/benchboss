@@ -13,7 +13,7 @@ GROUPS = [
     ("Find", ["trash", "players", "fa", "trending", "news", "trades", "alerts"]),
     ("Act (writes to ESPN, always asks first)", ["optimize", "add", "drop", "trade", "watch",
                                                  "chat"]),
-    ("Account", ["setup", "login", "logout", "status", "app"]),
+    ("Account", ["setup", "login", "logout", "status", "app", "web"]),
 ]
 
 
