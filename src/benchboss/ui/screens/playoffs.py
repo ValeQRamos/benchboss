@@ -709,8 +709,8 @@ class PlayoffBuilder(Widget, can_focus=True):
     def _draw_foot(self, pal: Palette, width: int, height: int) -> RenderableType:
         keys = [("↑↓", "game"), ("←→", "pick the winner"), ("0", "clear"), ("c", "clear all"),
                 ("e", f"final {FINAL_WEEKS} weeks"), ("b", "next week")]
-        if not self.games:
-            keys = []
+        if not self.games or getattr(self.app, "compact", False):
+            keys = []  # a phone: the key bar lists the letters (key_items), not the arrows
         brief = [("↑↓", "game"), ("←→", "pick"), ("0", "clear"), ("c", "clear all"),
                  ("e", "final weeks"), ("b", "next week")]
         if self.short and keys and "\n" not in _legend_lines(pal, brief, width).plain:
