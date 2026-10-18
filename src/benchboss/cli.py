@@ -24,6 +24,7 @@ examples:
   benchboss                      open the interactive app (menu, dashboard, one-key actions)
   benchboss dash --watch         live dashboard, refreshes every 60 s (great in a side terminal)
   benchboss optimize week        set the best lineup for every day left in the matchup week
+  benchboss autoswap add "Name"  start him by himself if he turns healthy before his game
   benchboss trash                most valuable free agents for this week
   benchboss news --days 5        latest news and spins on your players
   benchboss trades --need C      fair trades that get you a center
@@ -710,6 +711,246 @@ def cmd_app(c: Ctx):
     run(c.cfg, demo=c.args.demo, layout=getattr(c.args, "layout", None))
 
 
+# --- auto-swap and the monitor ------------------------------------------------------------------------
+
+def _clock_of(rec: dict, tz) -> str:
+    from benchboss.core.calendar import clock
+
+    try:
+        return clock(dt.datetime.fromisoformat(rec["at"]), tz)
+    except (KeyError, TypeError, ValueError):
+        return ""
+
+
+def _simulate(c: Ctx) -> dict[str, str]:
+    """--simulate "Name=STATUS" (repeatable) -> {name: STATUS}."""
+    from benchboss.espn.constants import KNOWN_STATUSES
+
+    out = {}
+    for spec in c.args.simulate or []:
+        name, _, status = spec.rpartition("=")
+        status = status.strip().upper().replace("-", "_").replace(" ", "_")
+        if not name.strip() or status not in KNOWN_STATUSES:
+            c.usage(f'--simulate takes "Player=STATUS" with STATUS one of '
+                    f"{', '.join(sorted(KNOWN_STATUSES))}; got {spec!r}")
+        out[name.strip()] = status
+    return out
+
+
+def cmd_monitor(c: Ctx):
+    """benchboss monitor: watch armed and watch-list players. Trial mode unless --live."""
+    from benchboss import monitor as mon
+    from benchboss import notify
+
+    a = c.args
+    if a.live and a.dry_run:
+        c.usage("--live sends changes and --dry-run sends nothing: pick one")
+    if a.simulate and a.live:
+        c.usage("--simulate works in trial mode, with --dry-run or with --demo, never with --live")
+    if a.demo and a.live:
+        raise BenchbossError("demo mode never writes to ESPN: leave out --live")
+    if a.demo and not a.once and not a.notify_test:
+        c.usage("the demo never sleeps: add --once (benchboss --demo monitor --once)")
+    simulate = _simulate(c)
+    names = [n for n in (a.notify or "").split(",") if n.strip()]
+    if not names and not a.demo:  # the demo notifies only when asked: its lines say it all
+        saved = c.cfg.notify.get("backends")
+        names = list(saved) if isinstance(saved, list) and saved else list(notify.default_backends())
+    backends = notify.backends(names)
+    for b in backends:  # in JSON mode stdout carries only the records
+        if isinstance(b, notify.LogBackend) and a.json:
+            b.stream = sys.stderr
+    if a.notify_test:
+        receipts = notify.send(notify.Note("benchboss", "Test note from benchboss monitor: "
+                                           "notifications work (Nikola Jokić, Luka Dončić).",
+                                           "normal", "test"), backends)
+        c.emit(Text("\n".join(receipts)), {"receipts": receipts})
+        if receipts and all("failed" in r for r in receipts):
+            raise BenchbossError("no notification went out")
+        return
+    if a.live:
+        if a.json and not a.yes:
+            raise NotConfirmed("NOT DONE: live mode needs --yes; nothing was started")
+        if not c.confirm("Auto-swap will change your lineup on ESPN without asking each time. "
+                         "Start?"):
+            return
+
+    made: list[int] = []
+
+    def factory():
+        """The first session is this command's; later ones (a new day, a new login) read
+        the config and the cookies again."""
+        if a.demo or not made:
+            made.append(1)
+            return c.session
+        from benchboss.service import Session
+
+        return Session(config_mod.load())
+
+    def emit(rec: dict) -> None:
+        if a.json:
+            print(json.dumps(rec, ensure_ascii=False, default=str), flush=True)
+            return
+        text = rec.get("text") or rec.get("event", "")
+        style = c.pal.bad if rec.get("outcome") in mon.URGENT_OUTCOMES else c.pal.text
+        tz = m.session.now.tzinfo if m.session is not None else None
+        c.out.print(Text.assemble((f"{_clock_of(rec, tz):>8}  ", c.pal.dim), (text, style)))
+
+    def say(text: str) -> None:
+        if not a.json:
+            c.out.print(Text(text, style=c.pal.dim))
+
+    m = mon.Monitor(factory, live=a.live, dry_run=a.dry_run, backends=backends,
+                    simulate=simulate, emit=emit, say=say)
+    if not a.json and not a.once:
+        mode = "live" if a.live else "trial (nothing is sent to ESPN)"
+        c.out.print(Text(f"benchboss monitor: {mode}; notifications: "
+                         f"{', '.join(names) or 'none'}. Ctrl-C stops it.", style=c.pal.dim))
+    code = m.run(once=a.once)
+    if code:
+        sys.exit(code)
+
+
+def _autoswap_preview(s, spot):
+    """(Preview, period) for arming ``spot`` now."""
+    from benchboss import monitor as mon
+    from benchboss.core import autoswap as core
+    from benchboss.core.lineup import LOCK_MARGIN
+    from benchboss.espn.constants import IR
+
+    cal = s.calendar
+    period = cal.period_of(s.today)
+    in_season = 1 <= period <= cal.final_period
+    roster = mon.base_roster(s, period) if in_season else list(s.league().me.roster)
+    p = spot.player
+    game = cal.game(p.pro_team_id, period) if in_season else None
+    plan = None
+    if game and spot.slot_id != IR and not p.locked and game.start > s.now + LOCK_MARGIN:
+        plan = core.preview_flip(roster, s.league().slot_counts, period, cal, p.id, s.now)
+    return core.describe(roster, plan, p.id, cal, period if in_season else 0, s.now,
+                         s.now.tzinfo)
+
+
+def cmd_autoswap(c: Ctx):
+    """benchboss autoswap: list, arm, disarm, pause and resume auto-swap marks; its log."""
+    from benchboss import lineup_log
+    from benchboss.marks import MarkStore
+    from benchboss.ui.screens import autoswap as screen
+
+    a = c.args
+    action = a.action or "list"
+    name = " ".join(a.player).strip()
+    if action in ("list", "clear", "pause", "resume", "log") and name:
+        c.usage(f"`autoswap {action}` takes no player")
+    if action in ("add", "remove") and not name:
+        c.usage(f'name the player: benchboss autoswap {action} "Player"')
+    if action != "add" and (a.today or a.notify_only or a.dry_run):
+        c.usage("--today, --notify-only and --dry-run go with `autoswap add`")
+    s = c.session
+    store_ = MarkStore(s)
+    if action == "list":
+        _screen(c, screen)
+        return
+    if action == "log":
+        recs = lineup_log.read_local(s)[-a.n:]
+        if a.json:
+            print(json.dumps(recs, indent=2, ensure_ascii=False, default=str))
+            return
+        if not recs:
+            c.out.print(Text("Nothing logged yet.", style=c.pal.dim))
+        for r in recs:
+            day = str(r.get("at", ""))[:10]
+            text = r.get("text") or screen._event_text(r)
+            c.out.print(Text.assemble((f"{day} {_clock_of(r, s.now.tzinfo):>8}  ", c.pal.dim),
+                                      (f"{r.get('writer', ''):<7} {r.get('event', ''):<8} ",
+                                       c.pal.dim), text))
+        return
+    if action == "add":
+        _autoswap_add(c, s, store_, name)
+        return
+    if action == "remove":
+        from benchboss.text import match_one
+
+        marks = store_.load().marks
+        if marks:
+            m = match_one(list(marks.values()), name, lambda x: x.name, where="your marks")
+            pid, who = m.player_id, m.name
+        else:
+            spot = s.league().me.find(name)
+            pid, who = spot.player.id, spot.player.name
+        gone = store_.disarm(pid, origin="cli")
+        msg = f"Auto-swap is off for {who}." if gone else f"{who} was not armed: nothing to do."
+        c.emit(Text(msg), {"player": who, "player_id": pid, "removed": gone})
+        return
+    if action == "clear":
+        n = store_.clear(origin="cli")
+        c.emit(Text(f"Took {n} mark{'s' * (n != 1)} off." if n else "Nobody was armed."),
+               {"removed": n})
+        return
+    paused = action == "pause"
+    store_.set_paused(paused, origin="cli")
+    msg = ("Auto-swap paused: the monitor changes nothing until benchboss autoswap resume."
+           if paused else "Auto-swap resumed: armed players count again.")
+    c.emit(Text(msg), {"paused": paused})
+
+
+def _autoswap_add(c: Ctx, s, store_, name: str) -> None:
+    from benchboss.core import autoswap as core
+    from benchboss.espn.constants import IR
+    from benchboss.marks import week_end
+
+    a = c.args
+    spot = s.league().me.find(name)
+    p = spot.player
+    if spot.slot_id == IR:
+        raise BenchbossError(f"{p.name} is on IR: auto-swap starts players from your bench, "
+                             "not from IR")
+    pv = _autoswap_preview(s, spot)
+    until = s.today if a.today else week_end(s)
+    mode = "notify" if a.notify_only else "auto"
+    tag = core.tag(p.injury_status if p.injury_known else None)
+    lines = [f"{p.name} ({p.pro_team}, {tag}): {pv.text}"]
+    if mode == "notify":
+        lines.append("Alert only: benchboss tells you when he turns healthy and changes "
+                     "nothing.")
+    lines.append(f"The mark lasts until {until:%a %b} {until.day}"
+                 + (" (tonight)." if a.today else " (the end of the matchup week)."))
+    result = {"player": p.name, "player_id": p.id, "mode": mode, "until": until.isoformat(),
+              "if_healthy": pv.to_dict(), "dry_run": bool(a.dry_run), "armed": False}
+    if not a.json:
+        c.out.print(Text("\n".join(lines)))
+    if a.dry_run:
+        if a.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            c.out.print(Text("Dry run: nothing was armed.", style=c.pal.dim))
+        return
+    if s.demo:
+        raise BenchbossError("demo mode keeps marks only inside the app: run benchboss --demo "
+                             "and press u")
+    if mode == "auto":
+        if a.json and not a.yes:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            raise NotConfirmed("NOT DONE: nothing was armed; repeat with --yes to arm him")
+        question = f"Arm auto-swap for {p.name}?"
+        if pv.would_change:
+            question += " " + pv.text
+        if not c.confirm(question):
+            return
+    store_.arm(p, mode, until=until, origin="cli")
+    result["armed"] = True
+    if a.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+    from benchboss import monitor as mon
+
+    done = (f"Armed {p.name}." if mode == "auto" else f"Alert on for {p.name}.")
+    hb = mon.heartbeat(s)
+    if not hb["running"]:
+        done += " It works while benchboss monitor runs (in trial mode until you add --live)."
+    c.out.print(Text(f"✓ {done}", style=c.pal.good))
+
+
 # --- parser -------------------------------------------------------------------------------------------
 
 def _count(value: str) -> int:
@@ -879,6 +1120,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--to", metavar="TEAM_OR_NAME", help="direct message instead of the league chat")
     p.add_argument("--dry-run", action="store_true", help="show the message, send nothing")
     p.add_argument("-n", type=_count, default=15, help="how many messages to show (default 15)")
+
+    p = add("autoswap", cmd_autoswap, "auto-swap: arm players who may turn healthy before their "
+                                      "game, so benchboss starts them by itself")
+    p.add_argument("action", nargs="?", choices=["list", "add", "remove", "clear", "pause",
+                                                 "resume", "log"], help="default: list")
+    p.add_argument("player", nargs="*", help="the player to add or remove")
+    p.add_argument("--today", action="store_true", help="add: the mark ends tonight (default: "
+                                                        "the end of the matchup week)")
+    p.add_argument("--notify-only", action="store_true",
+                   help="add: only tell me when he turns healthy, change nothing (no question)")
+    p.add_argument("--dry-run", action="store_true", help="add: show what would happen, arm nothing")
+    p.add_argument("-n", type=_count, default=20, help="log: how many lines (default 20)")
+    p = add("monitor", cmd_monitor, "the background process: watches armed and watch-list "
+                                    "players, makes the auto-swaps (trial mode unless --live) "
+                                    "and sends the notifications")
+    p.add_argument("--once", action="store_true", help="one read and one round, then exit")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print what it sees and would do: no notification, no state, no log")
+    p.add_argument("--live", action="store_true",
+                   help="send the changes to ESPN (needs --yes or a yes at the prompt)")
+    p.add_argument("--notify", metavar="BACKENDS",
+                   help="mac, ntfy, cmd, log, comma separated (secrets come from the "
+                        "environment, never from here)")
+    p.add_argument("--notify-test", action="store_true",
+                   help="send one test note through the backends and exit")
+    p.add_argument("--simulate", action="append", metavar="PLAYER=STATUS",
+                   help='pretend a status, e.g. --simulate "Dyson Daniels=ACTIVE" (trial, '
+                        "--dry-run or --demo only; repeat for more)")
     return ap
 
 

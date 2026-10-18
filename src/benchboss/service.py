@@ -695,6 +695,24 @@ class Session:
             found = ranked(players + [p for p in extra if p.id not in known])
         return found
 
+    # --- monitor -------------------------------------------------------------------------------
+
+    def player_snapshot(self, ids: Iterable[int]) -> list[Player]:
+        """The status of a few players, read fresh: one kona_player_info read with only these
+        ids (injury status, lineup lock, team, projection). The monitor's one read per tick;
+        writes still re-read the roster through apply_plan."""
+        ids = list(dict.fromkeys(int(i) for i in ids))
+        if not ids:
+            return []
+        lg = self.league()
+        flt = {"filterIds": {"value": ids}, "limit": len(ids),
+               "sortPercOwned": {"sortPriority": 1, "sortAsc": False},
+               # only the projection: the stats are what makes a player read heavy
+               "filterStatsForTopScoringPeriodIds": {
+                   "value": 1, "additionalValue": [split_ids(lg.season)[list(SPLITS).index("proj")]]}}
+        period = max(1, min(self.calendar.period_of(self.today), self.calendar.final_period))
+        return [parse_player(x, lg.season) for x in self.client.players(flt, period)]
+
 
 def _slot_id(position: str) -> int:
     pos = position.upper()

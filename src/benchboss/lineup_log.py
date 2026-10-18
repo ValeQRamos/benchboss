@@ -91,3 +91,49 @@ def read(session, months: int = 2) -> list[dict]:
 
 __all__ = ["EVENTS", "MODES", "REQUIRED", "VERSION", "WRITERS", "append", "path_for", "read",
            "record"]
+
+
+# --- helpers for local changes (auto-swap package) ------------------------------------------------
+# Arming, disarming and pausing must work with ESPN down, so these never read the league:
+# they take the league id from the client and the team from the league already loaded, or
+# from the config.
+
+def _ids(session) -> tuple[int, int | None]:
+    lg = getattr(session, "_league", None)
+    if lg is not None:
+        return lg.id, lg.my_team_id
+    return session.client.league_id, session.cfg.team_id
+
+
+def record_local(session, writer: str, event: str, mode: str, **fields) -> dict:
+    """``record`` without an ESPN read (see above), already redacted (nothing is written)."""
+    if writer not in WRITERS or event not in EVENTS or mode not in MODES:
+        raise BenchbossError(f"bad lineup log record: writer={writer} event={event} mode={mode}")
+    league, team = _ids(session)
+    rec = {"v": VERSION, "at": session.now.isoformat(timespec="seconds"), "league": league,
+           "team": team, "writer": writer, "event": event, "mode": mode, **fields}
+    return json.loads(store.redact(json.dumps(rec, ensure_ascii=False, default=str),
+                                   store.session_secrets(session)))
+
+
+def append_local(session, writer: str, event: str, mode: str, **fields) -> dict:
+    """``append`` without an ESPN read (see above)."""
+    clean = record_local(session, writer, event, mode, **fields)
+    store.append_jsonl(path_for(session.now), clean, memory=session.local_state)
+    return clean
+
+
+def read_local(session, months: int = 2) -> list[dict]:
+    """``read`` without an ESPN read: this league's records, oldest first."""
+    league, _ = _ids(session)
+    first = session.now.date().replace(day=1)
+    days = []
+    for _ in range(max(1, months)):
+        days.append(first)
+        first = (first - dt.timedelta(days=1)).replace(day=1)
+    out: list[dict] = []
+    for day in reversed(days):
+        when = dt.datetime.combine(day, dt.time())
+        out += [r for r in store.read_jsonl(path_for(when), memory=session.local_state)
+                if r.get("league") == league]
+    return out

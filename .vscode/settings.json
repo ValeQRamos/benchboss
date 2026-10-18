@@ -1,14 +1,22 @@
 {
   // Let Copilot's agent run benchboss read commands and --dry-run previews without asking.
-  // Writes (optimize, add, drop, trade, chat with text, watch add/remove) still require your
-  // approval.
+  // Writes (optimize, add, drop, trade, chat with text, watch add/remove, autoswap add and
+  // resume) still require your approval, and so does every other autoswap change.
+  // The monitor: only `monitor --once --dry-run` runs without asking (it reads, prints and
+  // saves nothing). Starting it for real is yours to do, in your own terminal.
   // The false rules always win: anything with --yes or -y, a paid AI briefing (news --ai),
-  // dash --watch (it never exits), alerts --mark-read and account commands always ask.
+  // dash --watch (it never exits), alerts --mark-read, monitor --live or --notify-test (a real
+  // push), autoswap resume and account commands always ask.
   "chat.tools.terminal.autoApprove": {
     "/^benchboss (status|doctor|dash|matchup|roster|activity|players|trash|fa|trending|news|trades|alerts|standings|playoffs)\\b/": true,
     "/^benchboss watch( --json| list)*$/": true,
     "/^benchboss chat( --json| -n \\d+| --to [\\w-]+)*$/": true,
     "/^benchboss (optimize|add|drop|trade|chat|watch) .*--dry-run(\\s|$)/": true,
+    "/^benchboss autoswap( list| log)?( --json| -n \\d+)*$/": true,
+    "/^benchboss autoswap add .*--dry-run(\\s|$)/": true,
+    "/^benchboss monitor(?=.*\\s--once(\\s|$))(?=.*\\s--dry-run(\\s|$))( --once| --dry-run| --json)*$/": true,
+    "/^benchboss monitor\\b.*\\s--(live|notify-test)(\\s|=|$)/": false,
+    "/^benchboss autoswap resume\\b/": false,
     "/\\s--y/": false,
     "/\\s-[A-Za-z]*y/": false,
     "/\\s--ai?(\\s|=|$)/": false,

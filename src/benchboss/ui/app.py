@@ -53,6 +53,7 @@ MENU = [
     ("dash", "Dashboard", "d"),
     ("today", "Optimize today", "t"),
     ("week", "Optimize week", "w"),
+    ("autoswap", "Auto-swap", "u"),
     ("activity", "Workload", "a"),
     ("trash", "Best trash", "f"),
     ("players", "Player finder", "p"),

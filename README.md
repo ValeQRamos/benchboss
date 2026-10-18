@@ -234,6 +234,8 @@ Run `benchboss --help` or `benchboss <command> --help` for every flag. Read comm
 | `benchboss news [PLAYER ...] [--watch] [--days 5] [--ai]` | News and spins for your roster, your watch list or named players |
 | `benchboss trades [--need C] [--with TEAM] [--needs]` | Trade ideas, or every team's positional balance |
 | `benchboss alerts [--mark-read]` | Trade offers, accepted trades, pending claims, unread DMs, new watch-list news (`--mark-read` stops showing the news you saw) |
+| `benchboss autoswap [list\|add\|remove\|clear\|pause\|resume\|log] [PLAYER]` | Auto-swap: arm a player who might turn healthy before his game, so benchboss starts him by itself (`add` shows what would happen and asks; `--notify-only` for an alert alone) |
+| `benchboss monitor [--once] [--live]` | The background process that makes the auto-swaps and sends the notifications. Trial mode (it only says what it would do) unless `--live` |
 | `benchboss add PLAYER [--drop PLAYER]` · `drop` | Sign a free agent or put in a claim; release a player |
 | `benchboss trade --give A --get B [--msg TEXT]` | Send a trade offer |
 | `benchboss chat [TEXT] [--to TEAM]` | Read or post in the league chat or a DM |
