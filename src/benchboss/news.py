@@ -56,6 +56,7 @@ def _parse_time(s: str) -> dt.datetime:
 BATCH = 50          # player ids per request: the URL length caps one at about 100
 LATEST = 10         # items a named player shows when no window is asked for
 LATEST_LIMIT = 200  # the most items one latest() request asks the feed for
+MAX_PAGES = 10      # pages one batch may take to cover a window of days (2,000 items at 200)
 
 
 def _get_feed(params: list[tuple[str, object]]) -> dict:
@@ -84,29 +85,47 @@ def fetch(player_ids: list[int], days: int | None = 5, limit: int = 200,
 
     ``days``: only the last ``days`` days (counted back from now); None asks for the newest
     items whatever their date. ``limit`` and ``offset`` page the feed (per request of
-    ``BATCH`` players). Video items (Media) are left out unless ``include_media``."""
+    ``BATCH`` players). Video items (Media) are left out unless ``include_media``.
+
+    The feed sends the newest ``limit`` items and video counts toward that, so a window of
+    days (with no ``offset`` given) keeps asking for the next page until one comes back
+    short or reaches past the window, up to MAX_PAGES pages per batch: a long window is
+    never cut at the first ``limit`` items. ``days=None`` or an ``offset`` is one request
+    per batch: the caller pages."""
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+              if days is not None else None)
     items: dict[int, NewsItem] = {}
     for i in range(0, len(player_ids), BATCH):
         chunk = player_ids[i:i + BATCH]
-        params: list[tuple[str, object]] = [("playerId", pid) for pid in chunk]
-        if days is not None:
-            params.append(("days", days))
-        params.append(("limit", limit))
-        if offset:
-            params.append(("offset", offset))
-        for raw in _get_feed(params).get("feed") or []:
-            if raw.get("type") == "Media" and not include_media:
-                continue
-            nid = raw.get("id")
-            if nid in items:  # one item about several players comes once for each of them
-                items[nid].player_ids.add(raw.get("playerId"))
-                continue
-            items[nid] = _parse_item(raw)
+        at = offset
+        for _ in range(MAX_PAGES if cutoff is not None and not offset else 1):
+            params: list[tuple[str, object]] = [("playerId", pid) for pid in chunk]
+            if days is not None:
+                params.append(("days", days))
+            params.append(("limit", limit))
+            if at:
+                params.append(("offset", at))
+            page = _get_feed(params).get("feed") or []
+            for raw in page:
+                if raw.get("type") == "Media" and not include_media:
+                    continue
+                nid = raw.get("id")
+                if nid in items:  # one item about several players comes once for each of them
+                    items[nid].player_ids.add(raw.get("playerId"))
+                    continue
+                items[nid] = _parse_item(raw)
+            if not page or len(page) < limit or cutoff is None or _oldest(page) < cutoff:
+                break
+            at += limit
     found = sorted(items.values(), key=lambda x: x.published, reverse=True)
-    if days is None:
+    if cutoff is None:
         return found
-    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
     return [x for x in found if x.published >= cutoff]
+
+
+def _oldest(page: list[dict]) -> dt.datetime:
+    """The oldest ``published`` in one page of the feed (Media included)."""
+    return min(_parse_time(raw.get("published") or "1970-01-01T00:00:00Z") for raw in page)
 
 
 def latest(player_id: int, n: int = LATEST, offset: int = 0) -> list[NewsItem]:

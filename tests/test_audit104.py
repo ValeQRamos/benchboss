@@ -10,7 +10,7 @@ import datetime as dt
 import pytest
 
 from benchboss import monitor as mon
-from benchboss import store
+from benchboss import news, store
 from benchboss.core.lineup import DayPlan
 from benchboss.errors import BenchbossError
 from benchboss.espn.constants import BENCH, SLOT_ID
@@ -201,3 +201,54 @@ def test_a_stopped_loop_monitor_is_not_running(live, monkeypatch):
     m.close()
     hb = _heartbeat_at(live, monkeypatch, 5)
     assert not hb["running"] and hb["mode"] is None
+
+
+# --- news windows longer than one page ------------------------------------------------------------
+
+NOW = dt.datetime.now(dt.timezone.utc)
+
+
+def _row(nid, hours, kind="Rotowire"):
+    stamp = (NOW - dt.timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"id": nid, "type": kind, "playerId": 7, "published": stamp, "headline": f"item {nid}"}
+
+
+class PagedFeed:
+    """ESPN's rules: newest first, days, limit and offset."""
+
+    def __init__(self, rows):
+        self.rows = sorted(rows, key=lambda x: x["published"], reverse=True)
+        self.calls = []
+
+    def __call__(self, params):
+        self.calls.append(dict(params))
+        q = dict(params)
+        rows = self.rows
+        if "days" in q:
+            cutoff = NOW - dt.timedelta(days=q["days"])
+            rows = [x for x in rows if news._parse_time(x["published"]) >= cutoff]
+        at = q.get("offset", 0)
+        return {"feed": rows[at:at + q["limit"]]}
+
+
+def test_a_long_window_pages_past_the_first_limit(monkeypatch):
+    # 30 days of news at 10 items a day (one in ten a video): 300 items, more than one page
+    rows = [_row(n, n * 2.4, "Media" if n % 10 == 0 else "Rotowire") for n in range(1, 301)]
+    rows.append(_row(999, 24 * 40))  # outside the window
+    feed = PagedFeed(rows)
+    monkeypatch.setattr(news, "_get_feed", feed)
+    items = news.fetch([7], days=30)
+    assert len(items) == 270 and 999 not in {x.id for x in items}
+    assert [c.get("offset", 0) for c in feed.calls] == [0, 200]
+    oldest = min(x.published for x in items)
+    assert NOW - oldest > dt.timedelta(days=29)
+
+
+def test_a_short_window_is_still_one_request(monkeypatch):
+    feed = PagedFeed([_row(n, n) for n in range(1, 30)])
+    monkeypatch.setattr(news, "_get_feed", feed)
+    assert len(news.fetch([7], days=1)) == 23 and len(feed.calls) == 1
+    feed.calls.clear()
+    news.fetch([7], days=None, limit=10)  # latest mode: the caller pages
+    news.fetch([7], days=30, limit=5, offset=5)  # an explicit offset: the caller pages
+    assert len(feed.calls) == 2
