@@ -173,3 +173,31 @@ def test_a_send_stopped_by_a_failed_save_counts_no_write_and_no_move(live, monke
     assert state["counters"]["writes"] == 0 and state["intents"] == {}
     assert int((state["moved"].get(pid) or {}).get("count", 0)) == 0
     assert state["last_write"] == "" and espn.bodies == []
+
+
+# --- the heartbeat of `monitor --once` ------------------------------------------------------------
+
+def _heartbeat_at(live, monkeypatch, seconds_after_tick):
+    with monkeypatch.context() as m:
+        m.setattr(mon.time, "time", lambda: live.now.timestamp() + seconds_after_tick)
+        return mon.heartbeat(live)
+
+
+def test_a_recent_once_round_counts_as_a_running_monitor(live, monkeypatch):
+    armed(live)
+    assert monitor(live).run(once=True) == 0
+    assert mon.read_lease(live) is None  # --once gives the lease back
+    hb = _heartbeat_at(live, monkeypatch, 120)
+    assert hb["running"] and hb["mode"] == "trial" and hb["checked"] == 120
+    assert "--once" in hb["text"] and hb["text"].startswith("monitor running in trial mode")
+    stale = _heartbeat_at(live, monkeypatch, mon.ONCE_FRESH + 60)
+    assert not stale["running"] and stale["text"] == "monitor not running: benchboss monitor"
+
+
+def test_a_stopped_loop_monitor_is_not_running(live, monkeypatch):
+    m = monitor(live)
+    m.start()
+    m.tick()
+    m.close()
+    hb = _heartbeat_at(live, monkeypatch, 5)
+    assert not hb["running"] and hb["mode"] is None

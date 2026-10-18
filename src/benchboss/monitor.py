@@ -104,6 +104,7 @@ NEAR_TIP = dt.timedelta(minutes=2)
 MAX_FAILURES = 2        # FAILED or REFUSED answers in a day before the rest of it is trial
 ALERTS_KEEP = 100
 LEAGUE_REFRESH = 1800.0  # seconds between full league reads (roster, watch list)
+ONCE_FRESH = 900.0      # seconds a `monitor --once` round still counts as a running monitor
 AUTH_RETRY = 600.0      # seconds between tries while the cookies do not work
 AUTH_CONFIRM = dt.timedelta(minutes=30)  # near an armed tip, a 401 is read twice
 BACKOFF = (30.0, 60.0, 120.0, 240.0)
@@ -285,11 +286,17 @@ def heartbeat(session) -> dict:
     checked = None
     with contextlib.suppress(KeyError, ValueError, TypeError):
         checked = max(0, round(now - dt.datetime.fromisoformat(hb["last_tick"]).timestamp()))
+    # `monitor --once` from cron gives the lease back after every round: a recent round
+    # counts as running
+    rounds = (not running and bool(hb.get("once")) and checked is not None
+              and checked <= ONCE_FRESH)
+    running = running or rounds
     mode = hb.get("mode") or "trial"
     host = (lease or {}).get("host") or hb.get("host") or ""
     if running:
         ago = "not yet" if checked is None else f"{_ago(checked)} ago"
-        text = f"monitor running in {mode} mode on {host}, checked {ago}"
+        text = (f"monitor running in {mode} mode on {host}"
+                + (" (one round at a time, --once)" if rounds else "") + f", checked {ago}")
         if hb.get("auth_wait"):
             text += " (waiting for a new login: run benchboss login)"
     else:
@@ -399,7 +406,7 @@ class Monitor:
         self._overrides()
         hb = self.state["heartbeat"]
         hb.update(pid=os.getpid(), host=self.host, version=__version__, mode=self.mode,
-                  started=self._now_iso(), last_error="", auth_wait=False)
+                  started=self._now_iso(), last_error="", auth_wait=False, once=self.once)
         if not self.once:  # cron runs --once every few minutes: no start and stop lines
             self._record("start", version=__version__,
                          backends=[b.name for b in self.backends], dry_run=self.dry_run,

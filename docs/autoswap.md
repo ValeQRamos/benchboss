@@ -102,6 +102,9 @@ minutes) and every 30 minutes when no armed player has a game left today. Watch-
 ride along on the same read. If your computer sleeps, the monitor checks everything as soon
 as it wakes up.
 
+With `--once` from cron, the Auto-swap screen and `autoswap list` count the monitor as running
+for 15 minutes after each round, so run it at least that often.
+
 Only one monitor runs per league. A second one, on this computer or another sharing the same
 settings folder, stops with a message. If the first one died, the second one takes over after
 3 minutes.
