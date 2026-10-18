@@ -1,9 +1,10 @@
 # Configuration
 
-benchboss keeps three things on your computer: which league and team to drive (a small JSON
-file), your ESPN session cookies (your keychain), both written by `benchboss setup`, and which
-news on your watch-list players you have already seen, so each spin alerts you once. It also
-caches the NBA schedule for a day. Demo mode (`--demo`) writes none of these.
+benchboss keeps a few things on your computer: which league and team to drive (a small JSON
+file) and your ESPN session cookies (your keychain), both written by `benchboss setup`; which
+news on your watch-list players you have already seen, so each spin alerts you once; and, if
+you use [auto-swap](autoswap.md), your marks, the monitor's state and a log of every lineup
+change. It also caches the NBA schedule for a day. Demo mode (`--demo`) writes none of these.
 
 ## Files
 
@@ -15,6 +16,11 @@ caches the NBA schedule for a day. Demo mode (`--demo`) writes none of these.
 | Cookies | OS keychain, service `benchboss`, accounts `espn_s2` and `SWID` | Windows Credential Locker, same names |
 | Cookies fallback | `credentials.json` next to the settings, permissions 0600, only when no keychain is available | same |
 | Watch list news you have seen | `seen-news.json` next to the settings: the ids of the newest 500 news items per league id, nothing else | same |
+| Watch list news the app already showed as a toast | `toasted-news.json` next to the settings, the same shape | same |
+| Auto-swap marks | `leagues/<league id>/marks.json` ([auto-swap](autoswap.md)) | same |
+| The monitor's state and its lease | `leagues/<league id>/monitor.json` and `monitor.lock` | same |
+| Every lineup change and auto-swap decision | `logs/lineup-YYYY-MM.jsonl`, one JSON object per line | same |
+| Notification secrets | `notify.env` next to the settings, read only when private (0600) | same, read as it is |
 
 `config.json`:
 
@@ -25,7 +31,8 @@ caches the NBA schedule for a day. Demo mode (`--demo`) writes none of these.
   "season": null,
   "theme": "dark",
   "league_name": "My League",
-  "team_name": "My Team"
+  "team_name": "My Team",
+  "notify": {"backends": ["mac", "ntfy"]}
 }
 ```
 
@@ -36,6 +43,9 @@ caches the NBA schedule for a day. Demo mode (`--demo`) writes none of these.
   always saved it), set it to `null` or run `benchboss setup` again when a new season starts.
 - `team_id` is detected from your cookies during setup; set it only if you co-manage a team.
 - `theme` is `dark` or `light`; it matches the palette to your terminal background.
+- `notify.backends` is where `benchboss monitor` sends its notes when you give no `--notify`:
+  any of `mac`, `ntfy`, `cmd` and `log`. Without it: `mac` on a Mac, `log` elsewhere. Never put
+  a secret here; see [Notifications](autoswap.md#notifications).
 
 ## seen-news.json
 
@@ -49,8 +59,9 @@ first, capped at the newest 500:
 {"12345678": [512345, 512377, 512401]}
 ```
 
-- The app adds the items it shows as toasts. `benchboss alerts --mark-read` adds the items it
-  lists. Plain `benchboss alerts` only reads the file.
+- `benchboss alerts --mark-read` adds the items it lists. Plain `benchboss alerts` only reads
+  the file. The app keeps the items it showed as toasts in `toasted-news.json` instead: a
+  toast nobody saw does not mark the news as read.
 - The first time a league is checked, news older than 24 hours is recorded as seen.
 - Deleting the file is safe. The next check starts over as if it were the first one, so news
   from the last 24 hours can show up once more.
@@ -67,9 +78,12 @@ Environment variables override the file. They are handy for scripts, CI and AI a
 | `BENCHBOSS_TEAM_ID` | Your team id inside the league |
 | `BENCHBOSS_SEASON` | Season year, for example `2027` |
 | `BENCHBOSS_THEME` | `dark` or `light` |
-| `BENCHBOSS_HOME` | Use another folder for settings, cache, `seen-news.json` and fallback cookies |
+| `BENCHBOSS_HOME` | Use another folder for settings, cache, `seen-news.json`, auto-swap marks, the lineup log and fallback cookies |
 | `ESPN_S2`, `ESPN_SWID` | Cookies from the environment instead of the keychain |
 | `ANTHROPIC_API_KEY` | Enables the AI briefing in `benchboss news --ai` and the app's news screen |
+| `BENCHBOSS_NTFY_TOPIC` | The ntfy topic for the monitor's phone notes (treat it like a password) |
+| `BENCHBOSS_NTFY_TOKEN`, `BENCHBOSS_NTFY_SERVER` | An ntfy access token, and another ntfy server than ntfy.sh |
+| `BENCHBOSS_NOTIFY_CMD` | Your own notification command (run without a shell; it gets `BENCHBOSS_TITLE` and `BENCHBOSS_TEXT`) |
 | `BENCHBOSS_AI_MODEL` | Model for the AI briefing (default `claude-sonnet-5-5`) |
 | `NO_COLOR` | Plain output without colors |
 
