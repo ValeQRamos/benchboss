@@ -37,6 +37,7 @@ from benchboss.errors import BenchbossError
 from benchboss.espn.constants import IR, status_class
 from benchboss.espn.models import Player
 from benchboss.marks import Mark, MarkStore, week_end
+from benchboss.text import surname
 from benchboss.ui.common import fit_title, legend, player_cell, table
 from benchboss.ui.layout import KeyItem
 from benchboss.ui.theme import DARK, Palette
@@ -130,11 +131,15 @@ def tip_cell(row: Row, data: AutoswapData, pal: Palette, wide: bool) -> Text:
     return Text(when, style=pal.text)
 
 
-def plan_words(row: Row, short_names: bool) -> str:
-    """What benchboss would do if he turned healthy, in a table cell."""
+def plan_words(row: Row, short_names: bool, narrow: bool = False) -> str:
+    """What benchboss would do if he turned healthy, in a table cell. ``narrow`` (a phone):
+    "G for Pippen +5.1", since the app's table cuts a cell instead of wrapping it."""
     pv = row.preview
     if pv.kind == "starts":
         b = pv.swap.benched
+        if narrow:
+            return f"{pv.swap.slot}" + (f" for {surname(b.name)}" if b else "") + \
+                f" {pv.swap.gain:+.1f}"
         who = (b.short_name if short_names else b.name) if b else ""
         text = f"starts at {pv.swap.slot}" + (f", benches {who}" if who else "")
         return f"{text} ({pv.swap.gain:+.1f})"
@@ -144,10 +149,11 @@ def plan_words(row: Row, short_names: bool) -> str:
             }.get(pv.kind, pv.kind)
 
 
-def plan_cell(row: Row, pal: Palette, short_names: bool) -> Text:
-    words = plan_words(row, short_names)
+def plan_cell(row: Row, pal: Palette, short_names: bool, narrow: bool = False) -> Text:
+    words = plan_words(row, short_names, narrow)
     if row.held:
-        return Text("resting today: someone changed his spot", style=pal.dim)
+        return Text("resting today" if narrow else "resting today: someone changed his spot",
+                    style=pal.dim)
     style = pal.text if row.preview.kind == "starts" else pal.dim
     return Text(words, style=style)
 
@@ -224,7 +230,7 @@ def cells(r: Row, data: AutoswapData, pal: Palette, width: int) -> list[Text]:
                                  style=pal.dim if not r.plays else None),
            "slot": Text(r.slot, style=pal.dim),
            "tip": tip_cell(r, data, pal, wide=width >= 100),
-           "plan": plan_cell(r, pal, short_names=width < 100)}
+           "plan": plan_cell(r, pal, short_names=width < 100, narrow=narrow)}
     return [out[k] for k in columns(width)]
 
 
@@ -395,12 +401,17 @@ class AutoswapView(Vertical):
         pal = self.pal
         row = self._row()
         armed = row is not None and row.mark is not None
+        compact = bool(getattr(self._owner_app, "compact", False))
         items = [("enter", "disarm" if armed else "arm"), ("!", "alert only"),
                  ("backspace", "disarm"), ("esc", "back")]
-        hint = legend(pal, *items)
+        hint = Text() if compact else legend(pal, *items)  # a phone has the key bar for these
         if not (self.data.monitor or {}).get("running"):
-            hint.append("  ·  marks act only while benchboss monitor runs", style=pal.warn)
+            hint.append(("" if compact else "  ·  ") + "marks act only while benchboss monitor "
+                        "runs", style=pal.warn)
         self.query_one("#as-hint", Static).update(hint)
+        refresh = getattr(self._owner_app, "refresh_keys", None)
+        if callable(refresh):  # enter reads "arm" or "disarm" for the row on show
+            refresh()
 
     # --- rows ----------------------------------------------------------------------------------
 

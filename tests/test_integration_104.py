@@ -120,3 +120,50 @@ def test_a_write_with_no_status_in_the_answer_exits_4_and_says_to_check(monkeypa
     data = json.loads(out)
     assert e.value.code == 4 and data["sent"] and data["status"] == "UNKNOWN"
     assert data["error"].startswith("ESPN's answer had no status")
+
+
+# --- monitor --simulate on a watch-list player ----------------------------------------------------
+
+def test_simulate_finds_a_watch_list_player(session):
+    """`monitor --once --dry-run --simulate "Myles Turner=ACTIVE"` on the demo: he is on the
+    watch list, not the roster, and the run says he turned healthy (and sends nothing)."""
+    records = []
+    m = monitor(session, records=records, dry_run=True, simulate={"Myles Turner": "ACTIVE"})
+    assert m.run(once=True) == 0
+    assert not any(r["event"] == "error" for r in records), records
+    (flip,) = [r for r in records if r["event"] == "flip"]
+    assert flip["trigger"]["player"] == "Myles Turner" and flip["trigger"]["new"] == "ACTIVE"
+
+
+# --- the auto-swap screen in the compact layout (the phone work meets the auto-swap screen) ------
+
+def test_auto_swap_on_a_phone_fits_its_cells_and_the_key_bar_follows_the_row(monkeypatch):
+    """At 46x30 the table cuts a cell instead of wrapping it, so the plan reads
+    "G for Pippen +5.1", and enter in the key bar says arm or disarm for the row on show."""
+    from textual.widgets import DataTable
+
+    from benchboss.ui.screens import autoswap as screen
+    from test_autoswap_tui import DANIELS, drive, marks, open_screen
+
+    now = [100.0]
+    monkeypatch.setattr(screen, "_clock", lambda: now[0])
+
+    def enter_label(app):
+        return next(item.label for item, _ in app.key_entries() if item.key == "⏎")
+
+    async def scenario(pilot, app):
+        view = await open_screen(pilot, app)
+        assert app.compact
+        t = view.query_one(DataTable)
+        plan = t.get_cell(str(DANIELS), "plan")
+        assert plan.plain == "G for Pippen +5.1"
+        width = t.columns["plan"].get_render_width(t) - 2 * t.cell_padding
+        assert all(t.get_cell(k, "plan").cell_len <= width for k in t.rows)
+        assert enter_label(app) == "arm"
+        await pilot.press("enter")
+        now[0] += 1
+        await pilot.press("enter")
+        await pilot.pause()
+        assert marks(app) == {DANIELS: "auto"} and enter_label(app) == "disarm"
+
+    drive(scenario, size=(46, 30))
