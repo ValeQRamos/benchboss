@@ -13,6 +13,10 @@ EnvironmentFile=-/etc/benchboss/web.env
 ExecStart=/home/bb/.local/bin/benchboss web --host 127.0.0.1 --port 8000 --url https://bb.example.com --password-file /home/bb/.bb-web-password
 Restart=on-failure
 RestartSec=5
+# Every browser tab runs its own app process (about 70 MB): cap them so a small server keeps
+# SSH and Caddy alive. Tune to the server's memory.
+MemoryHigh=300M
+MemoryMax=350M
 NoNewPrivileges=true
 PrivateTmp=true
 
