@@ -24,6 +24,7 @@ examples:
   benchboss                      open the interactive app (menu, dashboard, one-key actions)
   benchboss dash --watch         live dashboard, refreshes every 60 s (great in a side terminal)
   benchboss optimize week        set the best lineup for every day left in the matchup week
+  benchboss autoswap add "Name"  start him by himself if he turns healthy before his game
   benchboss trash                most valuable free agents for this week
   benchboss news --days 5        latest news and spins on your players
   benchboss trades --need C      fair trades that get you a center
@@ -44,6 +45,8 @@ class Ctx:
             self.cfg = config_mod.Config()  # the demo league does not need the real config
         if getattr(args, "theme", None):
             self.cfg.theme = args.theme
+        if getattr(args, "layout", None):
+            self.cfg.layout = args.layout
         self.pal = palette(self.cfg.theme)
         self.out = Console(highlight=False)
         self.err = Console(stderr=True, highlight=False)
@@ -182,10 +185,14 @@ def cmd_dash(c: Ctx):
         return
     from rich.live import Live
 
+    from benchboss.ui.layout import LOGO_MIN_HEIGHT
+
     with Live(console=c.out, screen=True, auto_refresh=False) as live:
         while True:
             try:
-                board = dashboard.render(once(), c.pal, c.out.width)
+                # the pixel ball only on a pane tall enough for it and the cards under it
+                board = dashboard.render(once(), c.pal, c.out.width,
+                                         logo=c.out.height >= LOGO_MIN_HEIGHT)
                 live.update(_fit_height(c.out, board, c.out.height, c.pal), refresh=True)
             except BenchbossError as e:
                 live.update(f"[{c.pal.bad}]{e}[/] (retrying)", refresh=True)
@@ -387,7 +394,8 @@ def _partner(s, q):
 
 
 def cmd_news(c: Ctx):
-    """News on your roster, on your watch list (--watch) or on the players you name."""
+    """News on your roster, on your watch list (--watch) or on the players you name: their
+    latest items whatever the date, or the last --days days."""
     from benchboss import news as news_mod
     from benchboss.ui.screens import news as screen
 
@@ -395,8 +403,14 @@ def cmd_news(c: Ctx):
     s = c.session
     if a.watch and a.players:
         c.usage("name players or use --watch, not both")
-    named = [s.find_player(q) for q in a.players] if a.players else None
+    if a.n is not None and not a.players:
+        c.usage('-n is for the players you name, for example: benchboss news "Ben Simmons" -n 20')
+    if a.n is not None and a.days is not None:
+        c.usage("-n counts a player's latest items and --days keeps a window: use one or "
+                "the other")
+    named = [_news_player(c, q) for q in a.players] if a.players else None
     which = () if named else ("watch",) if a.watch else ("roster",)
+    days = a.days or screen.DAYS
     if a.ai:
         players = list({p.id: p for sec in screen.sections(s, which, named)
                         for p in sec.players}.values())
@@ -404,11 +418,43 @@ def cmd_news(c: Ctx):
             raise BenchbossError(f"{screen.EMPTY_WATCH} {screen.WATCH_ADD}" if a.watch else
                                  "your roster is empty")
         with c.out.status("Asking Claude to search the web..."):
-            text = news_mod.ai_digest(players, a.days)
+            text = news_mod.ai_digest(players, days)
         c.emit(text, {"digest": text})
         return
-    data = screen.load(s, a.days, which, named)
+    if named and a.days is None:  # a named player: his latest items, however old
+        data = screen.load_latest(s, named, a.n or news_mod.LATEST)
+    else:
+        data = screen.load(s, days, which, named)
     c.emit(screen.draw(data, c.pal, c.out.width), screen.to_json(data))
+
+
+def _news_player(c: Ctx, query: str):
+    """The player a name means, for reading news only: any NBA player, typos allowed. A
+    guess gets a note on stderr; a name that fits several players is a usage error that
+    lists them. Writes never come here (they use Session.find_player)."""
+    from benchboss.ui.screens import news as screen
+
+    s = c.session
+    found = screen.find(s, query)
+    if not found.players:
+        raise BenchbossError(f"no NBA player matches '{query}'")
+    if not found.sure:
+        names = ", ".join(_news_choice(s, p) for p in found.players)
+        c.usage(f"'{query}' matches several players: {names}. Name one of them")
+    player = screen.refreshed(s, found.best)
+    if not found.exact:
+        c.err.print(Text(f"Showing {player.name}, the closest match to '{query}'.",
+                         style=c.pal.dim))
+    return player
+
+
+def _news_choice(session, p) -> str:
+    """ "Ben Simmons (SAC, FA, 12%)": enough to tell players with the same name apart."""
+    from benchboss.ui.common import rostered
+    from benchboss.ui.screens import news as screen
+
+    team = [p.pro_team] if p.pro_team_id > 0 else []
+    return f"{p.name} ({', '.join([*team, screen.owner_of(session, p), f'{rostered(p.owned)}%'])})"
 
 
 def cmd_alerts(c: Ctx):
@@ -444,13 +490,15 @@ def cmd_alerts(c: Ctx):
 # --- write ------------------------------------------------------------------------------------------
 
 def cmd_optimize(c: Ctx):
+    from benchboss.core.lineup import PlanOptions
     from benchboss.service import periods_for
 
     s = c.session
     periods = [p for p in periods_for(s, c.args.when) if p >= s.league().scoring_period]
     if not periods:
         raise BenchbossError("those days are already over")
-    plans = s.plan_days(periods)
+    # players whose game starts within the lock margin keep their slot, whatever ESPN's flag says
+    plans = s.plan_days(periods, PlanOptions(now=s.now))
     todo = [p for p in plans if p.changed]
     if c.args.json:
         _optimize_json(c, s, plans, todo)
@@ -467,9 +515,9 @@ def cmd_optimize(c: Ctx):
         return
     if not c.confirm(f"Apply the lineup for {len(plans)} day{'s' * (len(plans) != 1)}?"):
         return
-    results = s.apply_days([p.period for p in plans])
+    results = s.apply_days([p.period for p in plans], opts=PlanOptions(now=s.now), writer="cli")
     for r in results:
-        if not r.error and r.status != "ALREADY_OPTIMAL":
+        if _sent(r):
             c.out.print(Text(f"{_label(s.calendar.date_of(r.plan.period))}: ESPN: {r.status}",
                              style=c.pal.dim))
     moves, days = _check_results(c, s, results)
@@ -481,16 +529,29 @@ def cmd_optimize(c: Ctx):
     c.out.print(Text(msg, style=f"bold {c.pal.good}"))
 
 
+def _sent(r) -> bool:
+    """ESPN took this day's moves (EXECUTED, or a status 1.0.3 also counted as sent)."""
+    from benchboss.service import Outcome
+
+    return (not r.error and bool(r.status) and r.status != "ALREADY_OPTIMAL"
+            and r.outcome not in (Outcome.BELOW_MIN_GAIN, Outcome.WOULD_SEND, Outcome.NOT_SENT))
+
+
 def _optimize_json(c: Ctx, s, plans, todo) -> None:
     """JSON mode: the plan (dry run or not confirmed) or what ESPN answered for each day.
     stdout stays valid JSON; errors go to stderr with the usual exit codes."""
-    from benchboss.service import OptimizeResult
+    from benchboss.core.lineup import PlanOptions
+    from benchboss.service import OptimizeResult, Outcome
 
     def row(plan, result=None):
         out = {"date": s.calendar.date_of(plan.period).isoformat(),
-               "moves": [str(m) for m in plan.moves], "projected": round(plan.projected, 1)}
+               "moves": [str(m) for m in plan.moves], "projected": round(plan.projected, 1),
+               "frozen": [{"player": p.name, "reason": plan.frozen[p.id]}
+                          for p in _frozen_players(plan) if plan.frozen[p.id] != "IR"]}
         if result is not None:
-            out.update(status=result.status or None, error=result.error or None)
+            out.update(status=result.status or None, error=result.error or None,
+                       outcome=result.outcome or None,
+                       guards=[v.to_dict() for v in result.guards if v.fatal])
         return out
 
     if c.args.dry_run or not c.args.yes:
@@ -499,27 +560,45 @@ def _optimize_json(c: Ctx, s, plans, todo) -> None:
             raise NotConfirmed("NOT DONE: nothing was sent; repeat with --yes to apply the plan")
         return
     if todo:
-        results = s.apply_days([p.period for p in plans])
+        results = s.apply_days([p.period for p in plans], opts=PlanOptions(now=s.now),
+                               writer="cli")
     else:
-        results = [OptimizeResult(p, status="ALREADY_OPTIMAL") for p in plans]
+        results = [OptimizeResult(p, status="ALREADY_OPTIMAL", outcome=Outcome.ALREADY_OPTIMAL)
+                   for p in plans]
     print(json.dumps([row(r.plan, r) for r in results], indent=2))
     _check_results(c, s, results)
 
 
+def _frozen_players(plan) -> list:
+    seen = [pl for pl, _, _ in plan.starters] + [pl for pl, _ in plan.bench]
+    return [pl for pl in seen if pl.id in plan.frozen]
+
+
 def _check_results(c: Ctx, s, results) -> tuple[int, int]:
-    """Count what ESPN applied; raise WriteFailed (exit 4) when any day was not set."""
-    moves, days, failed = 0, 0, []
+    """Count what ESPN applied. Raise WriteFailed (exit 4) when any day was not set, or
+    GuardRefused (exit 5) when the only days not set are ones a safety check stopped before
+    anything was sent (core/guard.py)."""
+    from benchboss.errors import GuardRefused
+    from benchboss.service import Outcome
+
+    moves, days, failed, refused = 0, 0, [], []
     for r in results:
-        if r.error:
-            failed.append(f"{_label(s.calendar.date_of(r.plan.period))}: {r.error}")
-        elif r.status != "ALREADY_OPTIMAL":
+        label = _label(s.calendar.date_of(r.plan.period))
+        if r.outcome == Outcome.NOT_SENT and any(v.fatal for v in r.guards):
+            refused.append(f"{label}: {r.error}")
+        elif r.error:
+            failed.append(f"{label}: {r.error}")
+        elif _sent(r):
             moves += len(r.plan.moves)
             days += 1
-    for f in failed:
+    for f in failed + refused:
         c.err.print(Text(f"✗ {f}", style=c.pal.bad))
+    rest = "nothing was changed" if days == 0 else f"{days} other day(s) were set"
     if failed:
-        rest = "nothing was changed" if days == 0 else f"{days} other day(s) were set"
-        raise WriteFailed(f"{len(failed)} day(s) were not set; {rest}")
+        raise WriteFailed(f"{len(failed) + len(refused)} day(s) were not set; {rest}")
+    if refused:
+        raise GuardRefused(f"{len(refused)} day(s) were not sent: a safety check stopped "
+                           f"them; {rest}")
     return moves, days
 
 
@@ -544,7 +623,9 @@ def _write(c: Ctx, summary: str, send) -> None:
 
     With --json, stdout gets one JSON object (summary, dry_run, sent, status, error) and
     nothing else. ESPN can answer HTTP 200 with a FAILED_* status (roster lock, undroppable
-    player and so on): that exits 4 like any other refused write."""
+    player and so on): that exits 4 like any other refused write. So does an answer with no
+    status (actions.UNKNOWN_STATUS): nobody knows whether it went through, so it must be
+    checked on ESPN before anyone tries again."""
     js = c.args.json
     result = {"summary": summary, "dry_run": bool(c.args.dry_run), "sent": False,
               "status": None, "error": None}
@@ -568,14 +649,17 @@ def _write(c: Ctx, summary: str, send) -> None:
         if js:
             print(json.dumps({**result, "error": str(e)}, indent=2))
         raise
-    failed = status.startswith("FAILED")
+    from benchboss.actions import UNKNOWN_STATUS
+
+    error = (f"ESPN answered {status}" if status.startswith("FAILED") else
+             "ESPN's answer had no status, so it may or may not have gone through: check the "
+             "league on ESPN before trying again" if status == UNKNOWN_STATUS else None)
     if js:
-        print(json.dumps({**result, "sent": True, "status": status,
-                          "error": f"ESPN answered {status}" if failed else None}, indent=2))
+        print(json.dumps({**result, "sent": True, "status": status, "error": error}, indent=2))
     else:
         c.out.print(Text(f"ESPN: {status}"))
-    if failed:
-        raise WriteFailed(f"ESPN answered {status}")
+    if error:
+        raise WriteFailed(error)
 
 
 def cmd_add(c: Ctx):
@@ -629,7 +713,247 @@ def cmd_chat(c: Ctx):
 def cmd_app(c: Ctx):
     from benchboss.ui.app import run
 
-    run(c.cfg, demo=c.args.demo)
+    run(c.cfg, demo=c.args.demo, layout=getattr(c.args, "layout", None))
+
+
+# --- auto-swap and the monitor ------------------------------------------------------------------------
+
+def _clock_of(rec: dict, tz) -> str:
+    from benchboss.core.calendar import clock
+
+    try:
+        return clock(dt.datetime.fromisoformat(rec["at"]), tz)
+    except (KeyError, TypeError, ValueError):
+        return ""
+
+
+def _simulate(c: Ctx) -> dict[str, str]:
+    """--simulate "Name=STATUS" (repeatable) -> {name: STATUS}."""
+    from benchboss.espn.constants import KNOWN_STATUSES
+
+    out = {}
+    for spec in c.args.simulate or []:
+        name, _, status = spec.rpartition("=")
+        status = status.strip().upper().replace("-", "_").replace(" ", "_")
+        if not name.strip() or status not in KNOWN_STATUSES:
+            c.usage(f'--simulate takes "Player=STATUS" with STATUS one of '
+                    f"{', '.join(sorted(KNOWN_STATUSES))}; got {spec!r}")
+        out[name.strip()] = status
+    return out
+
+
+def cmd_monitor(c: Ctx):
+    """benchboss monitor: watch armed and watch-list players. Trial mode unless --live."""
+    from benchboss import monitor as mon
+    from benchboss import notify
+
+    a = c.args
+    if a.live and a.dry_run:
+        c.usage("--live sends changes and --dry-run sends nothing: pick one")
+    if a.simulate and a.live:
+        c.usage("--simulate works in trial mode, with --dry-run or with --demo, never with --live")
+    if a.demo and a.live:
+        raise BenchbossError("demo mode never writes to ESPN: leave out --live")
+    if a.demo and not a.once and not a.notify_test:
+        c.usage("the demo never sleeps: add --once (benchboss --demo monitor --once)")
+    simulate = _simulate(c)
+    names = [n for n in (a.notify or "").split(",") if n.strip()]
+    if not names and not a.demo:  # the demo notifies only when asked: its lines say it all
+        saved = c.cfg.notify.get("backends")
+        names = list(saved) if isinstance(saved, list) and saved else list(notify.default_backends())
+    backends = notify.backends(names)
+    for b in backends:  # in JSON mode stdout carries only the records
+        if isinstance(b, notify.LogBackend) and a.json:
+            b.stream = sys.stderr
+    if a.notify_test:
+        receipts = notify.send(notify.Note("benchboss", "Test note from benchboss monitor: "
+                                           "notifications work (Nikola Jokić, Luka Dončić).",
+                                           "normal", "test"), backends)
+        c.emit(Text("\n".join(receipts)), {"receipts": receipts})
+        if receipts and all("failed" in r for r in receipts):
+            raise BenchbossError("no notification went out")
+        return
+    if a.live:
+        if a.json and not a.yes:
+            raise NotConfirmed("NOT DONE: live mode needs --yes; nothing was started")
+        if not c.confirm("Auto-swap will change your lineup on ESPN without asking each time. "
+                         "Start?"):
+            return
+
+    made: list[int] = []
+
+    def factory():
+        """The first session is this command's; later ones (a new day, a new login) read
+        the config and the cookies again."""
+        if a.demo or not made:
+            made.append(1)
+            return c.session
+        from benchboss.service import Session
+
+        return Session(config_mod.load())
+
+    def emit(rec: dict) -> None:
+        if a.json:
+            print(json.dumps(rec, ensure_ascii=False, default=str), flush=True)
+            return
+        text = rec.get("text") or rec.get("event", "")
+        style = c.pal.bad if rec.get("outcome") in mon.URGENT_OUTCOMES else c.pal.text
+        tz = m.session.now.tzinfo if m.session is not None else None
+        c.out.print(Text.assemble((f"{_clock_of(rec, tz):>8}  ", c.pal.dim), (text, style)))
+
+    def say(text: str) -> None:
+        if not a.json:
+            c.out.print(Text(text, style=c.pal.dim))
+
+    m = mon.Monitor(factory, live=a.live, dry_run=a.dry_run, backends=backends,
+                    simulate=simulate, emit=emit, say=say)
+    if not a.json and not a.once:
+        mode = "live" if a.live else "trial (nothing is sent to ESPN)"
+        c.out.print(Text(f"benchboss monitor: {mode}; notifications: "
+                         f"{', '.join(names) or 'none'}. Ctrl-C stops it.", style=c.pal.dim))
+    code = m.run(once=a.once)
+    if code:
+        sys.exit(code)
+
+
+def _autoswap_preview(s, spot):
+    """(Preview, period) for arming ``spot`` now."""
+    from benchboss import monitor as mon
+    from benchboss.core import autoswap as core
+    from benchboss.core.lineup import LOCK_MARGIN
+    from benchboss.espn.constants import IR
+
+    cal = s.calendar
+    period = cal.period_of(s.today)
+    in_season = 1 <= period <= cal.final_period
+    roster = mon.base_roster(s, period) if in_season else list(s.league().me.roster)
+    p = spot.player
+    game = cal.game(p.pro_team_id, period) if in_season else None
+    plan = None
+    if game and spot.slot_id != IR and not p.locked and game.start > s.now + LOCK_MARGIN:
+        plan = core.preview_flip(roster, s.league().slot_counts, period, cal, p.id, s.now)
+    return core.describe(roster, plan, p.id, cal, period if in_season else 0, s.now,
+                         s.now.tzinfo)
+
+
+def cmd_autoswap(c: Ctx):
+    """benchboss autoswap: list, arm, disarm, pause and resume auto-swap marks; its log."""
+    from benchboss import lineup_log
+    from benchboss.marks import MarkStore
+    from benchboss.ui.screens import autoswap as screen
+
+    a = c.args
+    action = a.action or "list"
+    name = " ".join(a.player).strip()
+    if action in ("list", "clear", "pause", "resume", "log") and name:
+        c.usage(f"`autoswap {action}` takes no player")
+    if action in ("add", "remove") and not name:
+        c.usage(f'name the player: benchboss autoswap {action} "Player"')
+    if action != "add" and (a.today or a.notify_only or a.dry_run):
+        c.usage("--today, --notify-only and --dry-run go with `autoswap add`")
+    s = c.session
+    store_ = MarkStore(s)
+    if action == "list":
+        _screen(c, screen)
+        return
+    if action == "log":
+        recs = lineup_log.read_local(s)[-a.n:]
+        if a.json:
+            print(json.dumps(recs, indent=2, ensure_ascii=False, default=str))
+            return
+        if not recs:
+            c.out.print(Text("Nothing logged yet.", style=c.pal.dim))
+        for r in recs:
+            day = str(r.get("at", ""))[:10]
+            text = r.get("text") or screen._event_text(r)
+            c.out.print(Text.assemble((f"{day} {_clock_of(r, s.now.tzinfo):>8}  ", c.pal.dim),
+                                      (f"{r.get('writer', ''):<7} {r.get('event', ''):<8} ",
+                                       c.pal.dim), text))
+        return
+    if action == "add":
+        _autoswap_add(c, s, store_, name)
+        return
+    if action == "remove":
+        from benchboss.text import match_one
+
+        marks = store_.load().marks
+        if marks:
+            m = match_one(list(marks.values()), name, lambda x: x.name, where="your marks")
+            pid, who = m.player_id, m.name
+        else:
+            spot = s.league().me.find(name)
+            pid, who = spot.player.id, spot.player.name
+        gone = store_.disarm(pid, origin="cli")
+        msg = f"Auto-swap is off for {who}." if gone else f"{who} was not armed: nothing to do."
+        c.emit(Text(msg), {"player": who, "player_id": pid, "removed": gone})
+        return
+    if action == "clear":
+        n = store_.clear(origin="cli")
+        c.emit(Text(f"Took {n} mark{'s' * (n != 1)} off." if n else "Nobody was armed."),
+               {"removed": n})
+        return
+    paused = action == "pause"
+    store_.set_paused(paused, origin="cli")
+    msg = ("Auto-swap paused: the monitor changes nothing until benchboss autoswap resume."
+           if paused else "Auto-swap resumed: armed players count again.")
+    c.emit(Text(msg), {"paused": paused})
+
+
+def _autoswap_add(c: Ctx, s, store_, name: str) -> None:
+    from benchboss.core import autoswap as core
+    from benchboss.espn.constants import IR
+    from benchboss.marks import week_end
+
+    a = c.args
+    spot = s.league().me.find(name)
+    p = spot.player
+    if spot.slot_id == IR:
+        raise BenchbossError(f"{p.name} is on IR: auto-swap starts players from your bench, "
+                             "not from IR")
+    pv = _autoswap_preview(s, spot)
+    until = s.today if a.today else week_end(s)
+    mode = "notify" if a.notify_only else "auto"
+    tag = core.tag(p.injury_status if p.injury_known else None)
+    lines = [f"{p.name} ({p.pro_team}, {tag}): {pv.text}"]
+    if mode == "notify":
+        lines.append("Alert only: benchboss tells you when he turns healthy and changes "
+                     "nothing.")
+    lines.append(f"The mark lasts until {until:%a %b} {until.day}"
+                 + (" (tonight)." if a.today else " (the end of the matchup week)."))
+    result = {"player": p.name, "player_id": p.id, "mode": mode, "until": until.isoformat(),
+              "if_healthy": pv.to_dict(), "dry_run": bool(a.dry_run), "armed": False}
+    if not a.json:
+        c.out.print(Text("\n".join(lines)))
+    if a.dry_run:
+        if a.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            c.out.print(Text("Dry run: nothing was armed.", style=c.pal.dim))
+        return
+    if s.demo:
+        raise BenchbossError("demo mode keeps marks only inside the app: run benchboss --demo "
+                             "and press u")
+    if mode == "auto":
+        if a.json and not a.yes:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            raise NotConfirmed("NOT DONE: nothing was armed; repeat with --yes to arm him")
+        question = f"Arm auto-swap for {p.name}?"
+        if pv.would_change:
+            question += " " + pv.text
+        if not c.confirm(question):
+            return
+    store_.arm(p, mode, until=until, origin="cli")
+    result["armed"] = True
+    if a.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+    from benchboss import monitor as mon
+
+    done = (f"Armed {p.name}." if mode == "auto" else f"Alert on for {p.name}.")
+    hb = mon.heartbeat(s)
+    if not hb["running"]:
+        done += " It works while benchboss monitor runs (in trial mode until you add --live)."
+    c.out.print(Text(f"✓ {done}", style=c.pal.good))
 
 
 # --- parser -------------------------------------------------------------------------------------------
@@ -677,6 +1001,9 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("--demo", action="store_true",
                        help="use built-in sample data, no ESPN account needed", **kw)
         g.add_argument("--theme", choices=config_mod.THEMES, help="color palette for this run", **kw)
+        g.add_argument("--layout", choices=config_mod.LAYOUTS,
+                       help="app layout for this run: auto (compact on a phone or a small "
+                            "window), compact or full", **kw)
         g.add_argument("-y", "--yes", action="store_true", help="skip the confirmation on writes", **kw)
         return g
 
@@ -739,7 +1066,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pick", action="append", metavar="WINNER>LOSER",
                    help='fix a result, e.g. --pick "Monstars>Tune Squad" (add @WEEK for a '
                         "given week; repeat for more)")
-    p.add_argument("--sims", type=_count, default=5000, help="simulated seasons (default 5000)")
+    p.add_argument("--sims", type=_count, default=playoffs.SIMS,
+                   help=f"simulated seasons (default {playoffs.SIMS})")
     p.add_argument("--view", metavar="VIEW", type=_view(playoffs),
                    help="odds (default) or games, the matchups left")
     p = add("trash", cmd_trash, "most valuable free agents for this week (points added, best day to grab)")
@@ -750,11 +1078,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-n", type=_count, default=25, help="how many (default 25)")
     p = add("trending", cmd_fa, "free agents being added the most")
     p.add_argument("-n", type=_count, default=15, help="how many (default 15)")
-    p = add("news", cmd_news, "recent news and spins on your players, your watch list (--watch) "
-                              "or the players you name")
-    p.add_argument("players", nargs="*", help="player names; default: your roster")
+    p = add("news", cmd_news, "recent news and spins on your players or your watch list "
+                              "(--watch), or the latest news on any NBA player you name")
+    p.add_argument("players", nargs="*",
+                   help="any NBA player (a close spelling works); default: your roster")
     p.add_argument("--watch", action="store_true", help="your watch-list players instead of your roster")
-    p.add_argument("--days", type=_count, default=5, help="how many days back (default 5)")
+    p.add_argument("--days", type=_count,
+                   help="how many days back (default 5; a named player shows his latest news "
+                        "whatever the date unless you give --days)")
+    p.add_argument("-n", type=_count,
+                   help="how many of a named player's latest items to show (default 10)")
     p.add_argument("--ai", action="store_true", help="AI briefing with web search (needs ANTHROPIC_API_KEY)")
     p = add("trades", cmd_trades, "trade finder: fair 1-for-1 deals that fix positional needs")
     p.add_argument("--need", choices=["PG", "SG", "SF", "PF", "C", "pg", "sg", "sf", "pf", "c"],
@@ -792,6 +1125,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--to", metavar="TEAM_OR_NAME", help="direct message instead of the league chat")
     p.add_argument("--dry-run", action="store_true", help="show the message, send nothing")
     p.add_argument("-n", type=_count, default=15, help="how many messages to show (default 15)")
+
+    p = add("autoswap", cmd_autoswap, "auto-swap: arm players who may turn healthy before their "
+                                      "game, so benchboss starts them by itself")
+    p.add_argument("action", nargs="?", choices=["list", "add", "remove", "clear", "pause",
+                                                 "resume", "log"], help="default: list")
+    p.add_argument("player", nargs="*", help="the player to add or remove")
+    p.add_argument("--today", action="store_true", help="add: the mark ends tonight (default: "
+                                                        "the end of the matchup week)")
+    p.add_argument("--notify-only", action="store_true",
+                   help="add: only tell me when he turns healthy, change nothing (no question)")
+    p.add_argument("--dry-run", action="store_true", help="add: show what would happen, arm nothing")
+    p.add_argument("-n", type=_count, default=20, help="log: how many lines (default 20)")
+    p = add("monitor", cmd_monitor, "the background process: watches armed and watch-list "
+                                    "players, makes the auto-swaps (trial mode unless --live) "
+                                    "and sends the notifications")
+    p.add_argument("--once", action="store_true", help="one read and one round, then exit")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print what it sees and would do: no notification, no state, no log")
+    p.add_argument("--live", action="store_true",
+                   help="send the changes to ESPN (needs --yes or a yes at the prompt)")
+    p.add_argument("--notify", metavar="BACKENDS",
+                   help="mac, ntfy, cmd, log, comma separated (secrets come from the "
+                        "environment, never from here)")
+    p.add_argument("--notify-test", action="store_true",
+                   help="send one test note through the backends and exit")
+    p.add_argument("--simulate", action="append", metavar="PLAYER=STATUS",
+                   help='pretend a status, e.g. --simulate "Dyson Daniels=ACTIVE" (trial, '
+                        "--dry-run or --demo only; repeat for more)")
     return ap
 
 

@@ -211,3 +211,34 @@ def auto_approved(cmd: str) -> bool:
 ])
 def test_vscode_runs_the_new_reads_and_asks_for_watch_list_writes(cmd, auto):
     assert auto_approved(cmd) is auto
+
+
+@pytest.mark.parametrize("cmd, auto", [
+    # reads: the marks, the log, and the one monitor run that saves and sends nothing
+    ("benchboss autoswap", True),
+    ("benchboss autoswap list --json", True),
+    ("benchboss autoswap log --json -n 50", True),
+    ('benchboss autoswap add "Dyson Daniels" --dry-run', True),
+    ('benchboss autoswap add "Dyson Daniels" --dry-run --json', True),
+    ("benchboss monitor --once --dry-run --json", True),
+    ("benchboss monitor --dry-run --once", True),
+    # arming, every other mark change, and the monitor for real ask first
+    ('benchboss autoswap add "Dyson Daniels"', False),
+    ('benchboss autoswap add "Dyson Daniels" --yes', False),
+    ('benchboss autoswap add "Dyson Daniels" --notify-only', False),
+    ('benchboss autoswap add "Dyson Daniels" --dry-run -y', False),
+    ('benchboss autoswap remove "Dyson Daniels"', False),
+    ("benchboss autoswap clear", False),
+    ("benchboss autoswap pause", False),
+    ("benchboss autoswap resume", False),
+    ("benchboss autoswap resume --dry-run", False),
+    ("benchboss monitor", False),
+    ("benchboss monitor --once", False),
+    ("benchboss monitor --dry-run", False),
+    ("benchboss monitor --once --dry-run --live", False),
+    ("benchboss monitor --once --dry-run --notify-test", False),
+    ("benchboss monitor --live --yes", False),
+    ('benchboss monitor --once --dry-run --simulate "A=ACTIVE"', False),
+])
+def test_vscode_asks_before_auto_swap_changes_and_the_monitor(cmd, auto):
+    assert auto_approved(cmd) is auto

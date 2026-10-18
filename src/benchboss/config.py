@@ -3,7 +3,8 @@
 Stored as JSON in the platform config folder (see ``config_dir``). Every field can be
 overridden with an environment variable, which is handy for CI and for AI agents:
 
-    BENCHBOSS_LEAGUE_ID, BENCHBOSS_TEAM_ID, BENCHBOSS_SEASON, BENCHBOSS_THEME, BENCHBOSS_HOME
+    BENCHBOSS_LEAGUE_ID, BENCHBOSS_TEAM_ID, BENCHBOSS_SEASON, BENCHBOSS_THEME,
+    BENCHBOSS_LAYOUT, BENCHBOSS_HOME
 """
 
 from __future__ import annotations
@@ -12,12 +13,13 @@ import datetime as dt
 import json
 import os
 import sys
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from benchboss.errors import ConfigError
 
 THEMES = ("dark", "light")
+LAYOUTS = ("auto", "compact", "full")  # ui/layout.py: compact on small windows, or forced
 
 
 def config_dir() -> Path:
@@ -48,6 +50,10 @@ class Config:
     theme: str = "dark"
     league_name: str = ""
     team_name: str = ""
+    layout: str = "auto"         # one of LAYOUTS
+    # notifications from `benchboss monitor` (notify.py): {"backends": ["mac", "ntfy"],
+    # "ntfy_server": "https://ntfy.sh"}. Never secrets: those come from the environment.
+    notify: dict = field(default_factory=dict)
 
     @property
     def path(self) -> Path:
@@ -63,7 +69,8 @@ class Config:
 
 
 _ENV = {"league_id": "BENCHBOSS_LEAGUE_ID", "team_id": "BENCHBOSS_TEAM_ID",
-        "season": "BENCHBOSS_SEASON", "theme": "BENCHBOSS_THEME"}
+        "season": "BENCHBOSS_SEASON", "theme": "BENCHBOSS_THEME", "layout": "BENCHBOSS_LAYOUT"}
+_TEXT = ("theme", "layout")  # the variables above that are words, not numbers
 
 
 def load() -> Config:
@@ -82,8 +89,8 @@ def load() -> Config:
         value = os.environ.get(var)
         if not value:
             continue
-        if name == "theme":
-            cfg.theme = value
+        if name in _TEXT:
+            setattr(cfg, name, value)
             continue
         try:
             setattr(cfg, name, int(value))
@@ -91,13 +98,23 @@ def load() -> Config:
             raise ConfigError(f"{var} must be a whole number, got {value!r}") from None
     if cfg.theme not in THEMES:
         cfg.theme = "dark"
+    if cfg.layout not in LAYOUTS:
+        cfg.layout = "auto"
+    if not isinstance(cfg.notify, dict):
+        cfg.notify = {}
     return cfg
+
+
+def _tmp(path: Path) -> Path:
+    """A temp file next to ``path`` for this process only: the app, the CLI and the monitor
+    can save at the same time without writing into each other's temp file."""
+    return path.with_name(f"{path.name}.{os.getpid()}.tmp")
 
 
 def save(cfg: Config) -> Path:
     path = cfg.path
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    tmp = _tmp(path)
     tmp.write_text(json.dumps(asdict(cfg), indent=2) + "\n")
     tmp.replace(path)
     return path
@@ -121,7 +138,7 @@ def save_theme(theme: str) -> Path | None:
             return None
     raw["theme"] = theme
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    tmp = _tmp(path)
     tmp.write_text(json.dumps(raw, indent=2) + "\n")
     tmp.replace(path)
     return path

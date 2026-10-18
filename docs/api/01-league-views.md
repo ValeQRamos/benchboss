@@ -638,6 +638,8 @@ Team fields, re-checked on 2026-10-16 (preseason, all 10 teams). VERIFIED (live)
 
 **Use:** playoff odds column in the standings view, clinch tags, and ESPN's number next to benchboss's own simulation on the playoff race screen.
 
+**How ESPN seeds (checked for 1.0.4).** ESPN works the seeds out on its servers: the web app's main bundle only sorts teams by `teams[].playoffSeed` (`teamRankings_PlayoffSeed`) and ranks a division by the same seed (`teamRankings_Division`); no playoff tiebreaker logic turned up in it. VERIFIED (bundle, Oct 16 2026) So two details of benchboss's playoff race still come from ESPN's settings help and not from a real tie: a points-against tiebreaker ranks the team with **more** points against first, and division winners take the top seeds even with a worse record. UNVERIFIED. They can be checked once a season has real ties: compare `core.playoffs.seed_order` on the final standings with `teams[].playoffSeed`.
+
 ---
 
 ## 12. Transactions

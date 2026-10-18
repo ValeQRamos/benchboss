@@ -209,7 +209,8 @@ def test_a_pick_reruns_the_race_and_c_clears_it():
         await settle(pilot)
         assert b.picks == {g.id: g.away}
         assert b.race is not b.initial and b.race.picks == b.picks
-        assert b.race.sims == playoffs.SCENARIO_SIMS and not b.busy
+        assert b.race.sims == b.initial.sims == core.SIMS and not b.busy  # one count everywhere
+        assert b.race.baseline is b.initial
         after = odds_text(b)
         assert after != before and "+/-" in after and "1 pick" in str(b._draw_foot(b.pal, 100, 3))
         # the same side again clears the pick

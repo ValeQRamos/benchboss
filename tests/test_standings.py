@@ -356,8 +356,9 @@ def test_a_resize_redraws_at_the_new_width():
             await pilot.resize_terminal(64, 40)
             await pilot.pause()
             assert app.query_one("#menu").has_class("hidden")  # 64 columns is narrow
-            text = text_of(app.query_one("#body").content, 58)  # 64 minus padding and scrollbar
-            assert max(len(line) for line in text.splitlines()) <= 58
+            width = app._width()  # 64 minus padding and scrollbar (less of both on a phone)
+            text = text_of(app.query_one("#body").content, width)
+            assert max(len(line) for line in text.splitlines()) <= width
             assert "Pick and Roll Pros" in text and "Diff" in text
 
     asyncio.run(run())

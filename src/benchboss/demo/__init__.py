@@ -18,6 +18,7 @@ from benchboss import config as config_mod
 from benchboss.core.calendar import SeasonCalendar
 from benchboss.errors import BenchbossError
 from benchboss.espn.constants import SLOT_ID
+from benchboss.espn.models import parse_player
 from benchboss.news import NewsItem
 from benchboss.service import Session
 from benchboss.text import surname
@@ -102,6 +103,19 @@ class DemoClient:
             if x["id"] not in seen:
                 seen.add(x["id"])
                 out.append(x)
+        return out
+
+    def player_universe(self) -> list[dict]:
+        """ESPN's players_wl list: every player in the pool, with only the fields that list
+        has (no stats, no injury status, no roster status)."""
+        keys = ("id", "fullName", "firstName", "lastName", "proTeamId", "defaultPositionId",
+                "eligibleSlots", "droppable")
+        out = []
+        for x in self.pool():
+            p = x["player"]
+            own = p.get("ownership") or {}
+            out.append({**{k: p[k] for k in keys if k in p},
+                        "ownership": {"percentOwned": own.get("percentOwned", 0.0)}})
         return out
 
     def players(self, flt: dict, scoring_period=None) -> list:
@@ -206,6 +220,19 @@ _WATCH_NEWS = [
      "He has been efficient in limited minutes. A fine streamer if you need games this week."),
 ]
 
+# a free agent nobody in the demo watches, for the news search: (hours before 2 pm UTC on
+# the demo day, headline after the last name, spin); two of them are older than a week
+_SEARCH_NEWS = {
+    "Ben Simmons": [
+        (30, "handed out nine assists in 22 minutes off the bench Monday.",
+         "The passing is still there, but he took two shots. Points leagues reward the "
+         "assists; he is a streamer at best."),
+        (8 * 24, "will keep backing up at point guard for now, his coach said.",
+         "He should see 18 to 22 minutes a night. Not a fantasy option yet."),
+        (19 * 24, "went through a full practice Tuesday and reported no issues.",
+         "A healthy preseason would help. Worth watching in deep leagues."),
+    ],
+}
 
 class DemoSession(Session):
     def __init__(self, cfg: config_mod.Config | None = None):
@@ -221,8 +248,10 @@ class DemoSession(Session):
         me = next(t for t in data["league"]["teams"] if t["id"] == data["my_team_id"])
         self._watched = list(me.get("watchList") or [])  # as shipped, before any edit
         # the news seen stays in memory: the frozen demo shows the same alerts on every run
-        # and never writes to your config folder
+        # and never writes to your config folder; the same goes for every other local file
+        # (auto-swap marks, the monitor's state, the lineup log)
         self.seen_news = {}
+        self.local_state = {}
 
     @property
     def demo(self) -> bool:
@@ -251,27 +280,70 @@ class DemoSession(Session):
         return ([RosterSpot(s.player, assign.get(i, BENCH)) for i, s in enumerate(pool)]
                 + [s for s in roster if s.slot_id == IR])
 
-    def news(self, player_ids, days=5):
-        """RotoWire-style items for 4 roster players and 2 watch-list players, newest first,
-        only for the ids asked for and only from the last ``days`` days of the demo clock."""
+    def autoswap_lineup(self, period: int):
+        """The lineup auto-swap starts from in the demo: the one Optimize would set on that
+        day. The demo cannot save a lineup, and its frozen one starts the day-to-day players,
+        which a manager who optimizes in the morning would have benched (so arming one of
+        them shows what auto-swap is for: Dyson Daniels in for Scotty Pippen Jr.)."""
+        from dataclasses import replace
+
+        from benchboss.core.lineup import plan_day
+
+        roster = DemoSession.roster_on(self, period)  # the saved lineup, never a wrapper
+        moved = {m.player.id: m.to_slot
+                 for m in plan_day(roster, self.league().slot_counts, period, self.calendar).moves}
+        return [replace(s, slot_id=moved.get(s.player.id, s.slot_id)) for s in roster]
+
+    def _news_items(self) -> list[NewsItem]:
+        """Every canned news item, newest first: 4 on roster players, 2 on watch-list
+        players and a few on a free agent for the search, on the demo clock."""
         roster = [(s.player.id, s.player.name) for s in self.league().me.roster]
         names = {x["id"]: x["player"]["fullName"]
                  for x in self.data["free_agents"] + self.data["trending"]}
         watched = [(pid, names[pid]) for pid in self._watched if pid in names]
         now = dt.datetime.combine(self.today, dt.time(14, 0), tzinfo=dt.timezone.utc)
-        cutoff = self.now - dt.timedelta(days=days)
         items = []
         for i, (who, (idx, hours, headline, spin)) in enumerate(
                 [(roster, n) for n in _NEWS] + [(watched, n) for n in _WATCH_NEWS]):
-            if idx >= len(who) or who[idx][0] not in player_ids:
-                continue
-            pid, name = who[idx]
-            published = now - dt.timedelta(hours=hours)
-            if published >= cutoff:
-                items.append(NewsItem(i, published, f"{surname(name)} {headline}", spin,
-                                      "Demo", "Rotowire", "", {pid}))
+            if idx < len(who):
+                pid, name = who[idx]
+                items.append(NewsItem(i, now - dt.timedelta(hours=hours),
+                                      f"{surname(name)} {headline}", spin, "Demo", "Rotowire",
+                                      "", {pid}))
+        ids = {name: pid for pid, name in names.items()}
+        for n, (name, rows) in enumerate(_SEARCH_NEWS.items()):
+            for k, (hours, headline, spin) in enumerate(rows):
+                if name in ids:
+                    items.append(NewsItem(100 + 10 * n + k, now - dt.timedelta(hours=hours),
+                                          f"{surname(name)} {headline}", spin, "Demo",
+                                          "Rotowire", "", {ids[name]}))
         return sorted(items, key=lambda x: x.published, reverse=True)
 
+    def news(self, player_ids, days=5):
+        """The canned items on the ids asked for, newest first, only from the last ``days``
+        days of the demo clock."""
+        cutoff = self.now - dt.timedelta(days=days)
+        return [x for x in self._news_items()
+                if x.player_ids & set(player_ids) and x.published >= cutoff]
+
+    def latest_news(self, player_id, n=10, offset=0):
+        """The canned items on one player whatever their date, newest first."""
+        return [x for x in self._news_items() if player_id in x.player_ids][offset:offset + n]
+
+    def nba_players(self, max_age=None):
+        """The demo's players_wl list, with lastNewsDate from the canned news. Kept in
+        memory only: the demo never writes to your cache folder."""
+        if self._nba_players is None:
+            newest: dict[int, int] = {}
+            for x in self._news_items():
+                for pid in x.player_ids:
+                    newest.setdefault(pid, int(x.published.timestamp() * 1000))
+            self._nba_players = [
+                parse_player({"player": {**raw, **({"lastNewsDate": newest[raw["id"]]}
+                                                   if raw["id"] in newest else {})}},
+                             self.client.season)
+                for raw in self.client.player_universe()]
+        return self._nba_players
 
 def demo_session(cfg: config_mod.Config | None = None) -> DemoSession:
     return DemoSession(cfg)

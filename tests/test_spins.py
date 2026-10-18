@@ -335,6 +335,13 @@ def body_text(app) -> str:
     return text_of(app.query_one("#body", Static).content, 120)
 
 
+def news_text(app) -> str:
+    """What the news screen shows: its title, tab line and body."""
+    view = app.query_one(news_screen.NewsView)
+    return "\n".join(text_of(view.query_one(f"#news-{part}", Static).content, 120)
+                     for part in ("title", "tabs", "text"))
+
+
 def drive(app, scenario, size=(140, 44)):
     async def go():
         async with app.run_test(size=size) as pilot:
@@ -351,13 +358,19 @@ def test_app_news_screen_shows_roster_and_watch_list():
         await pilot.press("n")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        out = body_text(app)
+        out = news_text(app)
         assert app.current == "news"
-        assert out.index("Your roster") < out.index("★ Watch list")
-        assert "Demin is seeing more minutes" in out and "Edwards posted" in out
+        assert "Roster  ·  last 5 days  ·  4 items" in out and "Edwards posted" in out
+        assert "Demin is seeing more minutes" not in out  # the watch list is tab 2
+        await pilot.press("2")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        out = news_text(app)
+        assert "Watch list  ·  last 5 days  ·  2 items" in out
+        assert "Demin is seeing more minutes" in out and "Edwards posted" not in out
         await pilot.press("ctrl+t")
         await pilot.pause()
-        assert "★ Watch list" in body_text(app)  # redrawn from the same data
+        assert "Demin is seeing more minutes" in news_text(app)  # redrawn from the same data
 
     drive(app, scenario)
 
@@ -409,7 +422,7 @@ def test_app_sums_up_a_burst_of_spins():
 
     drive(app, scenario)
     assert toasts[:4] == [f"Egor Demin: headline {i}" for i in range(1, 5)]
-    assert toasts[4:] == ["3 more on your watch list: press n for Player news."]
+    assert toasts[4:] == ["3 more on your watch list: press n, then 2 to read them."]
 
 
 @pytest.mark.parametrize("error", [NetworkError("could not reach ESPN"), RuntimeError("boom")])
@@ -430,7 +443,7 @@ def test_a_failing_background_check_does_not_crash_the_app(monkeypatch, error):
         await pilot.press("n")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert app.current == "news" and "Watch list" in body_text(app)
+        assert app.current == "news" and "Watch list" in news_text(app)
 
     drive(app, scenario)
     assert app.return_code in (None, 0)

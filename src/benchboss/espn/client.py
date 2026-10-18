@@ -146,6 +146,15 @@ class Client:
                            fantasy_filter={"players": fantasy_filter})
         return data.get("players", [])
 
+    def player_universe(self) -> list:
+        """players_wl: every active NBA player in one light list (id, names, NBA team,
+        positions, % rostered, lastNewsDate; no stats, no injury status). Public: sent
+        without cookies. docs/api/03-news-injuries.md section 4."""
+        data = http(f"{READS}/seasons/{self.season}/players",
+                    params=[("scoringPeriodId", 0), ("view", "players_wl")],
+                    headers={"x-fantasy-filter": json.dumps({"filterActive": {"value": True}})})
+        return data if isinstance(data, list) else []
+
     # --- writes --------------------------------------------------------------------------------
 
     def transaction(self, body: dict) -> dict:
@@ -168,10 +177,3 @@ class Client:
         headers = {"X-Fantasy-Filter": json.dumps(fantasy_filter)} if fantasy_filter else None
         return http(COMM + self._league_path() + "/communication/" + path, params=p,
                     headers=headers, body=body, cookies=self.cookies)
-
-
-def player_news(player_id: int, limit: int = 10) -> list[dict]:
-    """Public fantasy news feed for one player (Rotowire blurbs and ESPN media). No cookies."""
-    url = f"{SITE}/fantasy/v2/games/fba/news/players"
-    data = http(url, params=[("playerId", player_id), ("limit", limit)])
-    return data.get("feed", [])

@@ -4,6 +4,98 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.4] - 2026-10-18
+
+Most of this release comes from the requests that showed up the night 1.0.3 went out: start a
+player on his own when he turns healthy late, run benchboss from a phone, and read news on
+any player. Auto-swap ships in trial mode. It tells you what it would have done and changes
+nothing on ESPN until you turn live mode on.
+
+### Added
+
+- Auto-swap. Arm a player who is day-to-day or out (`u` in the app, or
+  `benchboss autoswap add`). If he turns healthy at least 3 minutes before his game,
+  benchboss starts him and benches the starter with the lowest projection that day whose game
+  has not started. Nobody else in your lineup moves. Arming shows what would happen and asks
+  first, and that yes covers that one player until Sunday (or until tonight with `--today`).
+  `autoswap remove`, `clear` and `pause` take it back at any time.
+  [docs/autoswap.md](docs/autoswap.md) has the details.
+- `benchboss monitor`, the process that does the watching. It starts in trial mode: you get a
+  note like "benchboss would have started Dyson Daniels at G and benched Scotty Pippen Jr."
+  and nothing is sent. `--live --yes` makes the changes for real. Leave it off until a week of
+  trial notes looks right to you, since nobody knows yet how often ESPN flips a status before
+  tip-off rather than after. Only one monitor runs per league, it saves what it is about to
+  send before sending it, and it reads your lineup again afterwards to check that ESPN took
+  the change. `--once` runs a single round (for cron), and `--once --dry-run` prints what it
+  sees and saves or sends nothing.
+- Notifications from the monitor: the Mac's Notification Center, [ntfy](https://ntfy.sh)
+  (free pushes to iPhone or Android) or a command of your own, for Telegram, Pushover or
+  anything else. Secrets come from the environment or a private `notify.env`, never from the
+  command line. `benchboss monitor --notify-test` sends a test note.
+- A note when a player on your ESPN watch list turns healthy. The app's Inbox and
+  `benchboss alerts` also show what the monitor found in the last 24 hours.
+- A log of every lineup change (Apply in the app, `optimize`, the monitor) and every
+  auto-swap decision, in `logs/lineup-YYYY-MM.jsonl`. `benchboss autoswap log` prints it.
+- Player news has two tabs, `1` Roster and `2` Watch list, and `[` `]` change how far back it
+  looks (1 to 30 days). `/` searches any NBA player, on a roster or not, and shows his 10
+  latest items however old they are; `.` brings 10 more. From a terminal it's
+  `benchboss news "Ben Simmons"` (`-n` for more items, `--days` for a window). A name that
+  fits several players lists them and exits with code 2.
+- A compact layout for phones and small windows. Under 80 columns or 30 rows the menu opens
+  as a page of its own with `m`, a one-row key bar replaces the footer and always shows
+  `m menu`, and tapping a key on the bar works like pressing it. A tap never sends anything to
+  ESPN. `--layout compact` or `--layout full` (also `BENCHBOSS_LAYOUT` or `"layout"` in
+  `config.json`) forces one or the other.
+- Exit code 5: a safety check refused a lineup change and nothing was sent.
+- `tools/responsive.py` runs the demo app at phone, landscape and laptop sizes and saves the
+  text of every screen, so anyone changing the UI can check the small sizes.
+
+### Changed
+
+- Player finder on a phone. The columns that seemed to move around were the table scrolling
+  itself sideways until the selected split was the last column, and it never scrolled back
+  when you turned the phone. In the compact layout the split you pick sits right after the
+  name, the table starts at the left edge again whenever the window changes size, and a
+  column that does not fit whole is left out instead of showing as "Pro" or "3". With the
+  keyboard up the filters fold into one line so the rows stay on screen.
+- Optimize: a player whose game starts within 3 minutes keeps his slot, even while ESPN still
+  shows him unlocked. On the bench his reason reads "locked, tipped 8:00 PM".
+- Workload drops the bench section. Starters and bench share one list, since the cells
+  already show who sat each day, and the default order is now most games first. `v` (or
+  `--view lineup`) puts them in today's lineup order.
+- Playoff race: more than 5 weeks out, the screen says the odds still move a lot and that
+  picks matter most in the final 5 weeks (`e` jumps there). `,` and `.` change the week in
+  the builder, for keyboards without Page Up and Page Down.
+- The dashboard goes to two columns from 78 columns (it was 92), so a 120-column window with
+  the menu open shows the cards side by side. The pixel ball only shows in windows with 34
+  rows or more.
+- Optimize, Roster and Best trash fit a phone: the day header, the injury math and the
+  `add` command no longer break in the middle.
+- Trade ideas put give, get and fairness on their own lines when a deal does not fit on one.
+- The popup for watch-list news says where to read it: "press n, then 2".
+- JSON that scripts may notice. Existing keys keep their meaning:
+  - `optimize --json` rows add `frozen` (players who keep their slot, and why), `outcome`
+    and `guards` (the safety checks that stopped a day).
+  - `alerts --json` can have `healthy` and `autoswap` items from the monitor, with `player`
+    and `at`.
+  - `playoffs --json` adds `final_stretch_from`, the first week of the final 5.
+  - New: `autoswap list --json`, `autoswap log --json` and `monitor --once --json`.
+
+### Fixed
+
+- Playoff race: the first view ran 5,000 seasons, but each pick in the builder ran 2,000
+  against a separate 2,000-season base. A team could drop from 47% to 45% and the +/- column
+  showed no change. Every view and every pick now plays the same 5,000 seasons, and +/- is
+  measured against the odds the screen opened with. A pick still takes about half a second
+  on the demo league.
+- A division title only guarantees a playoff spot when the league has at least as many spots
+  as divisions. With fewer, only the best division winners get in, the way ESPN seeds them.
+- `add`, `drop` and `trade` printed "ESPN: UNKNOWN" and exited with 0 when ESPN's answer had
+  no status. They now exit with 4 and tell you to check the league on ESPN before trying again.
+- News over a long window showed at most the newest 200 items per batch of players, because
+  ESPN counts video items toward that limit. benchboss now asks for the next page until the
+  window is covered.
+
 ## [1.0.3] - 2026-10-16
 
 A small patch on top of 1.0.2: a better ball and the loose ends the 1.0.2 audit left.

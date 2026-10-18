@@ -1,9 +1,13 @@
 """Player finder: every player in one table with every stat split, and your ESPN watch list.
 
 The CLI prints ``draw`` (``benchboss players``, ``benchboss watch``). The app mounts
-``FinderView`` instead: pool tabs (1 2 3 4), a position filter ([ ]), the stat split (v), a
-search box (/), a table you sort by clicking a header or with < and >, a detail card with
-news (enter), and the watch-list star (space).
+``FinderView`` instead: pool tabs (1 2 3 4), a position filter ([ ] or ( )), the stat split
+(v), a search box (/), a table you sort by clicking a header or with < > (or , .), a detail
+card with news (enter), and the watch-list star (space).
+
+On a phone (the app's compact layout) the selected split sits right after the name and stays
+there while the rest scrolls sideways, names go short below 60 columns, the filters fold into
+one line on a short window, and the card takes the table's place.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ import weakref
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
+from rich.cells import cell_len
 from rich.console import Console, Group, RenderableType
 from rich.measure import Measurement
 from rich.table import Table
@@ -37,6 +42,7 @@ from benchboss.ui.common import (
     table,
     title,
 )
+from benchboss.ui.layout import KeyItem
 from benchboss.ui.theme import DARK, Palette
 
 TITLE = "Player finder"
@@ -51,6 +57,8 @@ SEARCH_WIDTH = 28                               # the app's search box (less on 
 SEARCH_MIN = 10                                 # ... but never less than this
 NEWS_DAYS = 7
 RECENT = ("l7", "l15", "l30")                   # colored hot or cold against the season
+SHORT_NAMES = 60                                # app: names go short below this many columns
+SHORT_FILTERS = 22                              # app: rows below which the filters fold to one line
 
 # The selector says "Season"; the column says "Avg" (constants.SPLIT_SHORT).
 SPLIT_PICK = {k: ("Season" if k == "season" else SPLIT_SHORT[k]) for k in SPLIT_KEYS}
@@ -213,11 +221,12 @@ def box_cell(p: Player, key: str, split: str, pal: Palette) -> Text:
     return Text(_BOX[key][2](v), style=pal.text, justify="right")
 
 
-def cell(p: Player, key: str, split: str, data: FinderData, watch, pal: Palette) -> Text:
+def cell(p: Player, key: str, split: str, data: FinderData, watch, pal: Palette,
+         short: bool = False) -> Text:
     if key == "star":
         return star_cell(p.id in watch, pal)
     if key == "name":
-        return player_cell(p, pal)
+        return player_cell(p, pal, short=short)
     if key == "pos":
         return Text(p.positions or p.position, style=pal.dim)
     if key == "owner":
@@ -407,40 +416,51 @@ def _ago(when: dt.datetime, now: dt.datetime) -> str:
     return f"{local:%b} {local.day}"
 
 
+def _pack(items: list[Text], width: int, pal: Palette) -> Text:
+    """Items joined by a dim middle dot, on as many lines as ``width`` needs, breaking between
+    items (never inside one, never after a dot)."""
+    out, line = Text(), 0
+    for item in items:
+        if line and line + 5 + item.cell_len > width:
+            out.append("\n")
+            line = 0
+        elif line:
+            out.append("  ·  ", style=pal.border)
+            line += 5
+        out.append_text(item)
+        line += item.cell_len
+    return out
+
+
 def detail(p: Player, data: FinderData, split: str, watched: bool, pal: Palette, width: int,
            news: list | None, now: dt.datetime | None, news_error: str = "") -> RenderableType:
     """The card under the table: who he is, every split with its box score, and the news."""
-    head = Text()
+    who = Text()
     if watched:
-        head.append("★ ", style=pal.accent)
-    head.append(p.name, style=f"bold {pal.text}")
-    head.append(f"  {p.pro_team}", style=pal.dim)
-    head.append(f"  {p.positions or p.position}", style=pal.dim)
+        who.append("★ ", style=pal.accent)
+    who.append(p.name, style=f"bold {pal.text}")
+    who.append(f"  {p.pro_team}", style=pal.dim)
+    who.append(f"  {p.positions or p.position}", style=pal.dim)
     team = owner_name(p, data)
     if team:
         mine = p.on_team_id == data.my_team_id
-        head.append(f"  ·  {team}{' (you)' if mine else ''}", style=pal.accent if mine else pal.text)
+        where = Text(f"{team}{' (you)' if mine else ''}", style=pal.accent if mine else pal.text)
     else:
-        head.append("  ·  On waivers" if p.status == "WAIVERS" else "  ·  Free agent",
-                    style=pal.warn if p.status == "WAIVERS" else pal.text)
+        where = Text("On waivers" if p.status == "WAIVERS" else "Free agent",
+                     style=pal.warn if p.status == "WAIVERS" else pal.text)
+    head = _pack([who, where], width, pal)
 
-    facts = Text()
     status = _status_words(p)
-    facts.append(status, style=pal.good if status == "Healthy" else
-                 (pal.bad if p.injury in ("OUT", "SUSP", "IR") else pal.warn))
-    facts.append("  ·  ", style=pal.border)
-    facts.append("Rostered ", style=pal.dim)
-    facts.append(f"{rostered(p.owned)}%", style=pal.text)
+    owned = Text.assemble(("Rostered ", pal.dim), (f"{rostered(p.owned)}%", pal.text))
     if abs(p.owned_change) >= 0.05:
         up = p.owned_change > 0
-        facts.append(f" {'▲' if up else '▼'}{abs(p.owned_change):.1f}", style=pal.good if up else pal.bad)
-    facts.append("  ·  ", style=pal.border)
-    facts.append("Started ", style=pal.dim)
-    facts.append(f"{rostered(p.started)}%", style=pal.text)
+        owned.append(f" {'▲' if up else '▼'}{abs(p.owned_change):.1f}", style=pal.good if up else pal.bad)
+    items = [Text(status, style=pal.good if status == "Healthy" else
+                  (pal.bad if p.injury in ("OUT", "SUSP", "IR") else pal.warn)),
+             owned, Text.assemble(("Started ", pal.dim), (f"{rostered(p.started)}%", pal.text))]
     if p.adp:
-        facts.append("  ·  ", style=pal.border)
-        facts.append("ADP ", style=pal.dim)
-        facts.append(f"{p.adp:.1f}", style=pal.text)
+        items.append(Text.assemble(("ADP ", pal.dim), (f"{p.adp:.1f}", pal.text)))
+    facts = _pack(items, width, pal)
 
     t = table(pal)
     t.show_edge = False
@@ -524,12 +544,23 @@ class _Bar(Static):
 
 
 class _Detail(VerticalScroll, can_focus=False):
-    pass
+    """The card. It takes the keys only on a phone, where it covers the table (j k scroll)."""
+
+    BINDINGS = [Binding("j", "scroll_down", "Down", show=False),
+                Binding("k", "scroll_up", "Up", show=False)]
+
+
+class FinderTable(DataTable):
+    """The table, with j and k for the rows (a phone keyboard has no arrows)."""
+
+    BINDINGS = [Binding("j", "cursor_down", "Down", show=False),
+                Binding("k", "cursor_up", "Up", show=False)]
 
 
 class FinderView(Vertical):
-    """The interactive finder. It binds 1 2 3 4 / [ ] < > v space * enter escape and nothing
-    else, so the app's one-key menu keeps working while the table has the focus."""
+    """The interactive finder. It binds 1 2 3 4 / [ ] ( ) < > , . v space * enter escape
+    backspace (and j k on the table) and nothing else, so the app's one-key menu keeps working
+    while the table has the focus."""
 
     DEFAULT_CSS = """
     FinderView { height: 1fr; }
@@ -549,6 +580,13 @@ class FinderView(Vertical):
                                 border-top: solid $accent; padding: 1 1 0 1; }
     FinderView #finder-detail.open { display: block; }
     FinderView #finder-hint { height: 1; margin-top: 1; }
+    /* compact (a phone): no blank rows, the key bar shows the keys, the card covers the table */
+    FinderView.-compact #finder-top, FinderView.-compact #finder-filters,
+    FinderView.-compact #finder-message, FinderView.-compact DataTable { margin-top: 0; }
+    FinderView.-compact DataTable { min-height: 4; }
+    FinderView.-compact #finder-hint { display: none; }
+    FinderView.-compact #finder-detail { border-top: none; padding: 0 0 0 1; }
+    FinderView.-card DataTable { display: none; }
     """
 
     BINDINGS = [
@@ -557,14 +595,14 @@ class FinderView(Vertical):
         Binding("3", "pool('watch')", "Watch list", show=False),
         Binding("4", "pool('all')", "Everyone", show=False),
         Binding("slash", "search", "Search", show=False),
-        Binding("left_square_bracket", "position(-1)", "Position", show=False),
-        Binding("right_square_bracket", "position(1)", "Position", show=False),
-        Binding("less_than_sign", "sort_by(-1)", "Sort", show=False),
-        Binding("greater_than_sign", "sort_by(1)", "Sort", show=False),
+        Binding("left_square_bracket,left_parenthesis", "position(-1)", "Position", show=False),
+        Binding("right_square_bracket,right_parenthesis", "position(1)", "Position", show=False),
+        Binding("less_than_sign,comma", "sort_by(-1)", "Sort", show=False),
+        Binding("greater_than_sign,full_stop", "sort_by(1)", "Sort", show=False),
         Binding("v", "next_split", "Stats", show=False),
         Binding("space,asterisk", "toggle_watch", "Watch", show=False),
         Binding("enter", "details", "Details", show=False),
-        Binding("escape", "back", "Back", show=False),
+        Binding("escape,backspace", "back", "Back", show=False),
     ]
 
     def __init__(self, data: FinderData, app) -> None:
@@ -593,6 +631,7 @@ class FinderView(Vertical):
         self._refetch_timer = None
         self._news_timer = None
         self._restore = None
+        self._mode: tuple[bool, bool] | None = None  # (compact, short names) of the table on show
         mem = _MEMORY.get(app)
         if mem:
             self.split, self.sort_key, self.sort_desc = mem["split"], mem["sort"], mem["desc"]
@@ -612,7 +651,7 @@ class FinderView(Vertical):
             yield Input(placeholder="/ search players", id="finder-search")
         yield _Bar(id="finder-filters")
         yield Static(id="finder-message")
-        yield DataTable(id="finder-table", zebra_stripes=True, cursor_type="row", fixed_columns=2)
+        yield FinderTable(id="finder-table", zebra_stripes=True, cursor_type="row", fixed_columns=2)
         with _Detail(id="finder-detail"):
             yield Static(id="finder-card")
         yield Static(id="finder-hint")
@@ -627,6 +666,7 @@ class FinderView(Vertical):
     def on_mount(self) -> None:
         if not self._live():
             return
+        self.set_class(self._compact(), "-compact")
         self.watch(self.app, "theme", self._theme_changed, init=False)
         self.watch(self.query_one(DataTable), "scroll_x", lambda _: self._fit_width(), init=False)
         if self.query_text:
@@ -645,13 +685,31 @@ class FinderView(Vertical):
         return self
 
     def on_resize(self) -> None:
+        self.relayout()
+
+    def relayout(self) -> None:
+        """The window changed size (a phone turned around) or the app went in or out of its
+        compact layout: fit the header and the table again, the sideways scroll back at the
+        start with the selected split in view, as when the finder opens."""
+        if not self._live():
+            return
+        self.set_class(self._compact(), "-compact")
         self._render_header()
-        if self._live() and self.query(DataTable):
-            # a resize can leave the scroll inside a column: snap it to the next column, refit
-            t = self.query_one(DataTable)
-            self.call_after_refresh(lambda: self._scroll_columns(t.scroll_x, None))
+        if self.query(DataTable):
+            if self._table_mode() != self._mode:  # other columns or names: draw it again
+                self._render_table(show=self.split, reset=True)
+            else:
+                self.call_after_refresh(lambda: self._scroll_columns(0, self.split))
         if self.detail_id is not None:
             self._render_detail()
+
+    def _compact(self) -> bool:
+        return bool(getattr(self._owner_app, "compact", False))
+
+    def _table_mode(self) -> tuple[bool, bool]:
+        """(compact, short names): what decides the columns and the name cells."""
+        compact = self._compact()
+        return compact, compact and (self.size.width or 100) < SHORT_NAMES
 
     @property
     def pal(self) -> Palette:
@@ -710,6 +768,26 @@ class FinderView(Vertical):
     def _render_hint(self) -> None:
         width = max(20, self.size.width or 100)
         self.query_one("#finder-hint", Static).update(self._hint(self.pal, width))
+        refresh = getattr(self._owner_app, "refresh_keys", None)
+        if callable(refresh):  # the key bar (compact) shows the same keys
+            refresh()
+
+    def key_items(self) -> list[KeyItem]:
+        """The finder's keys for the app's key bar (compact). Space changes the watch list on
+        ESPN, so it has no tap; the other taps only change what is on screen."""
+        if not self._live():
+            return []
+        if self.query_one("#finder-search", Input).has_focus:
+            return [KeyItem("⏎", "search", "", 10)]  # an empty search shows the whole pool
+        current = self._current()
+        watched = current is not None and current.id in self.watched
+        star = KeyItem("space", "★ unwatch" if watched else "★ watch", "", 14)
+        if self.detail_id is not None:
+            # enter, backspace and esc all close it; a phone has the first two
+            return [KeyItem("⏎", "close", "back", 11), star, KeyItem("j k", "scroll", "", 50)]
+        return [KeyItem("/", "search", "search", 10), KeyItem("⏎", "card", "details", 12), star,
+                KeyItem("1-4", "pool", "", 20), KeyItem("( )", "position", "position(1)", 35),
+                KeyItem(", .", "sort", "sort_by(1)", 40), KeyItem("j k", "row", "", 55)]
 
     def _tabs(self, pal: Palette, width: int) -> tuple[Text, list[Region]]:
         """ "1 Free agents  2 On a team  3 Watch list  4 Everyone", the current one a pill;
@@ -753,6 +831,18 @@ class FinderView(Vertical):
         splits = [(k, SPLIT_PICK[k], look(k == self.split, bool(self.players)
                                           and not has_split(self.players, k)))
                   for k in SPLIT_KEYS]
+        if self._compact() and (self.size.height or 99) < SHORT_FILTERS:
+            # a short window: one line with the values in use; a tap (or the keys) changes them
+            out, regions = Text(), []
+            for i, (head, value, kind) in enumerate((("Pos ", self.position or "All", "cycle_pos"),
+                                                     ("Stats ", SPLIT_PICK[self.split], "cycle_split"))):
+                if i:
+                    out.append("  ·  ", style=pal.border)
+                out.append(head, style=f"bold {pal.dim}")
+                start = out.cell_len
+                out.append(f" {value} ", style=f"bold {pal.accent}")
+                regions.append((0, start, out.cell_len, kind, value))
+            return out, regions
         pos, pos_at = part("Pos ", positions, "pos")
         stats, stats_at = part("Stats ", splits, "split")
         gap = " " * 4
@@ -764,11 +854,24 @@ class FinderView(Vertical):
             shift = pos.cell_len + len(gap)
             return (Text.assemble(pos, gap, stats),
                     [(0, *r) for r in pos_at] + [(0, a + shift, b + shift, k, v) for a, b, k, v in stats_at])
-        pos, pos_at = part("Pos   ", positions, "pos")  # lined up with "Stats "
-        for line, hint in ((pos, " [ ]"), (stats, " v")):
+        # one part per line ("Pos   " lined up with "Stats "); a part wider than the window
+        # goes on in the next line, under its first option, and each label knows its line
+        lines: list[Text] = []
+        regions: list[Region] = []
+        for head, options, kind, hint in (("Pos   ", positions, "pos", " [ ]"),
+                                          ("Stats ", splits, "split", " v")):
+            line = Text(head, style=f"bold {pal.dim}")
+            for value, label, style in options:
+                if line.cell_len > len(head) and line.cell_len + cell_len(f" {label} ") > width:
+                    lines.append(line)
+                    line = Text(" " * len(head))
+                start = line.cell_len
+                line.append(f" {label} ", style=style)
+                regions.append((len(lines), start, line.cell_len, kind, value))
             if line.cell_len + len(hint) <= width:
                 line.append(hint, style=pal.border)
-        return Text.assemble(pos, "\n", stats), [(0, *r) for r in pos_at] + [(1, *r) for r in stats_at]
+            lines.append(line)
+        return Text("\n").join(lines), regions
 
     def _hint(self, pal: Palette, width: int) -> Text:
         current = self._current()
@@ -783,20 +886,40 @@ class FinderView(Vertical):
                 break
         return out
 
-    def _columns(self) -> list[str]:
-        """Every column, except splits nobody has numbers for (the preseason)."""
+    def _all_columns(self) -> list[str]:
+        """Every column, except splits nobody has numbers for (the preseason), in the order
+        < and > walk through them."""
         keep = {self.split, self.sort_key, DEFAULT_SPLIT}
         return [c for c in COLUMNS if c not in SPLITS or c in keep or has_split(self.players, c)]
 
-    def _render_table(self, keep_id: int | None = None, show: str | None = None) -> None:
-        """Rebuild the table: same player under the cursor, same horizontal scroll, and the
-        column ``show`` (the split or the sort just picked) scrolled into view."""
+    def _columns(self) -> list[str]:
+        """The columns left to right. On a phone the selected split comes right after the
+        name (and stays there while the rest scrolls), then the sort column when it is a
+        number, then the rest; on a laptop COLUMNS order."""
+        cols = self._all_columns()
+        if not self._compact():
+            return cols
+        first = ["star", "name", self.split]
+        if self.sort_key not in first and self.sort_key not in TEXT_COLUMNS and self.sort_key in cols:
+            first.append(self.sort_key)
+        return first + [c for c in cols if c not in first]
+
+    def _render_table(self, keep_id: int | None = None, show: str | None = None,
+                      reset: bool = False) -> None:
+        """Rebuild the table: same player under the cursor, same horizontal scroll (or back
+        at the start with ``reset``), and the column ``show`` (the split or the sort just
+        picked) scrolled into view."""
         pal = self.pal
         t = self.query_one(DataTable)
         if keep_id is None:
             keep_id = self._current_id()
         data = self._view_data()
-        scroll_x = t.scroll_x
+        mode = self._table_mode()
+        reset = reset or mode != self._mode
+        self._mode = mode
+        compact, short = mode
+        scroll_x = 0 if reset else t.scroll_x
+        t.fixed_columns = 3 if compact else 2  # the split stays next to the name on a phone
         t.clear(columns=True)
         t.show_header = bool(self.players)  # an empty pool shows its message, not bare headers
         cols = self._columns()
@@ -814,7 +937,8 @@ class FinderView(Vertical):
             if p.id in seen:
                 continue
             seen.add(p.id)
-            t.add_row(*(cell(p, c, self.split, data, self.watched, pal) for c in cols), key=str(p.id))
+            t.add_row(*(cell(p, c, self.split, data, self.watched, pal, short) for c in cols),
+                      key=str(p.id))
         if keep_id is not None and str(keep_id) in t.rows:
             t.move_cursor(row=t.get_row_index(str(keep_id)))
         self.call_after_refresh(self._scroll_columns, scroll_x, show)
@@ -885,15 +1009,26 @@ class FinderView(Vertical):
             x += w
             edges.append(x)
         shown = [e for e in edges if e > scroll_x and fixed + e - scroll_x <= room]
-        if not shown or shown[-1] == edges[-1]:  # all the rest fits: the whole row is the table's
+        if not edges or (shown and shown[-1] == edges[-1]):  # all the rest fits: the whole row
             t.styles.width = None
+        elif not shown:  # not one more column fits whole: the fixed ones alone, never a stub
+            t.styles.width = fixed + bar
         else:
             t.styles.width = fixed + shown[-1] - round(scroll_x) + bar
 
     def _render_detail(self) -> None:
         p = self._player(self.detail_id)
         self.detail_id = p.id if p else None
-        self.query_one("#finder-detail").set_class(p is not None, "open")
+        box = self.query_one("#finder-detail")
+        box.set_class(p is not None, "open")
+        # on a phone the card takes the table's place, and the keys, until it closes
+        cover = p is not None and self._compact()
+        self.set_class(cover, "-card")
+        box.can_focus = cover
+        if cover and not box.has_focus and self.query_one(DataTable).has_focus:
+            box.focus()
+        elif not cover and box.has_focus:
+            self.query_one(DataTable).focus()
         self._render_hint()  # enter details, or esc close card
         if p is None:
             return
@@ -901,11 +1036,11 @@ class FinderView(Vertical):
         now = getattr(self.session, "now", None)
         card = detail(p, self._view_data(), self.split, p.id in self.watched, self.pal, width,
                       self._news.get(p.id), now, self._news_errors.get(p.id, ""))
-        box, shown = self.query_one("#finder-detail"), self.query_one("#finder-card", Static)
+        shown = self.query_one("#finder-card", Static)
         shown.update(card)
         # never taller than what it shows: a short card leaves the rest to the table
-        box.styles.max_height = (shown.get_content_height(self.size, self.app.size, width)
-                                 + box.styles.gutter.height)
+        box.styles.max_height = None if cover else (
+            shown.get_content_height(self.size, self.app.size, width) + box.styles.gutter.height)
 
     # --- helpers -----------------------------------------------------------------------------------
 
@@ -933,13 +1068,18 @@ class FinderView(Vertical):
     # --- actions -----------------------------------------------------------------------------------
 
     def pick(self, kind: str, value: str) -> None:
-        """A click on a tab, a position or a split in the header."""
+        """A click on a tab, a position or a split in the header (on a short window, on the
+        one-line filters: the next position, the next split)."""
         if kind == "pool":
             self.action_pool(value)
         elif kind == "pos":
             self._set_position(None if value == "All" else value)
         elif kind == "split":
             self._set_split(value)
+        elif kind == "cycle_pos":
+            self.action_position(1)
+        elif kind == "cycle_split":
+            self.action_next_split()
         self.focus()
 
     def action_pool(self, source: str) -> None:
@@ -989,7 +1129,7 @@ class FinderView(Vertical):
         self._maybe_refetch_sorted()
 
     def action_sort_by(self, step: int) -> None:
-        cols = self._columns()
+        cols = self._all_columns()  # the same walk on a phone, whatever the columns' order
         i = cols.index(self.sort_key) if self.sort_key in cols else 0
         self._sort(cols[(i + step) % len(cols)])
 
@@ -1041,6 +1181,12 @@ class FinderView(Vertical):
             self._refetch()
 
     def action_details(self) -> None:
+        """enter when the table does not have the keys: on a phone the open card has them, and
+        enter closes it."""
+        if self.detail_id is not None:
+            self.detail_id = None
+            self._render_detail()
+            return
         p = self._current()
         if p is not None:
             self._open_detail(p)
