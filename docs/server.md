@@ -6,6 +6,9 @@ and later features (alerts, scheduled tasks) can run when your own computer is o
 
 Nothing here is required. benchboss works fine on your own machine.
 
+This page explains the pieces. The order to do things in, updating, rolling back, adding people
+and automatic deploys from GitHub are in [deploy.md](deploy.md).
+
 ```mermaid
 flowchart LR
     Mac[Mac terminal] -->|SSH, key| Server[Server: benchboss + tmux]
@@ -17,7 +20,8 @@ flowchart LR
 
 | Piece | Where |
 |---|---|
-| benchboss and its settings (`~/.config/benchboss/`) | the server, in one Linux user's home |
+| benchboss itself | `/opt/benchboss/releases/<id>/`, the live one linked as `/opt/benchboss/current` (see [deploy.md](deploy.md)) |
+| Each person's settings (`~/.config/benchboss/`) | the server, in that person's own Linux user home |
 | ESPN cookies (`espn_s2`, `SWID`) | the server, in `credentials.json` (permissions `0600`) |
 | SSH private keys | each device that logs in (Mac, phone). They never leave the device. |
 | SSH public keys | the server, in `~/.ssh/authorized_keys` |
@@ -122,8 +126,7 @@ curl -fsSL https://tailscale.com/install.sh -o "$ts"
 sh "$ts"
 rm -f "$ts"
 
-# benchboss, installed for the new user
-su - "$USER_NAME" -c 'curl -fsSL https://raw.githubusercontent.com/ValeQRamos/benchboss/main/install.sh -o /tmp/bb-install.sh && sh /tmp/bb-install.sh'
+# benchboss itself is installed next, from your computer: deploy/deploy.sh (see deploy.md)
 
 echo "provisioning done"
 ```
@@ -132,9 +135,10 @@ Notes on the script:
 
 - The user has passwordless `sudo`. That is needed because there is no password, so your SSH
   key is the only protection. Use a passphrase.
-- Read `install.sh` before you run it on a server, since it is fetched from the `main` branch.
 - First boot takes a few minutes. `tail /var/log/benchboss-provision.log` on the server ends
   with `provisioning done` when it is finished.
+- It does not install benchboss. Do that with `deploy/deploy.sh bootstrap` and `update`
+  ([deploy.md](deploy.md)), which also adds swap on a small server.
 
 ## 4. Connect
 
@@ -223,7 +227,7 @@ open from any browser, including a phone.
 ```mermaid
 flowchart LR
     B[Browser] -->|HTTPS| C[Caddy]
-    C -->|127.0.0.1:8000| W[benchboss web: sign in page, then the app]
+    C -->|127.0.0.1:PORT| W[benchboss web: sign in page, then the app]
 ```
 
 `benchboss web` has its own sign in page, in the style of the app, with a password and
@@ -232,37 +236,37 @@ websocket, so the app never starts for someone who is not signed in. A reverse p
 only adds HTTPS. Without `--password-file` or the `--github-*` options there is **no login at
 all**: anyone who reaches the page acts as the ESPN account on the server and can press Apply.
 In that case put a proxy with a login in front. Either way `benchboss web` listens on
-`127.0.0.1` only (it refuses any other `--host` unless you add `--allow-remote`). This is built
-for one person: everyone who can sign in is the same ESPN account.
+`127.0.0.1` only (it refuses any other `--host` unless you add `--allow-remote`). Each web app
+serves one ESPN account: to serve several people, run one app per person (see
+[deploy.md](deploy.md#adding-people)).
 
 ### Install and run
 
-```bash
-uv tool install --force --with textual-serve "benchboss @ https://github.com/ValeQRamos/benchboss/archive/refs/heads/main.zip"
-benchboss --demo web          # try it with the fictional league first
-```
-
-`--demo` sends nothing to ESPN. Leave off `--demo` to serve your real league.
-
-To keep it running and restart it after a reboot, use the systemd unit in
-[deploy/benchboss-web.service](../deploy/benchboss-web.service). Put your public address in
-`--url`, and make the password file first (next section):
+On a server, do not run `benchboss web` by hand. `deploy/deploy.sh` installs releases, and
+`benchboss-users add` starts one web app per person as the service `benchboss-web@NAME` (the
+template is [deploy/benchboss-web@.service](../deploy/benchboss-web@.service)). The steps are
+in [deploy.md](deploy.md#first-deploy). To try it by hand on your own computer:
 
 ```bash
-sudo cp deploy/benchboss-web.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now benchboss-web
+pip install 'benchboss[web]'
+benchboss --demo web          # the fictional league: nothing is sent to ESPN
 ```
+
+Options you can set on a service live in `/etc/benchboss/NAME.env` (root only):
+`BB_PORT`, `BB_URL` and `BB_ARGS` (extra `benchboss web` options).
 
 ### Sign in with a password
 
+`benchboss-users add` makes a random password for the person and stores it in
+`/home/NAME/.bb-web-password`. The user name is `owner`.
+
 ```bash
-(umask 077; openssl rand -base64 24 | tr -d '=+/' | cut -c1-24 > ~/.bb-web-password)
-cat ~/.bb-web-password           # the password; the user name is owner (--login-user)
-benchboss web --url https://bb.example.com --password-file ~/.bb-web-password
+sudo cat /home/NAME/.bb-web-password     # read it
+sudo benchboss-users password NAME       # make a new one
 ```
 
-The file must not be readable by other users and the password needs 12 characters or more.
-What the sign in does:
+The service passes that file to `benchboss web --password-file`. By hand, the file must not be
+readable by other users and the password needs 12 characters or more. What the sign in does:
 
 - A signed session cookie (`HttpOnly`, `SameSite=Lax`, `Secure` when `--url` is `https`) that
   lasts 12 hours (`--session-hours`). Open `/logout` to end it.
@@ -281,20 +285,16 @@ once under GitHub, Settings, Developer settings, OAuth Apps, New OAuth App:
 - Authorization callback URL: `https://bb.example.com/login/github/callback`.
 
 Copy the client id, generate a client secret and keep it out of the command line (anyone on
-the server can read command lines). Put it in an environment file the service reads:
+the server can read command lines). `benchboss-users` asks for the secret with hidden input and
+stores it in the person's settings file (`/etc/benchboss/NAME.env`, root only):
 
 ```bash
-sudo install -d -m 700 /etc/benchboss
-read -rsp 'GitHub client secret: ' s && printf 'BENCHBOSS_GITHUB_CLIENT_SECRET=%s\n' "$s" | sudo tee /etc/benchboss/web.env >/dev/null; unset s
-sudo chmod 600 /etc/benchboss/web.env
+sudo benchboss-users github NAME --client-id YOUR_CLIENT_ID --users yourlogin
 ```
 
-Then add the id and the allowed users (comma separated GitHub logins or numeric ids) to the
-`ExecStart` line, next to or instead of `--password-file`, and restart:
-
-```
---github-client-id YOUR_CLIENT_ID --github-users yourlogin
-```
+`--users` is a comma separated list of GitHub logins or numeric ids. By hand, the secret goes in
+the `BENCHBOSS_GITHUB_CLIENT_SECRET` environment variable (never an argument) and the rest in
+`--github-client-id` and `--github-users`.
 
 The page then shows a Sign in with GitHub button. A GitHub account that is not on the list sees
 "is not allowed here" and gets no session. `--url` is required, since GitHub sends the browser
@@ -311,7 +311,8 @@ sudo apt-get install -y caddy
 ```
 
 Copy [deploy/Caddyfile.example](../deploy/Caddyfile.example) to `/etc/caddy/Caddyfile`, set
-your name, then open ports 80 and 443 and reload:
+your name (or paste the block `benchboss-users add` printed, one per person), then open ports
+80 and 443 and reload:
 
 ```bash
 sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
@@ -347,7 +348,7 @@ league and team. A terminal session never shows this screen and behaves as befor
 | App says the private key is empty | The key was not imported or pasted. Re-add it and check that the preview shows the whole `BEGIN` to `END` block. |
 | Nothing at all in the server log when you connect | The client is reaching a different machine. Check the IP digit by digit, then check the network (try cellular if Wi-Fi blocks port 22). |
 | `Host key verification failed` after a rebuild | The server has a new host key. Remove the old entry with `ssh-keygen -R SERVER_IP`. |
-| `benchboss: command not found` over SSH | Non-interactive shells skip your profile. Run `export PATH="$HOME/.local/bin:$PATH"` first, or use the full path. |
+| `benchboss: command not found` | No version is deployed yet. Run `deploy/deploy.sh update` ([deploy.md](deploy.md)). The command lives at `/usr/local/bin/benchboss`. |
 | `benchboss` exits with code 3 | The cookies are missing or expired. Repeat section 5. |
 
 To watch what the server sees while a device tries to log in:
@@ -373,6 +374,8 @@ The second command should show `passwordauthentication no` and `permitrootlogin 
 - Reach SSH over Tailscale and close port 22 to the internet once that works.
 - No cookies or keys in the provisioning script or in user data.
 - If you use the web app: a sign in (`--password-file` or GitHub) and HTTPS in front of it,
-  `benchboss web` on `127.0.0.1`, port 8000 closed to the internet, and a long random
-  password.
+  `benchboss web` on `127.0.0.1`, the app ports (8000 and up) closed to the internet, and a
+  long random password.
+- For automatic deploys: a deploy key that can only run the updater (`command="...",restrict`
+  in `authorized_keys`), and the server's host key pinned in GitHub ([deploy.md](deploy.md)).
 - Keep a spare way in (the provider's web console) in case you lock yourself out.
