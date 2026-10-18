@@ -24,7 +24,8 @@ def main() -> None:
     sub = next(a for a in ap._actions if isinstance(a, argparse._SubParsersAction))
     lines = ["# Command reference", "",
              "Generated from the CLI by `python tools/gen_commands_doc.py`. Every command also",
-             "accepts the global flags `--json`, `--demo`, `--theme dark|light` and `--yes`.", "",
+             "accepts the global flags `--json`, `--demo`, `--theme dark|light`,",
+             "`--layout auto|compact|full` and `--yes`.", "",
              "Running `benchboss` with no command opens the interactive app (it needs a terminal).",
              "With `--json`, write commands print one JSON result as well; without `--yes` they",
              "send nothing and exit with code 10.", ""]
@@ -38,7 +39,7 @@ def main() -> None:
             lines += ["```text", usage, "```", ""]
             rows = []
             for a in p._actions:
-                if a.dest in ("help", "json", "demo", "theme", "yes") or a.help == argparse.SUPPRESS:
+                if a.dest in ("help", "json", "demo", "theme", "layout", "yes") or a.help == argparse.SUPPRESS:
                     continue
                 flag = ", ".join(a.option_strings) or a.dest
                 text = (a.help or "").replace("%%", "%")

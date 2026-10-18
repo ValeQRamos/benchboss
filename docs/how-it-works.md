@@ -49,7 +49,11 @@ only left where he already is.
   into Tuesday: a day that looked fine in the preview can need moves after an earlier day
   changes, and the other way around. Days that need nothing are skipped.
 - Players whose game has already tipped off are locked by ESPN, so they stay where they are
-  and only the others are rearranged.
+  and only the others are rearranged. A player whose game starts within 3 minutes keeps his
+  slot too, even while ESPN still shows him unlocked. On the bench his reason reads
+  `locked, tipped 8:00 PM`.
+- Before anything is sent, a set of safety checks reads the plan the way ESPN will get it. A
+  day they refuse is not sent, and `optimize` exits with code 5 and the reason.
 - Players on injured reserve are never moved.
 
 ## Projected final
@@ -89,8 +93,10 @@ those days (for example with `optimize week`).
 - A player you dropped or traded away during the week stays as a last row marked `gone`,
   with only the days he was yours, so the games he played for you still add up in **In**.
 
-Rows come in lineup order (starters by slot, then the bench, then IR, then anyone gone). `v` in the app, or
-`--view games`, sorts by most games instead.
+Rows come most games first, with IR and anyone gone in their own blocks at the bottom.
+Starters and bench players share one list, since the cells already show who sat each day.
+`v` in the app, or `--view lineup`, puts them in today's lineup order instead (starters by
+slot, then the bench).
 
 ## Best trash (free agent value)
 
@@ -172,8 +178,11 @@ sorting free agents by L7 brings in the best free agents of the last 7 days.
 
 ## Playoff race
 
-`benchboss playoffs` and the `y` screen play the rest of the regular season 5,000 times
-(the scenario builder in the app uses 2,000 per change, so it keeps up with your keys).
+`benchboss playoffs` and the `y` screen play the rest of the regular season 5,000 times.
+Every pick in the scenario builder replays those same 5,000 seasons with the result fixed,
+so the +/- column shows only what your picks changed (about half a second per pick on the
+demo league). More than 5 weeks before the end of the regular season the screen says the
+odds still move a lot; picks matter most in the final 5 weeks.
 
 **Expected points.** Each team gets a points-per-day rate. Its real points per day so far
 are blended with what its roster projects; the real results weigh `days / (days + 21)`, so

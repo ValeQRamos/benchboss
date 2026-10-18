@@ -23,7 +23,7 @@ benchboss dash --watch          # refreshes every 60 s
 benchboss dash --watch 30       # every 30 s (minimum 15)
 ```
 
-The layout adapts to the width: one column below 92 columns, two or three columns on wider
+The layout adapts to the width: one column below 78 columns, two or three columns on wider
 terminals.
 
 ## 3. Tasks
