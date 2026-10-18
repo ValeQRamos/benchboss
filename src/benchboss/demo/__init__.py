@@ -253,6 +253,20 @@ class DemoSession(Session):
         return ([RosterSpot(s.player, assign.get(i, BENCH)) for i, s in enumerate(pool)]
                 + [s for s in roster if s.slot_id == IR])
 
+    def autoswap_lineup(self, period: int):
+        """The lineup auto-swap starts from in the demo: the one Optimize would set on that
+        day. The demo cannot save a lineup, and its frozen one starts the day-to-day players,
+        which a manager who optimizes in the morning would have benched (so arming one of
+        them shows what auto-swap is for: Dyson Daniels in for Scotty Pippen Jr.)."""
+        from dataclasses import replace
+
+        from benchboss.core.lineup import plan_day
+
+        roster = DemoSession.roster_on(self, period)  # the saved lineup, never a wrapper
+        moved = {m.player.id: m.to_slot
+                 for m in plan_day(roster, self.league().slot_counts, period, self.calendar).moves}
+        return [replace(s, slot_id=moved.get(s.player.id, s.slot_id)) for s in roster]
+
     def news(self, player_ids, days=5):
         """RotoWire-style items for 4 roster players and 2 watch-list players, newest first,
         only for the ids asked for and only from the last ``days`` days of the demo clock."""
