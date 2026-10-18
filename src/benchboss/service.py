@@ -457,8 +457,8 @@ class Session:
 
     def apply_plan(self, period: int, current: int | None = None, *,
                    opts: PlanOptions | None = None, send: bool = True,
-                   writer: str = "cli", before_send=None, note: dict | None = None
-                   ) -> OptimizeResult:
+                   writer: str = "cli", before_send=None, note: dict | None = None,
+                   log: bool = True) -> OptimizeResult:
         """Re-read one day and send what it still needs. ESPN errors end up in the result.
 
         The one path for every lineup write: Optimize in the app (``writer`` "tui") and the
@@ -479,9 +479,13 @@ class Session:
         The lineup log (lineup_log.py) gets one record for every send attempt and every
         guard refusal, and for the monitor ("autoswap", mode "trial" or "live") one for every
         plan it asked for; ``note`` adds fields to that record (trigger, intent, text).
+        ``log=False`` writes no record: the caller writes its own. The monitor does that, one
+        record per decision once it knows the outcome (after its check of the lineup), so a
+        trial or a send is never in the log twice, and a dry run is never in it at all.
         """
         from benchboss.core import guard
 
+        logged = self._logged if log else (lambda r, *_a, **_k: r)
         lg = self.league()
         auto = bool(opts and opts.auto)
         if auto:
@@ -502,7 +506,7 @@ class Session:
             roster = self.roster_on(period)
         except GuardRefused as e:
             v = guard.Violation("G9", str(e))
-            return self._logged(OptimizeResult(DayPlan(period), error=f"not sent: {e} (G9)",
+            return logged(OptimizeResult(DayPlan(period), error=f"not sent: {e} (G9)",
                                                outcome=Outcome.NOT_SENT, guards=[v]),
                                 writer, send, note)
         except AuthError as e:
@@ -523,32 +527,32 @@ class Session:
         fatal = [v for v in guards if v.fatal]
         kind = "ROSTER" if auto or period == current else "FUTURE_ROSTER"
         if not plan.changed and not (auto and fatal):
-            return self._logged(OptimizeResult(plan, status="ALREADY_OPTIMAL", guards=guards,
+            return logged(OptimizeResult(plan, status="ALREADY_OPTIMAL", guards=guards,
                                                outcome=Outcome.ALREADY_OPTIMAL),
                                 writer, send, note, quiet=True)
         if fatal:
             reasons = "; ".join(f"{v.message} ({v.code})" for v in fatal[:3])
             more = f" and {len(fatal) - 3} more" if len(fatal) > 3 else ""
-            return self._logged(OptimizeResult(plan, error=f"not sent: {reasons}{more}",
+            return logged(OptimizeResult(plan, error=f"not sent: {reasons}{more}",
                                                outcome=Outcome.NOT_SENT, kind=kind,
                                                guards=guards), writer, send, note)
         need = opts.min_gain if opts is not None else 0.0
         if auto:  # an automatic change never goes out for less, whatever the caller passed
             need = max(need, MIN_GAIN_AUTO)
         if need > 0 and plan_gain(plan, cal) < need - 1e-9:
-            return self._logged(OptimizeResult(plan, outcome=Outcome.BELOW_MIN_GAIN, kind=kind,
+            return logged(OptimizeResult(plan, outcome=Outcome.BELOW_MIN_GAIN, kind=kind,
                                                guards=guards), writer, send, note, quiet=True)
         if not send:
-            return self._logged(OptimizeResult(plan, outcome=Outcome.WOULD_SEND, kind=kind,
+            return logged(OptimizeResult(plan, outcome=Outcome.WOULD_SEND, kind=kind,
                                                guards=guards), writer, send, note, quiet=True)
         try:
             stop = before_send(plan) if before_send is not None else None
         except BenchbossError as e:  # the monitor could not save its intent: send nothing
             stop = f"not sent: {e}"
         if stop:
-            return self._logged(OptimizeResult(plan, error=str(stop), outcome=Outcome.NOT_SENT,
+            return logged(OptimizeResult(plan, error=str(stop), outcome=Outcome.NOT_SENT,
                                                kind=kind, guards=guards), writer, send, note)
-        return self._logged(self._post(plan, kind, period, guards), writer, send, note)
+        return logged(self._post(plan, kind, period, guards), writer, send, note)
 
     # --- optimizer: the write path (apply_plan's helpers) ----------------------------------------
 

@@ -753,8 +753,9 @@ class Monitor:
         live = self.live and not forced
         if live and not revert and self._spacing_wait(tip):
             return  # the next tick tries again
-        writer = "cli" if self.dry_run else "monitor"  # apply_plan logs nothing for a dry run
-        r0 = s.apply_plan(period, opts=opts, send=False, writer=writer)
+        # the monitor writes its own record once it knows the outcome (_settle), so
+        # apply_plan logs nothing here, and a dry run leaves no line in the log
+        r0 = s.apply_plan(period, opts=opts, send=False, writer="monitor", log=False)
         trigger = core.player_in(r0.plan, pid)
         if r0.outcome in ("ERROR", "AUTH"):  # a read that failed decides nothing
             if r0.outcome == "AUTH":
@@ -882,21 +883,38 @@ class Monitor:
         if outcome == "NOT_SENT" and (guards or problems):
             self._worse(5)
 
-    def _send(self, p, key: str, edge: int, period: int, opts, r0, swap: core.Swap,
-              revert: bool, tip: dt.datetime) -> None:
-        """Live: fence, re-check, save the intent, send, verify."""
-        s = self.session
+    def _hold_back(self, p, revert: bool) -> str:
+        """Why this monitor must not send for ``p`` right now: "lease" (another monitor runs
+        the league), "marks" (disarmed, auto-swap paused, or the marks file is damaged), or
+        "" when it may. A disarm or a pause made a moment ago always wins."""
         if self.lease is None or not self.lease.held():
+            return "lease"
+        marks = MarkStore(self.session).load()
+        if marks.paused or marks.error or (not revert and p.id not in marks.auto_ids()):
+            return "marks"
+        return ""
+
+    def _held_back(self, p, why: str) -> None:
+        if why == "lease":
             self.say("another monitor took this league over: this one stops writing")
             self._record("error", text="the lease is gone: another monitor runs this league, "
                                        "so this one stopped writing")
             self.live = False
             self.stop.set()
-            return
-        marks = MarkStore(s).load()  # a disarm or a pause made a moment ago always wins
-        if marks.paused or marks.error or (not revert and p.id not in marks.auto_ids()):
+        else:
             self.state["pending"].pop(str(p.id), None)
             self.say(f"{p.name} was disarmed or auto-swap was paused: nothing sent")
+
+    def _send(self, p, key: str, edge: int, period: int, opts, r0, swap: core.Swap,
+              revert: bool, tip: dt.datetime) -> None:
+        """Live: fence, re-check, save the intent, send, verify. The lease and the marks are
+        checked here and again inside apply_plan right before the POST (``before_send``),
+        after its own fresh read of the roster, and the intent is saved there with the
+        moves that actually go out."""
+        s = self.session
+        why = self._hold_back(p, revert)
+        if why:
+            self._held_back(p, why)
             return
         try:
             strict = s.current_period(strict=True)
@@ -908,31 +926,55 @@ class Monitor:
                          ["ESPN's day is not today"], revert, None)
             return
         intent = uuid.uuid4().hex[:12]
-        self.state["intents"][intent] = {"at": self._now_iso(), "period": period,
-                                         "items": r0.plan.items(), "trigger": p.id,
-                                         "outcome": None, "resent": 0}
         c = self.state["counters"]
-        c["writes"] = c.get("writes", 0) + 1
         moved = self.state["moved"].setdefault(str(p.id), {"count": 0})
-        moved["count"] = int(moved.get("count", 0)) + 1
-        self.state["last_write"] = self._now_iso()
-        if not self._save():  # write-ahead: a restart now cannot send it twice or lose counts
+        stopped: list[str] = []
+
+        def before_send(plan) -> str:
+            """Runs inside apply_plan right before the POST: fence again, then save the
+            intent and the counts (write-ahead: a restart cannot send it twice or lose
+            them). A string stops the send."""
+            why = self._hold_back(p, revert)
+            if why:
+                stopped.append(why)
+                return "not sent: " + ("another monitor runs this league" if why == "lease"
+                                       else f"{p.name} was disarmed or auto-swap was paused")
+            self.state["intents"][intent] = {"at": self._now_iso(), "period": period,
+                                             "items": plan.items(), "trigger": p.id,
+                                             "outcome": None, "resent": 0}
+            c["writes"] = c.get("writes", 0) + 1
+            moved["count"] = int(moved.get("count", 0)) + 1
+            self.state["last_write"] = self._now_iso()
+            if not self._save():
+                stopped.append("save")
+                return "not sent: benchboss could not save what it was about to send"
+            return ""
+
+        r1 = s.apply_plan(period, opts=opts, send=True, writer="monitor",
+                          before_send=before_send, log=False)
+        if stopped and stopped[0] != "save":
+            self._held_back(p, stopped[0])
+            return
+        if stopped:
             self._settle(p, key, edge, r0, "NOT_SENT", swap, [],
                          ["benchboss could not save what it was about to send"], revert, intent)
             return
-        r1 = s.apply_plan(period, opts=opts, send=True, writer="monitor")
+        sent = intent in self.state["intents"]  # before_send ran: the POST went out
         outcome = r1.outcome
-        if outcome == "ERROR" and r1.kind:
+        if outcome == "ERROR" and r1.kind and sent:
             outcome = "UNKNOWN"  # the POST went out and the answer was lost
-        self.state["intents"][intent]["outcome"] = outcome
-        self._save()
+        if sent:
+            self.state["intents"][intent]["outcome"] = outcome
+            self._save()
+        else:
+            intent = None
         if outcome in ("ERROR", "AUTH"):  # the lineup could not be read again, or ESPN
             # turned the cookies down (a 401 applies nothing): nothing was sent
             if outcome == "AUTH":
                 self._worse(3)
             self._record("error", trigger={"player_id": p.id, "player": p.name}, intent=intent,
                          text=f"nothing sent for {p.name}: {r1.error}")
-            return  # stays pending; the counts already went up, which only makes it safer
+            return  # stays pending
         if outcome in ("EXECUTED", "UNKNOWN"):
             outcome = self._verify(p, r1, intent, outcome, opts, period, tip, revert)
         r = r1 if r1.plan.moves or not r0.plan.moves else replace(r1, plan=r0.plan)
@@ -955,7 +997,8 @@ class Monitor:
         elif outcome == "AUTH":
             self._worse(3)
         guards = [getattr(v, "code", str(v)) for v in r1.guards if getattr(v, "fatal", True)]
-        self.state["intents"][intent]["outcome"] = outcome
+        if intent is not None:
+            self.state["intents"][intent]["outcome"] = outcome
         self._settle(p, key, edge, r, outcome, swap, guards, [], revert, intent,
                      status=r1.status, error=r1.error)
 
@@ -1004,7 +1047,10 @@ class Monitor:
             intent_rec["resent"] = 1
             if not self._save():  # the resend is recorded before it goes, like the send
                 return "UNKNOWN"
-            again = s.apply_plan(period, opts=opts, send=True, writer="monitor")
+            again = s.apply_plan(  # the fence again right before the second POST
+                period, opts=opts, send=True, writer="monitor", log=False,
+                before_send=lambda plan: ("not sent: the lease or the marks changed"
+                                          if self._hold_back(p, revert) else ""))
             if again.outcome == "ALREADY_OPTIMAL":
                 continue  # the first send landed after all: the next read says so
             if again.outcome in ("FAILED", "REFUSED"):
