@@ -27,7 +27,8 @@ die() { printf 'update: %s\n' "$*" >&2; exit 1; }
 command -v uv >/dev/null || die "uv is not installed: run setup-server.sh first"
 
 current() { local t; t=$(readlink "$ROOT/current" 2>/dev/null) || return 0; basename "$t"; }
-releases() { ls -1t "$ROOT/releases" 2>/dev/null || true; }   # newest first
+# ids start with a timestamp, so sorting them sorts the releases by age
+releases() { ls -1 "$ROOT/releases" 2>/dev/null | sort -r || true; }   # newest first
 
 switch_to() {
   ln -sfn "releases/$1" "$ROOT/current.new"
@@ -68,8 +69,8 @@ case "${1:-}" in
     exit 0 ;;
   --rollback)
     cur=$(current)
-    prev=$(releases | grep -vx "$cur" | head -1 || true)
-    [ -n "$prev" ] || die "no earlier release to go back to"
+    prev=$(releases | awk -v c="$cur" '$0 < c' | head -1)
+    [ -n "$prev" ] || die "no release older than $cur to go back to"
     say "rolling back $cur -> $prev"
     switch_to "$prev"; restart_all
     healthy || die "the previous release does not answer either: see journalctl -u 'benchboss-web@*'"
@@ -116,12 +117,15 @@ fi
 restart_all
 
 if ! healthy; then
+  mkdir -p "$ROOT/failed"
   if [ -n "$previous" ]; then
     say "the check failed: going back to $previous"
     switch_to "$previous"; restart_all
     healthy && say "back on $previous" || say "the previous release does not answer either"
   fi
-  die "release $id failed its check and was left in $rel for inspection"
+  mv "$rel" "$ROOT/failed/$id"   # out of the list, so a rollback never lands on it
+  ls -1t "$ROOT/failed" | tail -n +3 | while read -r old; do rm -rf "${ROOT:?}/failed/$old"; done
+  die "release $id failed its check: kept in $ROOT/failed/$id for inspection"
 fi
 
 releases | tail -n +$((KEEP + 1)) | while read -r old; do
