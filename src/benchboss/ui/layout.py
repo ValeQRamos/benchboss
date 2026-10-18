@@ -46,8 +46,9 @@ class KeyItem:
 
 
 def is_compact(width: int, height: int, layout: str = "auto", was: bool = False) -> bool:
-    """Whether a ``width`` x ``height`` window uses the compact layout. ``was`` is the
-    current state, for the height hysteresis."""
+    """Whether a ``width`` x ``height`` window uses the compact layout. ``was`` says the
+    window is compact because it got short (the height hysteresis), not because it was
+    narrow: a phone turned from portrait to landscape starts over."""
     if layout == "compact":
         return True
     if layout == "full":

@@ -116,6 +116,27 @@ def test_compact_follows_the_window_and_the_setting(monkeypatch):
         assert not app.compact and app._width() == 100 - 6  # menu hidden below NARROW
 
     drive(phone, size=(46, 24))
+
+    async def turned(pilot, app):
+        # compact for the width only: the height hysteresis does not carry over to a wide
+        # window of 31 to 33 rows, which opens full when started at that size
+        assert app.compact
+        await pilot.resize_terminal(100, 31)
+        await settle(pilot)
+        assert not app.compact
+        await pilot.resize_terminal(100, 26)   # a keyboard opening
+        await settle(pilot)
+        assert app.compact
+        await pilot.resize_terminal(100, 31)   # and closing: held by the height
+        await settle(pilot)
+        assert app.compact
+        await pilot.resize_terminal(46, 31)
+        await pilot.resize_terminal(100, 34)
+        await settle(pilot)
+        assert not app.compact
+
+    drive(turned, size=(46, 40))
+    drive(lambda pilot, app: _check(not app.compact), size=(100, 31))
     drive(lambda pilot, app: _check(app.compact), size=(120, 40), cfg=Config(layout="compact"))
     drive(lambda pilot, app: _check(not app.compact and app.query_one(Footer).display),
           size=(46, 40), cfg=Config(layout="full"))

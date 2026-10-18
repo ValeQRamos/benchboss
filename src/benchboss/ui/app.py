@@ -153,6 +153,10 @@ class Benchboss(App):
         # short when the window has fewer than COMPACT_HEIGHT rows. Widgets read both.
         self.compact = False
         self.short = False
+        # compact because the window got short (under COMPACT_HEIGHT rows), kept until it is
+        # taller than COMPACT_HEIGHT_EXIT: the hysteresis is for the height only, so a phone
+        # turned from a narrow portrait to a wide landscape does not inherit it
+        self._held_by_height = False
         self.status_short = ""  # the context the key bar shows on the right in compact
         self._apply_focused_at = 0.0  # when a tap last moved the focus to Apply (APPLY_PAUSE)
 
@@ -395,7 +399,10 @@ class Benchboss(App):
         if not width or not height:
             return  # the first size can be 0: the first resize fits it
         was = self.compact
-        self.compact = layout.is_compact(width, height, self.cfg.layout, was)
+        self.compact = layout.is_compact(width, height, self.cfg.layout, self._held_by_height)
+        self._held_by_height = self.cfg.layout == "auto" and (
+            height < layout.COMPACT_HEIGHT
+            or (self._held_by_height and height <= layout.COMPACT_HEIGHT_EXIT))
         self.short = height < layout.COMPACT_HEIGHT
         self.screen.set_class(self.compact, "-compact")
         self.screen.set_class(self.short, "-short")
