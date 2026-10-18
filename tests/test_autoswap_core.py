@@ -168,6 +168,30 @@ def test_out_of_scope_catches_a_plan_that_moves_more_than_one_swap():
     assert any("moves in one run" in p for p in core.out_of_scope(before, many, {1}))
 
 
+def test_frozen_moves_catches_a_started_locked_or_unscheduled_player(session):
+    """The monitor's twin of guard G1: an automatic plan never moves a player whose game
+    started, starts within the margin, is locked on ESPN, or has no time set yet."""
+    roster, cal, period = demo(session)
+    daniels = spot_of(roster, "Dyson Daniels").player
+    plan = core.preview_flip(roster, session.league().slot_counts, period, cal, daniels.id, NOW)
+    assert core.frozen_moves(plan, cal, NOW) == []
+    tip = cal.game(daniels.pro_team_id, period).start  # 7:00 PM; Pippen plays at 8:00
+    late = tip - LOCK_MARGIN + dt.timedelta(seconds=1)
+    assert core.frozen_moves(plan, cal, late) == ["Dyson Daniels's game starts at 7:00 PM"]
+    later = tip + dt.timedelta(hours=1)
+    assert len(core.frozen_moves(plan, cal, later)) == 2
+    locked = DayPlan(period, moves=[Move(replace(daniels, locked=True), BENCH, SLOT_ID["G"])])
+    assert core.frozen_moves(locked, cal, NOW) == ["Dyson Daniels is locked on ESPN"]
+    game = cal.game(daniels.pro_team_id, period)
+    tbd, real = replace(game, tbd=True), cal.game
+    cal.game = lambda team, day: tbd if real(team, day) is game else real(team, day)
+    try:
+        assert core.frozen_moves(plan, cal, NOW) == [
+            "ESPN has not set the time of Dyson Daniels's game"]
+    finally:
+        del cal.game
+
+
 # --- words -------------------------------------------------------------------------------------
 
 def test_the_notes_read_naturally_and_keep_accents():

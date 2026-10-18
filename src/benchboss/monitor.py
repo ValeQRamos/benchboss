@@ -51,9 +51,13 @@ How one tick goes:
 6. Trial: apply_plan(send=False) and the note "Trial run: benchboss would have...". Live:
    the same plan first (send=False), then the lease, the marks (a disarm or a pause always
    wins), the caps and the day are checked again, the intent is saved, and apply_plan
-   sends. A send is verified with a fresh roster read at least 20 s later; an UNKNOWN
-   outcome is resent at most once, only when that read shows nothing applied and the tip
-   is still outside the margin. FAILED and REFUSED are never retried.
+   sends. A plan that moves anyone but the healthy player and one starter, or touches a
+   player who is locked, tipped or about to, or whose game time is not set, is refused
+   (G5, G1) in trial and live alike. A send is verified with a fresh roster read at least
+   20 s later; an UNKNOWN outcome is resent at most once, only when that read shows nothing
+   applied, the tip is still outside the margin, and the lease and the marks still allow it.
+   FAILED and REFUSED are never retried; a read that fails (or a 401) leaves the flip
+   pending.
 7. A notify mark or a watch-list player who turns healthy makes an alert and a note.
 """
 
@@ -336,6 +340,8 @@ class Monitor:
                  say: Callable[[str], None] | None = None,
                  clock: Callable[[], float] = time.time,
                  sleep: Callable[[float], object] | None = None, host: str | None = None):
+        if live and simulate and not dry_run:  # a pretend status must never reach ESPN
+            raise BenchbossError("--simulate works in trial mode or with --dry-run, never live")
         self.factory = session_factory
         self.live = live and not dry_run
         self.dry_run = dry_run
@@ -641,7 +647,7 @@ class Monitor:
                 self._healthy(f, edge, today=period)
         for key in list(self.state["pending"]):
             p = by_id.get(int(key))
-            if p is None:
+            if p is None or int(key) not in auto:  # disarmed, lowered to alert only, or gone
                 self.state["pending"].pop(key, None)
                 continue
             self._try_start(p, self.state["pending"][key], period, marks.paused)
@@ -750,7 +756,9 @@ class Monitor:
         writer = "cli" if self.dry_run else "monitor"  # apply_plan logs nothing for a dry run
         r0 = s.apply_plan(period, opts=opts, send=False, writer=writer)
         trigger = core.player_in(r0.plan, pid)
-        if r0.outcome == "ERROR":
+        if r0.outcome in ("ERROR", "AUTH"):  # a read that failed decides nothing
+            if r0.outcome == "AUTH":
+                self._worse(3)
             self._record("error", trigger={"player_id": pid, "player": p.name},
                          text=f"could not read the lineup for {p.name}: {r0.error}")
             return  # stays pending
@@ -769,9 +777,13 @@ class Monitor:
         gain = swap.gain
         outcome = r0.outcome
         guards = [getattr(v, "code", str(v)) for v in r0.guards if getattr(v, "fatal", True)]
-        problems = core.out_of_scope(before, r0.plan, movable) if r0.plan.moves else []
+        frozen = core.frozen_moves(r0.plan, cal, self._now()) if r0.plan.moves else []
+        scope = core.out_of_scope(before, r0.plan, movable) if r0.plan.moves else []
+        problems = frozen + scope
         if outcome == "WOULD_SEND" and problems:
-            outcome, guards = "NOT_SENT", guards + ["G5"]
+            outcome = "NOT_SENT"
+            guards = guards + [g for g, hit in (("G1", frozen), ("G5", scope))
+                               if hit and g not in guards]
         if outcome == "WOULD_SEND" and not revert and gain < MIN_GAIN_AUTO:
             outcome = "BELOW_MIN_GAIN"
         if outcome != "WOULD_SEND":
@@ -914,14 +926,19 @@ class Monitor:
             outcome = "UNKNOWN"  # the POST went out and the answer was lost
         self.state["intents"][intent]["outcome"] = outcome
         self._save()
-        if outcome == "ERROR":  # the lineup could not be read again: nothing was sent
+        if outcome in ("ERROR", "AUTH"):  # the lineup could not be read again, or ESPN
+            # turned the cookies down (a 401 applies nothing): nothing was sent
+            if outcome == "AUTH":
+                self._worse(3)
             self._record("error", trigger={"player_id": p.id, "player": p.name}, intent=intent,
                          text=f"nothing sent for {p.name}: {r1.error}")
             return  # stays pending; the counts already went up, which only makes it safer
         if outcome in ("EXECUTED", "UNKNOWN"):
-            outcome = self._verify(p, r1, intent, outcome, opts, period, tip)
+            outcome = self._verify(p, r1, intent, outcome, opts, period, tip, revert)
         r = r1 if r1.plan.moves or not r0.plan.moves else replace(r1, plan=r0.plan)
         swap = core.swap_of(r.plan, p.id, s.calendar) if r.plan.moves else swap
+        if outcome == "EXECUTED":  # what the next look at the lineup should find
+            self.state["lineup"].update({str(m.player.id): m.to_slot for m in r.plan.moves})
         if outcome == "EXECUTED" and not revert:
             moved.update(to=swap.slot, benched=swap.benched.id if swap.benched else None)
         elif outcome == "EXECUTED" and revert:
@@ -942,8 +959,16 @@ class Monitor:
         self._settle(p, key, edge, r, outcome, swap, guards, [], revert, intent,
                      status=r1.status, error=r1.error)
 
+    def _may_resend(self, p, revert: bool) -> bool:
+        """The checks before a second POST, as before the first: the lease is still ours,
+        and no disarm or pause came in meanwhile."""
+        if self.lease is None or not self.lease.held():
+            return False
+        marks = MarkStore(self.session).load()
+        return not (marks.paused or marks.error or (not revert and p.id not in marks.auto_ids()))
+
     def _verify(self, p, r, intent: str, outcome: str, opts, period: int,
-                tip: dt.datetime) -> str:
+                tip: dt.datetime, revert: bool = False) -> str:
         """Read the lineup again at least VERIFY_AFTER seconds after the send. An UNKNOWN
         send that shows nothing applied is sent once more, while the tip allows it."""
         s = self.session
@@ -974,14 +999,23 @@ class Monitor:
             # UNKNOWN: resend once, only when nothing was applied and there is time
             intent_rec = self.state["intents"][intent]
             if (attempt or result != "not applied" or intent_rec.get("resent")
-                    or tip - LOCK_MARGIN <= self._now() or not self.lease.held()):
+                    or tip - LOCK_MARGIN <= self._now() or not self._may_resend(p, revert)):
                 return "UNKNOWN"
             intent_rec["resent"] = 1
-            self._save()
-            r = s.apply_plan(period, opts=opts, send=True, writer="monitor")
-            outcome = "UNKNOWN" if r.outcome == "ERROR" and r.kind else r.outcome
-            if outcome not in ("EXECUTED", "UNKNOWN"):
-                return outcome
+            if not self._save():  # the resend is recorded before it goes, like the send
+                return "UNKNOWN"
+            again = s.apply_plan(period, opts=opts, send=True, writer="monitor")
+            if again.outcome == "ALREADY_OPTIMAL":
+                continue  # the first send landed after all: the next read says so
+            if again.outcome in ("FAILED", "REFUSED"):
+                return again.outcome
+            if again.outcome == "EXECUTED" or again.outcome == "UNKNOWN" or (
+                    again.outcome == "ERROR" and again.kind):
+                outcome = "EXECUTED" if again.outcome == "EXECUTED" else "UNKNOWN"
+            else:  # nothing went out this time (a read failed, a 401, a guard): the first
+                return "UNKNOWN"  # send stays unknown
+            if again.plan.moves:
+                r = again
         return outcome
 
     # --- the loop ------------------------------------------------------------------------------

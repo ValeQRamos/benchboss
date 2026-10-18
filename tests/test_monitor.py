@@ -759,3 +759,134 @@ def test_nothing_is_sent_when_the_intent_cannot_be_saved(live, monkeypatch):
     swap = next(r for r in records if r["event"] == "autoswap")
     assert swap["outcome"] == "NOT_SENT" and "could not save" in swap["text"]
     assert any("cannot save its state" in n.body for n in notes.notes)
+
+
+# --- self-check: the gaps found after the build ----------------------------------------------------
+
+def test_a_pending_flip_ends_when_the_mark_is_lowered_to_an_alert(live):
+    """A flip that waited for the roster read to agree is dropped once the player is no longer
+    armed for auto-swap, even when the monitor still watches him."""
+    armed(live)
+    for x in live.client.pool():  # the poll says healthy, the roster read does not yet
+        if x["player"]["fullName"] == "Dyson Daniels":
+            x["player"]["injuryStatus"] = "ACTIVE"
+    monitor(live).run(once=True)
+    pid = str(player(live, "Dyson Daniels").id)
+    assert pid in mon.read_state(live)["pending"]
+    armed(live, mode="notify")
+    set_status(live, "Dyson Daniels", "ACTIVE")  # now the roster agrees
+    later(live)
+    notes, records = Notes(), []
+    monitor(live, notes=notes, records=records).run(once=True)
+    assert pid not in mon.read_state(live)["pending"]
+    assert not [r for r in records if r["event"] == "autoswap"] and notes.notes == []
+
+
+def test_a_pause_while_the_change_is_checked_stops_the_resend(live):
+    armed(live)
+    espn = FakeEspn(live, "lost-before", "EXECUTED")
+    live.client.transaction = espn
+    set_status(live, "Dyson Daniels", "ACTIVE")
+    records = []
+    m = monitor(live, live=True, records=records,
+                sleep=lambda s: MarkStore(live).set_paused(True))
+    assert m.run(once=True) == 4
+    assert len(espn.bodies) == 1
+    assert next(r for r in records if r["event"] == "autoswap")["outcome"] == "UNKNOWN"
+
+
+def test_a_stale_check_after_a_lost_answer_never_sends_twice(live, monkeypatch):
+    """ESPN applied the change but the answer was lost, and the first check still reads the
+    old lineup: the resend finds nothing to do, the next check sees the change."""
+    armed(live)
+    stale = []
+    espn = FakeEspn(live, "lost-after",
+                    check=lambda body: stale.append([replace(sp) for sp in live.league().me.roster]))
+    live.client.transaction = espn
+    set_status(live, "Dyson Daniels", "ACTIVE")
+    real, served = live.roster_on, []
+
+    def roster_on(period):
+        if espn.bodies and not served:
+            served.append(1)
+            return stale[0]
+        return real(period)
+
+    monkeypatch.setattr(live, "roster_on", roster_on)
+    records = []
+    assert monitor(live, live=True, records=records).run(once=True) == 0
+    assert len(espn.bodies) == 1
+    assert [r["result"] for r in records if r["event"] == "verify"] == ["not applied", "ok"]
+    assert next(r for r in records if r["event"] == "autoswap")["outcome"] == "EXECUTED"
+    assert mon.read_state(live)["moved"][str(player(live, "Dyson Daniels").id)]["to"] == "G"
+
+
+def test_cookies_turned_down_on_the_lineup_read_keep_the_flip_waiting(live, monkeypatch):
+    from benchboss.core.lineup import DayPlan
+
+    armed(live)
+    set_status(live, "Dyson Daniels", "ACTIVE")
+    monkeypatch.setattr(live, "apply_plan", lambda period, *a, **k: OptimizeResult(
+        DayPlan(period), error="could not read the lineup: ESPN 401", outcome="AUTH"))
+    records = []
+    assert monitor(live, live=True, records=records).run(once=True) == 3
+    state = mon.read_state(live)
+    assert str(player(live, "Dyson Daniels").id) in state["pending"] and not state["acted"]
+    assert not [r for r in records if r["event"] == "autoswap"]
+
+
+def test_a_pretend_status_never_goes_live(live):
+    with pytest.raises(BenchbossError, match="never live"):
+        monitor(live, live=True, simulate={"Dyson Daniels": "ACTIVE"})
+    assert monitor(live, live=True, dry_run=True, simulate={"Dyson Daniels": "ACTIVE"}).mode == "trial"
+
+
+def test_a_plan_that_moves_a_started_player_is_refused(live, monkeypatch):
+    """The monitor's own twin of guard G1: nothing is sent when the plan touches a player
+    whose game started (here ESPN already locked the starter who would sit)."""
+    from benchboss.core.lineup import Move
+
+    armed(live)
+    espn = FakeEspn(live)
+    live.client.transaction = espn
+    set_status(live, "Dyson Daniels", "ACTIVE")
+    real = live.apply_plan
+
+    def started(period, *a, **k):
+        r = real(period, *a, **k)
+        if k.get("send") is False and r.plan.moves:
+            m = r.plan.moves[-1]  # Scotty Pippen Jr. G -> BE
+            r.plan.moves[-1] = Move(replace(m.player, locked=True), m.from_slot, m.to_slot)
+        return r
+
+    monkeypatch.setattr(live, "apply_plan", started)
+    records = []
+    assert monitor(live, live=True, records=records).run(once=True) == 5
+    assert espn.bodies == []
+    swap = next(r for r in records if r["event"] == "autoswap")
+    assert swap["outcome"] == "NOT_SENT" and swap["guards"] == ["G1"]
+    assert "Scotty Pippen Jr. is locked on ESPN" in swap["text"]
+
+
+def test_a_resend_that_could_not_read_the_lineup_leaves_the_change_unknown(live, monkeypatch):
+    from benchboss.core.lineup import DayPlan
+
+    armed(live)
+    espn = FakeEspn(live, "lost-before")
+    live.client.transaction = espn
+    set_status(live, "Dyson Daniels", "ACTIVE")
+    real, sends = live.apply_plan, []
+
+    def plan(period, *a, **k):
+        if k.get("send") is not False:
+            sends.append(1)
+            if len(sends) == 2:  # the resend: ESPN does not answer the read before it
+                return OptimizeResult(DayPlan(period), error="could not read the lineup",
+                                      outcome="ERROR")
+        return real(period, *a, **k)
+
+    monkeypatch.setattr(live, "apply_plan", plan)
+    records = []
+    assert monitor(live, live=True, records=records).run(once=True) == 4
+    assert len(espn.bodies) == 1 and len(sends) == 2
+    assert next(r for r in records if r["event"] == "autoswap")["outcome"] == "UNKNOWN"

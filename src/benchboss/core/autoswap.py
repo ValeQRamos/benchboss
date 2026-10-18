@@ -32,6 +32,11 @@ The monitor (monitor.py), the Auto-swap screen and ``benchboss autoswap`` all us
         the monitor's own check that an automatic plan only moves the player who turned
         healthy and the one starter he displaces (core/guard.py G5 says the same; this one
         runs even when the guards are not there).
+
+    frozen_moves(plan, cal, now) -> list[str]
+        the monitor's own check that an automatic plan never moves a player whose lineup is
+        locked, whose game starts within LOCK_MARGIN (or started), or whose game time ESPN
+        has not set (core/guard.py G1 says the same).
 """
 
 from __future__ import annotations
@@ -265,6 +270,25 @@ def out_of_scope(before: Mapping[int, int], plan: DayPlan, movable: Iterable[int
     return out
 
 
+def frozen_moves(plan: DayPlan, cal: SeasonCalendar, now: dt.datetime | None) -> list[str]:
+    """Why an automatic plan touches a player it must leave alone (an empty list when it
+    does not): ESPN locked him, his game starts within LOCK_MARGIN of ``now`` or already
+    started, or ESPN has not set his game time yet. A player with no game that day may move
+    (benching him is what makes room)."""
+    out = []
+    tz = now.tzinfo if now is not None else None
+    for m in plan.moves:
+        p = m.player
+        game = cal.game(p.pro_team_id, plan.period) if plan.period >= 1 else None
+        if p.locked:
+            out.append(f"{p.name} is locked on ESPN")
+        elif game is not None and (game.tbd or not game.valid_for_locking):
+            out.append(f"ESPN has not set the time of {p.name}'s game")
+        elif game is not None and now is not None and game.start <= now + LOCK_MARGIN:
+            out.append(f"{p.name}'s game starts at {clock(game.start, tz)}")
+    return out
+
+
 # --- words -------------------------------------------------------------------------------------
 
 def tag(status: str | None) -> str:
@@ -362,6 +386,6 @@ def healthy_text(flip: Flip, tz: dt.tzinfo | None = None) -> str:
 
 __all__ = ["CADENCE", "FLIP_KINDS", "Flip", "IDLE", "Preview", "REVERT_STATUSES", "Swap",
            "as_healthy", "auto_options", "bad_read", "describe", "detect_flips", "flip_kind",
-           "healthy_text", "known_status", "lineup_before", "live_text", "next_poll",
+           "frozen_moves", "healthy_text", "known_status", "lineup_before", "live_text", "next_poll",
            "out_of_scope", "player_in", "preview_flip", "remember", "swap_of", "tag",
            "trial_text"]
