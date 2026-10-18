@@ -220,14 +220,22 @@ def columns(width: int) -> list[str]:
     return cols + ["plan"]
 
 
+TINY = 42  # columns of the screen: under this (a 40-column phone) players go by surname
+
 HEADERS = {"mark": "", "player": "Player", "slot": "Slot", "tip": "Tip", "plan": "If healthy"}
 
 
 def cells(r: Row, data: AutoswapData, pal: Palette, width: int) -> list[Text]:
     narrow = width < 60
+    style = pal.dim if not r.plays else None
+    if width < TINY:  # a phone with the keyboard up: "Daniels DTD"
+        name = player_cell(r.player, pal, team=False, style=style)
+        name = Text(surname(r.player.name), style=style or pal.text) + \
+            name[len(r.player.name):]
+    else:
+        name = player_cell(r.player, pal, short=narrow, team=not narrow, style=style)
     out = {"mark": mark_cell(r.mark, r.held, pal),
-           "player": player_cell(r.player, pal, short=narrow, team=not narrow,
-                                 style=pal.dim if not r.plays else None),
+           "player": name,
            "slot": Text(r.slot, style=pal.dim),
            "tip": tip_cell(r, data, pal, wide=width >= 100),
            "plan": plan_cell(r, pal, short_names=width < 100, narrow=narrow)}
@@ -375,6 +383,8 @@ class AutoswapView(Vertical):
     def _render_table(self, keep: int | None = None) -> None:
         t = self.query_one(DataTable)
         pal, width = self.pal, self._width()
+        # a phone: a one-column scrollbar, like the app's own, so the cells keep their room
+        t.styles.scrollbar_size_vertical = 1 if getattr(self._owner_app, "compact", False) else 2
         keep = keep if keep is not None else (self._row().player.id if self._row() else None)
         t.clear(columns=True)
         for key in columns(width):

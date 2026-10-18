@@ -137,9 +137,11 @@ def test_simulate_finds_a_watch_list_player(session):
 
 # --- the auto-swap screen in the compact layout (the phone work meets the auto-swap screen) ------
 
-def test_auto_swap_on_a_phone_fits_its_cells_and_the_key_bar_follows_the_row(monkeypatch):
-    """At 46x30 the table cuts a cell instead of wrapping it, so the plan reads
-    "G for Pippen +5.1", and enter in the key bar says arm or disarm for the row on show."""
+@pytest.mark.parametrize("size", [(46, 30), (40, 18)])
+def test_auto_swap_on_a_phone_fits_its_cells_and_the_key_bar_follows_the_row(monkeypatch, size):
+    """On a phone the table cuts a cell instead of wrapping it, so the plan reads
+    "G for Pippen +5.1" and every cell fits its column (also with the keyboard up and a
+    scrollbar), and enter in the key bar says arm or disarm for the row on show."""
     from textual.widgets import DataTable
 
     from benchboss.ui.screens import autoswap as screen
@@ -157,8 +159,11 @@ def test_auto_swap_on_a_phone_fits_its_cells_and_the_key_bar_follows_the_row(mon
         t = view.query_one(DataTable)
         plan = t.get_cell(str(DANIELS), "plan")
         assert plan.plain == "G for Pippen +5.1"
-        width = t.columns["plan"].get_render_width(t) - 2 * t.cell_padding
-        assert all(t.get_cell(k, "plan").cell_len <= width for k in t.rows)
+        used = sum(c.get_render_width(t) for c in t.columns.values())
+        assert used + t.styles.scrollbar_size_vertical <= t.size.width
+        for key, col in t.columns.items():
+            room = col.get_render_width(t) - 2 * t.cell_padding
+            assert all(t.get_cell(k, key).cell_len <= room for k in t.rows)
         assert enter_label(app) == "arm"
         await pilot.press("enter")
         now[0] += 1
@@ -166,4 +171,4 @@ def test_auto_swap_on_a_phone_fits_its_cells_and_the_key_bar_follows_the_row(mon
         await pilot.pause()
         assert marks(app) == {DANIELS: "auto"} and enter_label(app) == "disarm"
 
-    drive(scenario, size=(46, 30))
+    drive(scenario, size=size)
