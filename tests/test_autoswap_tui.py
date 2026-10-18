@@ -11,6 +11,7 @@ from textual.widgets import DataTable
 from benchboss import notify
 from benchboss.config import Config
 from benchboss.marks import MarkStore
+from benchboss.ui import layout
 from benchboss.ui.app import MENU, Benchboss
 from benchboss.ui.layout import FIT_WIDTHS
 from benchboss.ui.screens import autoswap as screen
@@ -104,6 +105,25 @@ def test_two_enters_arm_and_one_disarms(clock):
         assert marks(app) == {}
 
     drive(scenario)
+
+
+@pytest.mark.parametrize("size", [(150, 54), (46, 30)])
+def test_the_table_keeps_its_widths_after_arming(size, clock):
+    """Arming redraws the table from an event. A frame drawn before Textual measured the new
+    rows kept the header widths in its row cache ("Dyson", "7:0", "starts at", no mark)."""
+    async def scenario(pilot, app):
+        await open_screen(pilot, app)
+        await pilot.press("enter")
+        clock[0] += screen.CONFIRM_DELAY + 0.01
+        await pilot.press("enter")
+        await settle(pilot)
+        await pilot.pause(0.3)
+        assert marks(app) == {DANIELS: "auto"}
+        name = "Dyson Daniels" if size[0] >= 60 else "D. Daniels"
+        lines = layout.screen_text(app).splitlines()
+        assert any("✓" in ln and name in ln and "Pippen" in ln for ln in lines), lines
+
+    drive(scenario, size=size)
 
 
 def test_any_other_key_cancels_the_question(clock):

@@ -20,6 +20,7 @@ import datetime as dt
 import time
 from dataclasses import dataclass, field
 
+from rich.cells import cell_len
 from rich.console import Group, RenderableType
 from rich.constrain import Constrain
 from rich.table import Table
@@ -386,11 +387,17 @@ class AutoswapView(Vertical):
         # a phone: a one-column scrollbar, like the app's own, so the cells keep their room
         t.styles.scrollbar_size_vertical = 1 if getattr(self._owner_app, "compact", False) else 2
         keep = keep if keep is not None else (self._row().player.id if self._row() else None)
+        cols = columns(width)
+        body = [cells(r, self.data, pal, width) for r in self.data.rows]
         t.clear(columns=True)
-        for key in columns(width):
-            t.add_column(HEADERS[key], key=key)
-        for r in self.data.rows:
-            t.add_row(*cells(r, self.data, pal, width), key=str(r.player.id))
+        for i, key in enumerate(cols):
+            # widths given up front: a width left to the table is measured on its next idle,
+            # and when arming redraws the table a frame drawn before that kept the header
+            # widths in Textual's row cache ("Dyson", "7:0", no mark)
+            room = max([cell_len(HEADERS[key]), *(row[i].cell_len for row in body)])
+            t.add_column(HEADERS[key], key=key, width=room)
+        for r, row in zip(self.data.rows, body, strict=True):
+            t.add_row(*row, key=str(r.player.id))
         if keep is not None and str(keep) in t.rows:
             t.move_cursor(row=t.get_row_index(str(keep)))
 
