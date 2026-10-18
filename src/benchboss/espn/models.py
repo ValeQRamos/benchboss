@@ -127,6 +127,9 @@ class Player:
     adp: float | None = None     # average draft position
     droppable: bool = True
     stats: dict[str, StatLine] = field(default_factory=dict)  # keys of constants.SPLITS
+    # False when ESPN sent no injuryStatus: injury_status then reads ACTIVE for display, but
+    # code that acts on health (auto-swap, guards, alerts) must treat him as unknown
+    injury_known: bool = True
 
     @property
     def pro_team(self) -> str:
@@ -303,6 +306,7 @@ class League:
     uses_faab: bool = False      # acquisitionSettings.isUsingAcquisitionBudget, as ESPN reads it
     minimum_bid: int = 0
     roster_lock_type: str = ""   # rosterSettings.rosterLocktimeType, e.g. FIRSTGAME_SCORINGPERIOD
+    lineup_lock_type: str = ""   # rosterSettings.lineupLocktimeType, e.g. INDIVIDUAL_GAME
     playoff_teams: int = 0       # scheduleSettings.playoffTeamCount
     regular_season_weeks: int = 0  # scheduleSettings.matchupPeriodCount
     seeding_rule: str = ""       # scheduleSettings.playoffSeedingRule: tiebreaker, e.g. H2H_RECORD
@@ -383,6 +387,7 @@ def parse_player(entry: dict, season: int) -> Player:
         adp=own.get("averageDraftPosition"),
         droppable=p.get("droppable", True) is not False,
         stats=stats,
+        injury_known=bool(p.get("injuryStatus")),
     )
 
 
@@ -476,6 +481,7 @@ def parse_league(raw: dict, my_team_id: int | None, swid: str | None = None,
         uses_faab=acq.get("isUsingAcquisitionBudget") is True,
         minimum_bid=acq.get("minimumBid") or 0,
         roster_lock_type=roster_settings.get("rosterLocktimeType") or "",
+        lineup_lock_type=roster_settings.get("lineupLocktimeType") or "",
         playoff_teams=sched.get("playoffTeamCount") or 0,
         regular_season_weeks=sched.get("matchupPeriodCount") or 0,
         seeding_rule=sched.get("playoffSeedingRule") or "",

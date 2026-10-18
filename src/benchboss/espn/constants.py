@@ -34,9 +34,33 @@ INJURY_TAG = {"ACTIVE": "", "NORMAL": "", "DAY_TO_DAY": "DTD", "OUT": "OUT",
 INJURY_FACTOR = {"OUT": 0.0, "SUSPENSION": 0.0, "INJURY_RESERVE": 0.0, "BEREAVEMENT": 0.0,
                  "PATERNITY": 0.0, "DOUBTFUL": 0.25, "DAY_TO_DAY": 0.75, "QUESTIONABLE": 0.75}
 
+# player.injuryStatus by what it means for a lineup. Auto-swap, the lineup guards and the
+# monitor's alerts all use these sets. A status outside KNOWN_STATUSES, or no status at all
+# (Player.injury_known is False), is "unknown": never healthy, so it never triggers an
+# automatic lineup change.
+HEALTHY_STATUSES = frozenset({"ACTIVE", "NORMAL", "PROBABLE"})
+RISK_STATUSES = frozenset({"DAY_TO_DAY", "QUESTIONABLE", "DOUBTFUL"})
+OUT_STATUSES = frozenset({"OUT", "SUSPENSION", "INJURY_RESERVE", "BEREAVEMENT", "PATERNITY"})
+KNOWN_STATUSES = HEALTHY_STATUSES | RISK_STATUSES | OUT_STATUSES
+
+
+def status_class(status: str | None) -> str:
+    """ "ok", "risk", "out", or "unknown" for None, "" and any status not in KNOWN_STATUSES."""
+    if status in HEALTHY_STATUSES:
+        return "ok"
+    if status in RISK_STATUSES:
+        return "risk"
+    if status in OUT_STATUSES:
+        return "out"
+    return "unknown"
+
+
 # rosterSettings.rosterLocktimeType: adds and drops made after the day's first tip-off only
 # take effect the next day.
 ROSTER_LOCK_FIRST_GAME = "FIRSTGAME_SCORINGPERIOD"
+# rosterSettings.lineupLocktimeType: each player's lineup slot locks at his own tip-off. The
+# monitor only makes automatic lineup changes in leagues that lock this way.
+LINEUP_LOCK_INDIVIDUAL = "INDIVIDUAL_GAME"
 
 # Stat ids used by points leagues (scoringSettings.scoringItems[].statId)
 STAT = {0: "PTS", 1: "BLK", 2: "STL", 3: "AST", 4: "OREB", 5: "DREB", 6: "REB", 7: "EJ",

@@ -17,6 +17,8 @@ The look, in short (every screen follows it, so the app reads as one thing):
 - Legends and explanations go in one dim caption line under the table, kept short.
 - No emoji. The glyphs in use: ● ○ ★ ☆ ▲ ▼ · ━ and the bar and spark blocks below.
 - Every screen fits the width it is given: drop secondary columns before cutting names.
+- Phones (ui/layout.py): every draw fits 40 columns. A line that has to stay one line (a
+  verdict, a header) offers shorter wordings through ``Fit``, never a wrap mid-thought.
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ import datetime as dt
 from collections.abc import Iterable
 
 from rich import box
+from rich.console import Console, ConsoleOptions, RenderResult
+from rich.measure import Measurement
 from rich.table import Table
 from rich.text import Text
 
@@ -167,3 +171,22 @@ def legend(pal: Palette, *items: tuple[str, str]) -> Text:
         out.append(key, style=f"bold {pal.dim}")
         out.append(f" {meaning}", style=pal.dim)
     return out
+
+
+class Fit:
+    """The first of ``variants`` (longest first) that fits the width it is drawn at, on one
+    line; the last one when none does. For a line that must not wrap mid-thought:
+    "Up 18.2 now, projected to lose by 114" becomes "Up 18.2, proj. to lose by 114"."""
+
+    def __init__(self, *variants: Text):
+        self.variants = variants
+
+    def pick(self, width: int) -> Text:
+        return next((v for v in self.variants if v.cell_len <= width), self.variants[-1])
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        yield self.pick(options.max_width)
+
+    def __rich_measure__(self, console: Console, options: ConsoleOptions) -> Measurement:
+        sizes = [v.cell_len for v in self.variants]
+        return Measurement(min(sizes), max(sizes))

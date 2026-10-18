@@ -39,6 +39,12 @@ class WriteFailed(BenchbossError):
     exit_code = 4
 
 
+class GuardRefused(BenchbossError):
+    """A lineup change failed a safety check (core/guard.py), so nothing was sent."""
+
+    exit_code = 5
+
+
 class NotConfirmed(BenchbossError):
     """A write was prepared but not sent: no --yes and no terminal to ask."""
 

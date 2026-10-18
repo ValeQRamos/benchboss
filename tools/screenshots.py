@@ -2,6 +2,9 @@
 
     python tools/screenshots.py            # writes docs/images/*.svg (and *.png on macOS)
 
+Most shots are a 150x54 laptop window. The phone-* shots are a 46x40 portrait phone, where the
+app runs its compact layout (key bar, menu as a page).
+
 PNGs are rendered with macOS QuickLook (qlmanage) and trimmed with ImageMagick when both are
 available (the SVGs are then removed); otherwise the SVGs are kept.
 """
@@ -35,10 +38,16 @@ async def app_shots(theme: str, shots: list[tuple[str, str]], size=(150, 54)) ->
             if key == "apply":
                 await pilot.click("#apply")
                 await pilot.pause(1.5)
+            elif key == "arm":  # Auto-swap: enter shows what would happen, a second enter arms
+                await pilot.press("enter")
+                await pilot.pause(1.5)
+                await pilot.press("enter")
+                await pilot.pause(2.5)
             elif key:
                 await pilot.press(key)
                 await pilot.pause(2.5)
-            app.save_screenshot(filename=f"{name}.svg", path=str(OUT))
+            if name:  # a step with no name only gets the screen ready for the next one
+                app.save_screenshot(filename=f"{name}.svg", path=str(OUT))
 
 
 def side_panel(width: int = 46) -> None:
@@ -50,7 +59,9 @@ def side_panel(width: int = 46) -> None:
     console.save_svg(str(OUT / "side-panel.svg"), title="benchboss dash --watch")
 
 
-def to_png(svg: Path) -> None:
+def to_png(svg: Path, width: int = 1600) -> None:
+    """Render, trim, shrink to ``width`` and keep 256 colors (a terminal has few, and the
+    files come out about a third of the size with no visible change)."""
     if not (shutil.which("qlmanage") and shutil.which("magick")):
         return
     with tempfile.TemporaryDirectory() as tmp:
@@ -58,10 +69,15 @@ def to_png(svg: Path) -> None:
                        capture_output=True, check=False)
         rendered = Path(tmp) / (svg.name + ".png")
         if rendered.exists():
-            subprocess.run(["magick", str(rendered), "-trim", "+repage", "-resize", "1600x>",
-                            str(svg.with_suffix(".png"))], check=False)
+            subprocess.run(["magick", str(rendered), "-trim", "+repage", "-resize", f"{width}x>",
+                            "+dither", "-colors", "256", "-strip",
+                            f"PNG8:{svg.with_suffix('.png')}"], check=False)
     if svg.with_suffix(".png").exists():
         svg.unlink()  # the README uses the PNGs; keep the repo light
+
+
+PHONE = (46, 40)  # a portrait phone over SSH: the app goes compact under 80 columns
+PHONE_WIDTH = 640  # pixels; the README shows two of them side by side
 
 
 def main() -> None:
@@ -71,11 +87,12 @@ def main() -> None:
     asyncio.run(app_shots("dark", [("", "dashboard"), ("w", "optimize-week"), ("apply", "optimize-done"),
                                    ("f", "trash"), ("x", "trades"), ("a", "workload"), ("n", "news"),
                                    ("p", "players"), ("s", "standings"), ("o", "roster"),
-                                   ("y", "playoffs")]))
+                                   ("y", "playoffs"), ("u", ""), ("arm", "autoswap")]))
     asyncio.run(app_shots("light", [("", "dashboard-light")]))
+    asyncio.run(app_shots("dark", [("", "phone-dashboard"), ("p", "phone-players")], size=PHONE))
     side_panel()
     for svg in OUT.glob("*.svg"):
-        to_png(svg)
+        to_png(svg, PHONE_WIDTH if svg.stem.startswith("phone-") else 1600)
     print("\n".join(sorted(p.name for p in OUT.iterdir())))
 
 

@@ -67,5 +67,5 @@ def test_when_both_hosts_fail_the_first_error_is_the_one_shown(answers):
 def test_one_player_news_uses_the_same_hosts(answers):
     queue, calls = answers
     queue += [EspnError(403, "Access Denied"), feed()]
-    assert client.player_news(7)[0]["headline"] == "Out tonight"
+    assert news.latest(7)[0].headline == "Out tonight"
     assert calls == [WEB, OLD]

@@ -1,0 +1,54 @@
+ ● benchboss  X.Y.Z   Monstars   demo data
+
+  Dashboard  d              Roster  ·  Monstars 2-0  ·  This season
+  Optimize today  t
+  Optimize week  w                                                       ───── Fantasy points per game ─────    ── Per game ───
+  Auto-swap  u              Slot  Player                 Pos    Today     Avg     L7   L15   L30  Proj  Prev     PTS   REB  AST
+  Workload  a               ───────────────────────────────────────────────────────────────────────────────────────────────────
+  Best trash  f             PG    LaMelo Ball MIN        PG      @HOU    48.6   50.8  48.6  48.6  46.4  39.7    26.0   6.6  7.9
+  Player finder  p          SG    Anthony Edwards MIN    SG/SF   @HOU    48.5   49.5  48.5  48.5  47.2  45.6    30.0   4.8  5.9
+  Player news  n            SF    Brandon Miller CHA     SG/SF   @BKN    42.4   41.8  42.4  42.4  37.4  34.2    26.6   4.7  4.3
+  Trade finder  x           PF    Tobias Harris SAS DTD  SF/PF    DAL    31.4  ▲43.3  31.4  31.4  30.1  27.0    17.0   4.0  1.7
+  Inbox  i                  C     Jalen Duren DET        C        PHI    44.4   47.7  44.4  44.4  42.2  38.8    23.9  12.0  2.9
+  Standings  s              G     Dyson Daniels ATL DTD  PG/SG   @WSH    38.0  ▼32.2  38.0  38.0  35.7  36.5    14.4   6.4  5.4
+  Playoff race  y           F     AJ Dybantsa WSH        SF       ATL    28.0   26.7  28.0  28.0  32.9     -    14.8   5.0  3.0
+  Roster  o                 UT    Alex Sarr WSH          PF/C     ATL    28.7   27.7  28.7  28.7  36.6  36.5    13.7   6.6  2.7
+                            UT    Rudy Gobert MIN        C       @HOU    33.6   35.2  33.6  33.6  34.3  33.0    13.3  10.3  2.9
+                            UT    Coby White CHA DTD     PG/SG   @BKN    39.8   40.5  39.8  39.8  32.9  26.1    23.8   4.2  6.1
+                            ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+                            BE    Pascal Siakam IND      PF      @MEM    39.3   40.0  39.3  39.3  41.1  39.0    24.0   7.6  4.0
+                            BE    Zach Edey MEM          C        IND    32.0   32.0  32.0  32.0  33.2  34.2    15.0   8.1  1.0
+                            BE    Scotty Pippen Jr. MEM  PG/SG    IND    28.4  ▼25.3  28.4  28.4  30.6  26.3    11.4   3.7  6.3
+
+                            L7 L15 L30 last 7, 15, 30 days  ·  Prev last season  ·  ▲▼ L7 well above or below Avg
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Season · v for Last 7 · r refresh · ctrl+t light/dark · q quit
+ d Dashboard  t Optimize today  w Optimize week  f Best trash  m Menu  r Refresh  ^t Light/Dark  q Quit

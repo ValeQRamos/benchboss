@@ -23,11 +23,11 @@ Rules for every screen: ``load`` may raise BenchbossError (the app shows the mes
 
 from __future__ import annotations
 
-from benchboss.ui.screens import finder, playoffs, roster, standings, trash, workload
+from benchboss.ui.screens import autoswap, finder, playoffs, roster, standings, trash, workload
 
 # app screen id -> module (the dashboard, optimize, news, trades and inbox screens live in app.py)
 SCREENS = {"roster": roster, "standings": standings, "activity": workload, "trash": trash,
-           "players": finder, "playoffs": playoffs}
+           "players": finder, "playoffs": playoffs, "autoswap": autoswap}
 
 
 def view_index(module, key: str | None) -> int:

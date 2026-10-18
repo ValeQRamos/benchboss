@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
+import re
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from pathlib import Path
 
@@ -20,9 +22,9 @@ from benchboss.core import activity as activity_mod
 from benchboss.core import trades as trades_mod
 from benchboss.core import trash as trash_mod
 from benchboss.core.calendar import SeasonCalendar
-from benchboss.core.lineup import DayPlan, plan_day
+from benchboss.core.lineup import MIN_GAIN_AUTO, DayPlan, PlanOptions, plan_day, plan_gain
 from benchboss.core.projection import MatchupOutlook, matchup_outlook
-from benchboss.errors import BenchbossError
+from benchboss.errors import AuthError, BenchbossError, EspnError, GuardRefused, NetworkError
 from benchboss.espn.client import Client
 from benchboss.espn.constants import SLOT_ID, SPLITS, split_ids
 from benchboss.espn.models import League, Player, parse_league, parse_player, parse_team
@@ -32,6 +34,10 @@ LEAGUE_VIEWS = ("mRoster", "mTeam", "mSettings", "mMatchupScore", "mStatus", "mS
 
 # The player finder's pools (kona_player_info filterStatus; "watch" is your watch list)
 POOLS = {"fa": ["FREEAGENT", "WAIVERS"], "rostered": ["ONTEAM"], "all": None, "watch": None}
+
+# An automatic lineup change re-reads the NBA schedule when the copy in use is older than this
+# (seconds): a game moved earlier must not slip past the lock margin.
+SCHEDULE_MAX_AGE = 2 * 3600
 
 # ESPN's web app refuses a 51st watch-list player (maxWatchListPlayers in its bundle)
 WATCH_LIST_MAX = 50
@@ -64,11 +70,27 @@ class DiskCache:
     def put(self, name: str, data) -> None:
         try:
             self.folder.mkdir(parents=True, exist_ok=True)
-            tmp = self.folder / f"{name}.json.tmp"
+            # one temp file per process: the app, the CLI and the monitor share this folder
+            tmp = self.folder / f"{name}.json.{os.getpid()}.tmp"
             tmp.write_text(json.dumps(data))
             tmp.replace(self.folder / f"{name}.json")
         except OSError:
             pass
+
+
+class Outcome:
+    """What happened to one day's lineup write (OptimizeResult.outcome). An unattended
+    caller (the monitor) acts on this, never on the text of ``error``."""
+    EXECUTED = "EXECUTED"                # ESPN applied it
+    ALREADY_OPTIMAL = "ALREADY_OPTIMAL"  # nothing to send
+    BELOW_MIN_GAIN = "BELOW_MIN_GAIN"    # moves exist but gain less than opts.min_gain
+    WOULD_SEND = "WOULD_SEND"            # send=False: planned and checked, not sent
+    NOT_SENT = "NOT_SENT"                # refused before sending: a guard, the day check
+    FAILED = "FAILED"                    # ESPN answered a FAILED_* status (status holds it)
+    REFUSED = "REFUSED"                  # ESPN answered an HTTP error: not applied
+    UNKNOWN = "UNKNOWN"                  # the POST may or may not have gone through
+    AUTH = "AUTH"                        # cookies missing or expired
+    ERROR = "ERROR"                      # anything else (could not read the lineup, ...)
 
 
 @dataclass
@@ -76,6 +98,9 @@ class OptimizeResult:
     plan: DayPlan
     status: str = ""        # ESPN status, e.g. EXECUTED; "" when nothing was sent
     error: str = ""
+    outcome: str = ""       # Outcome.*
+    kind: str = ""          # ROSTER or FUTURE_ROSTER: what was (or would be) sent
+    guards: list = field(default_factory=list)  # core.guard.Violation, fatal or not
 
 
 class Session:
@@ -97,6 +122,9 @@ class Session:
     # The news on watch-list players you have seen (inbox.watch_spins): None keeps it in
     # seen-news.json in the config folder; a dict keeps it in memory instead (the demo).
     seen_news: dict | None = None
+    # Every other local file (store.py: marks, the monitor's state, the lineup log): None
+    # uses the config folder; a dict keeps them in memory instead (the demo).
+    local_state: dict | None = None
 
     @property
     def demo(self) -> bool:
@@ -125,10 +153,18 @@ class Session:
     def in_season(self) -> bool:
         return 1 <= self.calendar.period_of(self.today) <= self.calendar.final_period
 
-    def current_period(self) -> int:
-        """ESPN's current scoring period, read fresh (it decides ROSTER versus FUTURE_ROSTER)."""
+    def current_period(self, strict: bool = False) -> int:
+        """ESPN's current scoring period, read fresh (it decides ROSTER versus FUTURE_ROSTER).
+
+        ``strict`` (automatic writes): no guessing from the cached league when ESPN's answer
+        has no latestScoringPeriod; that raises GuardRefused instead (exit code 5)."""
         status = self.client.league("mStatus").get("status") or {}
-        return status.get("latestScoringPeriod") or self.league().scoring_period
+        latest = status.get("latestScoringPeriod")
+        if isinstance(latest, int) and not isinstance(latest, bool) and latest > 0:
+            return latest
+        if strict:
+            raise GuardRefused("ESPN did not say which day it is (no latestScoringPeriod)")
+        return latest or self.league().scoring_period
 
     # --- data ----------------------------------------------------------------------------------
 
@@ -162,9 +198,11 @@ class Session:
         return self._league_raw or {}
 
     def roster_on(self, period: int):
-        """My roster as it stands on a given day (future days carry pending lineup moves)."""
-        raw = self.client.league("mRoster", "mTeam", scoring_period=period)
+        """My roster as it stands on a given day (future days carry pending lineup moves).
+        forTeamId makes ESPN send only my team, about a tenth of the whole league."""
         lg = self.league()
+        raw = self.client.league("mRoster", "mTeam", scoring_period=period,
+                                 params=[("forTeamId", lg.my_team_id)])
         for t in raw.get("teams") or []:
             if t["id"] == lg.my_team_id:
                 return parse_team(t, lg.season, lg.members).roster
@@ -305,12 +343,19 @@ class Session:
 
         return news.fetch(player_ids, days)
 
-    def playoff_race(self, picks: dict[int, int] | None = None, sims: int = 5000):
+    def playoff_race(self, picks: dict[int, int] | None = None, sims: int | None = None, *,
+                     base=None):
         """Playoff odds and who is in or out, with the results you pick fixed (see
-        core.playoffs.race: ``picks`` maps a matchup id to the team id you say wins it)."""
+        core.playoffs.race: ``picks`` maps a matchup id to the team id you say wins it).
+        ``sims`` defaults to core.playoffs.SIMS. ``base``: a race this returned earlier; the
+        new one replays its seasons with the same league and inputs (core.playoffs.rerun), so
+        it differs from ``base`` only by the picks, whatever the clock says now."""
         from benchboss.core import playoffs
         from benchboss.core.projection import not_started, week_projection
 
+        if base is not None and base.league is not None:
+            return playoffs.rerun(base, picks)
+        sims = playoffs.SIMS if sims is None else sims
         lg, cal = self.league(), self.calendar
         weeks = range(1, playoffs.regular_season_weeks(lg) + 1)
         days = {w: len(cal.matchup_periods(w, lg.matchup_periods)) for w in weeks}
@@ -375,7 +420,7 @@ class Session:
                             lambda t: f"{t.name} {t.owner_name}", where="this league").id
         return trades_mod.find_trades(lg, need=need, partner_id=pid, limit=n)
 
-    def plan_days(self, periods: list[int]) -> list[DayPlan]:
+    def plan_days(self, periods: list[int], opts: PlanOptions | None = None) -> list[DayPlan]:
         """Preview: the best lineup for each day (sends nothing).
 
         On ESPN a move carries forward to the next days that have no change of their own, so
@@ -391,14 +436,15 @@ class Session:
             on_espn = {s.player.id: s.slot_id for s in roster}
             if prev and prev[0] == sp - 1 and prev[1] == on_espn:
                 roster = [replace(s, slot_id=prev[2][s.player.id]) for s in roster]
-            plan = plan_day(roster, lg.slot_counts, sp, self.calendar)
+            plan = plan_day(roster, lg.slot_counts, sp, self.calendar, opts)
             after = {s.player.id: s.slot_id for s in roster}
             after.update((m.player.id, m.to_slot) for m in plan.moves)
             prev = (sp, on_espn, after)
             plans.append(plan)
         return plans
 
-    def apply_days(self, periods: list[int]) -> list[OptimizeResult]:
+    def apply_days(self, periods: list[int], opts: PlanOptions | None = None,
+                   writer: str = "cli") -> list[OptimizeResult]:
         """Send the best lineup for every day in order.
 
         Every day is re-read right before it is planned, because moves on one day carry
@@ -407,31 +453,269 @@ class Session:
         when a day fails, so the caller can tell which days were sent.
         """
         current = self.current_period()
-        return [self.apply_plan(sp, current) for sp in sorted(periods)]
+        return [self.apply_plan(sp, current, opts=opts, writer=writer) for sp in sorted(periods)]
 
-    def apply_plan(self, period: int, current: int | None = None) -> OptimizeResult:
-        """Re-read one day and send what it still needs. ESPN errors end up in the result."""
+    def apply_plan(self, period: int, current: int | None = None, *,
+                   opts: PlanOptions | None = None, send: bool = True,
+                   writer: str = "cli", before_send=None, note: dict | None = None,
+                   log: bool = True) -> OptimizeResult:
+        """Re-read one day and send what it still needs. ESPN errors end up in the result.
+
+        The one path for every lineup write: Optimize in the app (``writer`` "tui") and the
+        CLI ("cli"), and the monitor ("monitor", with ``opts``). ``send=False`` plans and
+        checks everything and stops before the POST (Outcome.WOULD_SEND): the monitor's
+        trial mode. ``result.outcome`` says what happened (Outcome); nothing is ever retried.
+
+        Steps: read ESPN's day and the roster, plan with ``opts``, run the guards
+        (core/guard.py: fatal ones give NOT_SENT and ``result.guards``), stop below
+        ``opts.min_gain`` (BELOW_MIN_GAIN), then send. ``opts.auto`` adds the strict day check
+        (ESPN's day, this computer's day and ``period`` all agree, or NOT_SENT with G9), a
+        schedule at most SCHEDULE_MAX_AGE old, a clock no older than this computer's, a
+        minimum gain of at least MIN_GAIN_AUTO, and always sends ROSTER. ``before_send(plan)``
+        runs right before the POST; a non-empty string it returns stops the send (NOT_SENT,
+        the string is the error): the monitor re-checks its marks and its lease there and
+        saves its intent.
+
+        The lineup log (lineup_log.py) gets one record for every send attempt and every
+        guard refusal, and for the monitor ("autoswap", mode "trial" or "live") one for every
+        plan it asked for; ``note`` adds fields to that record (trigger, intent, text).
+        ``log=False`` writes no record: the caller writes its own. The monitor does that, one
+        record per decision once it knows the outcome (after its check of the lineup), so a
+        trial or a send is never in the log twice, and a dry run is never in it at all.
+        """
+        from benchboss.core import guard
+
+        logged = self._logged if log else (lambda r, *_a, **_k: r)
         lg = self.league()
+        auto = bool(opts and opts.auto)
+        if auto:
+            # never plan an automatic change on an older clock than this computer's: a stale
+            # ``now`` could leave a player who just tipped movable
+            now = self.now
+            if opts.now is not None:
+                given = opts.now if opts.now.tzinfo else opts.now.astimezone()
+                now = max(now, given)
+            opts = replace(opts, now=now)
+        cal = self.calendar
         try:
-            current = current or self.current_period()
+            if auto:
+                current = self.current_period(strict=True)
+                cal = self.fresh_calendar(SCHEDULE_MAX_AGE)
+            else:
+                current = current or self.current_period()
             roster = self.roster_on(period)
+        except GuardRefused as e:
+            v = guard.Violation("G9", str(e))
+            return logged(OptimizeResult(DayPlan(period), error=f"not sent: {e} (G9)",
+                                               outcome=Outcome.NOT_SENT, guards=[v]),
+                                writer, send, note)
+        except AuthError as e:
+            return OptimizeResult(DayPlan(period), error=f"could not read the lineup: {e}",
+                                  outcome=Outcome.AUTH)
         except BenchbossError as e:
-            return OptimizeResult(DayPlan(period), error=f"could not read the lineup: {e}")
-        plan = plan_day(roster, lg.slot_counts, period, self.calendar)
-        if period < current:
-            return OptimizeResult(plan, error="that day is already over on ESPN")
-        if not plan.changed:
-            return OptimizeResult(plan, status="ALREADY_OPTIMAL")
-        kind = "ROSTER" if period == current else "FUTURE_ROSTER"
-        from benchboss.actions import send
+            return OptimizeResult(DayPlan(period), error=f"could not read the lineup: {e}",
+                                  outcome=Outcome.ERROR)
+        plan = plan_day(roster, lg.slot_counts, period, cal, opts)
+        if period < current and not auto:  # an automatic run gets G9 (and a log line) below
+            return OptimizeResult(plan, error="that day is already over on ESPN",
+                                  outcome=Outcome.NOT_SENT)
+        guards = guard.check(roster, plan, lg.slot_counts, cal, opts)
+        if auto:
+            guards += guard.day_check(period, espn_day=current, today_period=self.today_period,
+                                      in_season=self.in_season, lock_type=lg.lineup_lock_type,
+                                      cal=cal)
+        fatal = [v for v in guards if v.fatal]
+        kind = "ROSTER" if auto or period == current else "FUTURE_ROSTER"
+        if not plan.changed and not (auto and fatal):
+            return logged(OptimizeResult(plan, status="ALREADY_OPTIMAL", guards=guards,
+                                               outcome=Outcome.ALREADY_OPTIMAL),
+                                writer, send, note, quiet=True)
+        if fatal:
+            reasons = "; ".join(f"{v.message} ({v.code})" for v in fatal[:3])
+            more = f" and {len(fatal) - 3} more" if len(fatal) > 3 else ""
+            return logged(OptimizeResult(plan, error=f"not sent: {reasons}{more}",
+                                               outcome=Outcome.NOT_SENT, kind=kind,
+                                               guards=guards), writer, send, note)
+        need = opts.min_gain if opts is not None else 0.0
+        if auto:  # an automatic change never goes out for less, whatever the caller passed
+            need = max(need, MIN_GAIN_AUTO)
+        if need > 0 and plan_gain(plan, cal) < need - 1e-9:
+            return logged(OptimizeResult(plan, outcome=Outcome.BELOW_MIN_GAIN, kind=kind,
+                                               guards=guards), writer, send, note, quiet=True)
+        if not send:
+            return logged(OptimizeResult(plan, outcome=Outcome.WOULD_SEND, kind=kind,
+                                               guards=guards), writer, send, note, quiet=True)
+        try:
+            stop = before_send(plan) if before_send is not None else None
+        except BenchbossError as e:  # the monitor could not save its intent: send nothing
+            stop = f"not sent: {e}"
+        if stop:
+            return logged(OptimizeResult(plan, error=str(stop), outcome=Outcome.NOT_SENT,
+                                               kind=kind, guards=guards), writer, send, note)
+        return logged(self._post(plan, kind, period, guards), writer, send, note)
+
+    # --- optimizer: the write path (apply_plan's helpers) ----------------------------------------
+
+    def fresh_calendar(self, max_age: float = SCHEDULE_MAX_AGE) -> SeasonCalendar:
+        """The NBA schedule, downloaded again (past the disk cache) unless this session did
+        that less than ``max_age`` seconds ago. The demo's schedule never changes."""
+        if self.demo:
+            return self.calendar
+        at = self.__dict__.get("_calendar_at")
+        if at is not None and time.time() - at < max_age:
+            return self.calendar
+        raw = self.client.season_data("proTeamSchedules_wl")
+        self.cache.put("nba-schedule", raw)
+        self.__dict__["calendar"] = SeasonCalendar.from_raw(raw)
+        self._calendar_at = time.time()
+        return self.calendar
+
+    def _post(self, plan: DayPlan, kind: str, period: int, guards: list) -> OptimizeResult:
+        """Send one day's moves and say what happened. HTTP 4xx = REFUSED (not applied);
+        401 = AUTH; no answer, 5xx, an answer that is not JSON, or a status ESPN does not
+        use = UNKNOWN (it may or may not have gone through)."""
+        from benchboss.actions import send as post
+
+        def result(outcome: str, status: str = "", error: str = "") -> OptimizeResult:
+            return OptimizeResult(plan, status=status, error=error, outcome=outcome, kind=kind,
+                                  guards=guards)
 
         try:
-            status = send(self, kind, plan.items(), period)
+            status = post(self, kind, plan.items(), period)
+        except AuthError as e:
+            return result(Outcome.AUTH, error=str(e))
+        except EspnError as e:
+            return result(Outcome.REFUSED if 400 <= e.status < 500 else Outcome.UNKNOWN,
+                          error=str(e))
+        except NetworkError as e:
+            return result(Outcome.UNKNOWN, error=str(e))
         except BenchbossError as e:
-            return OptimizeResult(plan, error=str(e))
+            return result(Outcome.ERROR, error=str(e))
+        if not isinstance(status, str) or not re.fullmatch(r"[A-Z_]+", status):
+            status = "UNKNOWN"
         if status.startswith("FAILED"):
-            return OptimizeResult(plan, status=status, error=f"ESPN answered {status}")
-        return OptimizeResult(plan, status=status)
+            return result(Outcome.FAILED, status, f"ESPN answered {status}")
+        if status == "EXECUTED":
+            return result(Outcome.EXECUTED, status)
+        said = "did not say whether it worked" if status == "UNKNOWN" else f"answered {status}"
+        return result(Outcome.UNKNOWN, status,
+                      f"ESPN {said}: check your lineup before trying again")
+
+    def _logged(self, r: OptimizeResult, writer: str, send: bool, note: dict | None,
+                quiet: bool = False) -> OptimizeResult:
+        """Write ``r`` to the lineup log and return it. ``quiet`` results (nothing to send,
+        below the minimum gain, a trial) are logged only for the monitor. A log that cannot
+        be written never changes the result: it adds a note to the plan."""
+        from benchboss import lineup_log
+        from benchboss.espn.constants import SLOT
+
+        monitor = writer == "monitor"
+        if quiet and not monitor:
+            return r
+        p = r.plan
+        cal = self.calendar
+        fields = {
+            "period": p.period, "date": cal.date_of(p.period).isoformat(), "kind": r.kind or None,
+            "moves": [{"player_id": m.player.id, "player": m.player.name,
+                       "from": SLOT.get(m.from_slot), "to": SLOT.get(m.to_slot)} for m in p.moves],
+            "projected_before": round(p.projected_before, 1),
+            "projected_after": round(p.projected, 1), "gain": round(plan_gain(p, cal), 1),
+            "outcome": r.outcome, "status": r.status or None, "error": r.error or None,
+            "guards": [v.code for v in r.guards if v.fatal]}
+        fields.update({k: v for k, v in (note or {}).items() if k not in lineup_log.REQUIRED})
+        mode = ("live" if send else "trial") if monitor else "attended"
+        try:
+            lineup_log.append(self, writer, "autoswap" if monitor else "apply", mode, **fields)
+        except Exception as e:  # the write already happened: say so in the plan and go on
+            p.notes.append(f"Could not write the lineup log ({e}).")
+        return r
+
+    # --- news ------------------------------------------------------------------------------------
+
+    NBA_PLAYERS_AGE = 86400  # seconds a saved copy of every NBA player's name is used
+    _nba_players: list[Player] | None = None  # nba_players, once read
+
+    def latest_news(self, player_id: int, n: int = 10, offset: int = 0):
+        """The newest ``n`` news items on one player whatever their date, skipping the
+        newest ``offset`` (news.latest). ``news`` keeps its window of days."""
+        from benchboss import news
+
+        return news.latest(player_id, n, offset)
+
+    def nba_players(self, max_age: float = NBA_PLAYERS_AGE) -> list[Player]:
+        """Every active NBA player (ESPN's public players_wl list): names, NBA team,
+        positions and % rostered, no stats or injury status. Kept on disk for ``max_age``
+        seconds and in memory for the session."""
+        if self._nba_players is None:
+            raw = self.cache.get("nba-players", max_age)
+            if raw is None:
+                raw = self.client.player_universe()
+                if raw:
+                    self.cache.put("nba-players", raw)
+            season = self.client.season
+            self._nba_players = [parse_player({"player": x}, season) for x in raw
+                                 if isinstance(x, dict) and x.get("id")]
+        return self._nba_players
+
+    def search_players(self, query: str, n: int = 8) -> list[tuple[float, Player]]:
+        """Any NBA player by name, best match first, as (score, player) from text.rank
+        (typos and partial names allowed). For reading only: every write finds its player
+        with ``find_player``, which never guesses.
+
+        Players on a roster in this league come as the league has them (injury, owner).
+        Without ESPN's player list, it searches the league's rosters and ESPN's own name
+        filter instead."""
+        from benchboss.text import rank
+
+        lg = self.league()
+        rostered = {sp.player.id: sp.player for t in lg.teams.values() for sp in t.roster}
+        try:
+            pool = self.nba_players()
+        except BenchbossError:
+            pool = []
+        players = [rostered.get(p.id, p) for p in pool]
+        listed = {p.id for p in players}
+        players += [p for pid, p in rostered.items() if pid not in listed]
+
+        def ranked(candidates):
+            return rank(candidates, query, lambda p: p.name,
+                        lambda p: (p.owned, p.pro_team_id > 0), n)
+
+        found = ranked(players)
+        # ESPN's name filter may know someone the list does not; without the list it is
+        # the only way to find a free agent, even when a rostered name looks close
+        if not pool or not found:
+            try:
+                hits = self.client.players(
+                    {"filterName": {"value": query}, "limit": 10,
+                     "sortPercOwned": {"sortPriority": 1, "sortAsc": False}},
+                    lg.scoring_period)
+            except BenchbossError:
+                if found:
+                    return found
+                raise
+            extra = [rostered.get(p.id, p) for p in (parse_player(x, lg.season) for x in hits)]
+            known = {p.id for p in players}
+            found = ranked(players + [p for p in extra if p.id not in known])
+        return found
+
+    # --- monitor -------------------------------------------------------------------------------
+
+    def player_snapshot(self, ids: Iterable[int]) -> list[Player]:
+        """The status of a few players, read fresh: one kona_player_info read with only these
+        ids (injury status, lineup lock, team, projection). The monitor's one read per tick;
+        writes still re-read the roster through apply_plan."""
+        ids = list(dict.fromkeys(int(i) for i in ids))
+        if not ids:
+            return []
+        lg = self.league()
+        flt = {"filterIds": {"value": ids}, "limit": len(ids),
+               "sortPercOwned": {"sortPriority": 1, "sortAsc": False},
+               # only the projection: the stats are what makes a player read heavy
+               "filterStatsForTopScoringPeriodIds": {
+                   "value": 1, "additionalValue": [split_ids(lg.season)[list(SPLITS).index("proj")]]}}
+        period = max(1, min(self.calendar.period_of(self.today), self.calendar.final_period))
+        return [parse_player(x, lg.season) for x in self.client.players(flt, period)]
 
 
 def _slot_id(position: str) -> int:

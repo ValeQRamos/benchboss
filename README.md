@@ -6,7 +6,7 @@
 
 **Run your ESPN Fantasy Basketball team from the terminal.**
 
-Live matchup dashboard · one-key lineup optimizer · waiver scout that does the math · player finder · playoff odds · trade finder · player news
+Live matchup dashboard · one-key lineup optimizer · auto-swap for game-time decisions · waiver scout that does the math · player finder · playoff odds · trade finder · player news
 
 [![CI](https://github.com/ValeQRamos/benchboss/actions/workflows/ci.yml/badge.svg)](https://github.com/ValeQRamos/benchboss/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab)
@@ -26,7 +26,9 @@ that matters this week on one screen, and turns the chores that decide close mat
 single key: set the best lineup for today or the whole week, find the free agent who adds the
 most points before Sunday, and spot fair trades that fix a positional hole on both sides. It
 also finds players by recent form, keeps your ESPN watch list, and plays out the rest of the
-season to show your playoff odds.
+season to show your playoff odds. It can watch a player listed as day-to-day and start him if
+he is cleared before his game (in trial mode for now, see [Auto-swap](docs/autoswap.md)), and
+it fits on a phone over SSH.
 
 Try it in ten seconds, no ESPN account needed (with [uv](https://docs.astral.sh/uv/) installed):
 
@@ -40,6 +42,7 @@ uvx --from "benchboss @ https://github.com/ValeQRamos/benchboss/archive/refs/hea
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Using it from VS Code](#using-it-from-vs-code)
+- [On a phone](#on-a-phone)
 - [Commands](#commands)
 - [How the numbers work](#how-the-numbers-work)
 - [Configuration](#configuration)
@@ -55,13 +58,15 @@ uvx --from "benchboss @ https://github.com/ValeQRamos/benchboss/archive/refs/hea
 |---|---|
 | **Matchup dashboard** | Live score, a projected final for both sides, games left this week, your roster with who plays today, your place and ESPN's playoff odds, standings, alerts and the latest news. Works full screen or as a narrow side panel that refreshes itself. |
 | **Optimize today / Optimize week** | One key sets the best lineup for today or for every day left in the matchup week. Benches players who rest, are OUT or project less; doubtful and day-to-day players are discounted. Each day shows the moves, the lineup they leave and why everyone on the bench sits, with the injury math written out. Waits for **Apply**, then tells you *"Your week is set"*. |
+| **Auto-swap** | Arm a player who is day-to-day or out. If he turns healthy at least 3 minutes before his game, benchboss starts him and benches the starter with the lowest projection whose game has not started, and nobody else moves. `benchboss monitor` does the watching and sends notes to your Mac or phone (ntfy, or a command of your own). It ships in **trial mode**: it tells you what it would have done and changes nothing until you turn live mode on. [How it works](docs/autoswap.md). |
 | **Workload this week** | Games per player this week with the opponent each day, his position and today's slot. Reads the lineup ESPN has saved for every day, so the games a player spends on your bench are marked, and the footer shows the days you have more games than starting spots. In daily leagues, volume wins. |
 | **Best trash** | Ranks free agents ("trash") by the points they would actually add to *your* lineup from the day you grab them to Sunday, after subtracting what your weakest player would have scored. A strip shows the days each one plays. Knows about waivers. |
 | **Player finder** | Free agents, players on a team, your watch list or everyone, in one table: fantasy points per game for the season, the last 7, 15 and 30 days, ESPN's projection and last season, plus the box score. Sort by any column, filter by position, search by name, and star players on your ESPN watch list. |
 | **Playoff race** | Playoff, seed and division odds from 5,000 simulated seasons, seeded the way ESPN does it. Pick winners for the games left and watch the odds move. |
 | **Roster and standings** | Your roster with every stat split side by side and the box score of one. Standings with PF, PA, Diff, streaks, games back, ESPN's playoff odds, clinch tags and the playoff line, plus a table per division and one with the waiver order and every team's adds, drops and trades. |
 | **Trade finder** | Profiles every roster by position, finds where you are deep and they are thin (and the other way around), and proposes fair 1-for-1 deals that respect league position limits. Comes with a ready-to-send note. |
-| **Player news** | The latest RotoWire blurbs and their "spin" for your players and your watch list, plus an optional AI briefing that searches the web. The app pops up a note when a watch-list player gets news. |
+| **Player news** | The latest RotoWire blurbs and their "spin", with a tab for your roster and one for your watch list and a window from 1 to 30 days. Search any NBA player to read his latest news, however old. Plus an optional AI briefing that searches the web, and a popup when a watch-list player gets news. |
+| **Works on a phone** | Under 80 columns or 30 rows the app goes compact: the menu opens as its own page, a one-row key bar keeps `m menu` in reach, and the Player finder keeps the name and the split you picked side by side. See [On a phone](#on-a-phone). |
 | **Inbox** | Trade offers sent to you, accepted trades waiting to process, pending claims, unread DMs and watch-list news you have not seen. |
 | **Agent ready** | Every read command speaks `--json`; every write has `--dry-run`. The repo ships instructions and skills so GitHub Copilot, Claude Code and other agents can drive it safely. |
 
@@ -82,8 +87,12 @@ uvx --from "benchboss @ https://github.com/ValeQRamos/benchboss/archive/refs/hea
 <td width="50%"><img src="docs/images/playoffs.png" alt="Playoff race: odds and a scenario builder"><br><sub><b>Playoff race</b>: pick winners for the weeks left and see the odds move.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/images/news.png" alt="Player news for your roster and your watch list"><br><sub><b>Player news</b>: your roster and your watch list.</sub></td>
+<td width="50%"><img src="docs/images/news.png" alt="Player news for your roster and your watch list"><br><sub><b>Player news</b>: your roster, your watch list, or any player you search.</sub></td>
 <td width="50%"><img src="docs/images/trades.png" alt="Trade finder: fair deals by positional need"><br><sub><b>Trade finder</b>: fair 1-for-1 deals that fix needs on both sides.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/autoswap.png" alt="Auto-swap: armed players and what each would do if he turned healthy"><br><sub><b>Auto-swap</b>: who is armed and what happens if he is cleared.</sub></td>
+<td width="50%"><img src="docs/images/dashboard-light.png" alt="The dashboard in the light theme"><br><sub><b>Light theme</b>: for light terminals, or <code>ctrl+t</code> any time.</sub></td>
 </tr>
 </table>
 
@@ -157,9 +166,10 @@ Inside the app every screen has a single key:
 | `a` | Workload | `s` | Standings |
 | `f` | Best trash | `y` | Playoff race |
 | `p` | Player finder | `o` | Roster |
-| `v` | Next view of this screen (roster split, standings table, workload order) | `r` | Refresh |
-| `m` | Show or hide the menu (it hides itself below 110 columns) | `ctrl+t` | Light or dark |
-| `g` | AI news briefing (needs `ANTHROPIC_API_KEY`) | `q` | Quit |
+| `u` | Auto-swap | `r` | Refresh |
+| `v` | Next view of this screen (roster split, standings table, workload order) | `ctrl+t` | Light or dark |
+| `m` | Show or hide the menu (it hides itself below 110 columns; on a phone it opens as a page) | `q` | Quit |
+| `g` | AI news briefing (needs `ANTHROPIC_API_KEY`) | | |
 
 The Player finder has its own keys. Letters it does not use (`d`, `s`, `o`...) still jump
 to the other screens, except while you type in the search box.
@@ -175,13 +185,28 @@ to the other screens, except while you type in the search box.
 | `esc` | Leave the search box, close the card, or clear the search |
 | `space` or `*` | Add the player to your ESPN watch list, or take him off. This one is sent right away, see [Privacy and safety](#privacy-and-safety) |
 
+Player news has two tabs and a search:
+
+| Key | In Player news |
+|---|---|
+| `1` `2` | Your roster, your watch list |
+| `[` `]` | Fewer or more days back (1, 3, 5, 7, 14 or 30) |
+| `/` | Search any NBA player by name (a close spelling works), Enter to run it |
+| `.` | Ten older items for the player you searched (on a tab, the next window of days) |
+| `esc` | Leave the search box, then the pick list, then the search |
+
+On the Auto-swap screen (`u`), `enter` on a player shows what would happen if he turned
+healthy, and a second `enter` arms him. `enter` or `backspace` on an armed player disarms
+him, and `!` asks for an alert only, with no lineup change. The rest is in
+[docs/autoswap.md](docs/autoswap.md).
+
 The Playoff race screen is a scenario builder: the games left on one side, the odds on the
 other. Every pick runs the season again and a +/- column shows what your picks changed.
 
 | Key | In the Playoff race |
 |---|---|
 | `↑` `↓` (or `k` `j`) | Previous or next game |
-| `Page Up` `Page Down` | Previous or next week |
+| `Page Up` `Page Down` (or `,` `.`) | Previous or next week |
 | `←` `→` (or `h` `l`) | The team on the left (home) or on the right (away) wins. The same key again clears it |
 | `0` or `backspace` | Clear this game |
 | `c` | Clear every pick |
@@ -212,7 +237,34 @@ benchboss was built to live in the VS Code integrated terminal.
 
 More in [docs/vscode.md](docs/vscode.md).
 
-## Using it from a server or a phone
+## On a phone
+
+benchboss runs fine in an SSH app on a phone. Keep it on a computer that stays on (a Mac
+mini, a home server, a small cloud machine), open a `tmux` session there so it keeps running
+when the phone locks, and connect from the phone. To skip the SSH app, the server can serve
+the app as a web page behind a login (see "On a server, and in a browser" below).
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/phone-dashboard.png" alt="The dashboard on a 46-column phone screen"><br><sub><b>Dashboard</b> at 46 columns.</sub></td>
+<td width="50%"><img src="docs/images/phone-players.png" alt="The Player finder on a 46-column phone screen"><br><sub><b>Player finder</b>: the name and the split you picked stay side by side.</sub></td>
+</tr>
+</table>
+
+Under 80 columns or 30 rows the app switches to its compact layout on its own:
+
+- `m` opens the menu as a page of its own; `m`, `esc` or `backspace` close it.
+- A one-row key bar replaces the footer, with `m menu` always on it. Tapping a key on the bar
+  works like pressing it, and a tap never sends anything to ESPN.
+- `j` `k` scroll, and every action has a key that a phone keyboard has (letters, digits,
+  `,` `.` `/` `!` and the like), so you never need arrows or Page Up.
+- The Player finder puts the split you picked right after the name and folds its filters
+  into one line when the keyboard is up.
+
+`benchboss --layout compact` (or `full`) forces one or the other, and so do
+`BENCHBOSS_LAYOUT` and `"layout"` in `config.json`.
+
+## On a server, and in a browser
 
 Run benchboss on a small always-on Linux server and open it over SSH from your Mac or your
 phone, with `tmux` keeping the session alive, or serve it as a web page with
@@ -231,7 +283,7 @@ Run `benchboss --help` or `benchboss <command> --help` for every flag. Read comm
 | `benchboss dash [--watch]` | Dashboard once, or live in a side terminal |
 | `benchboss matchup` | Live score, projected final, games left |
 | `benchboss roster [--view l7]` | Roster with every stat split, the box score of one (`season`, `l7`, `l15`, `l30`, `proj`, `last`), who plays today |
-| `benchboss activity [--view games]` | Games per player this matchup week, day by day, with the bench marked (`lineup` order, or `games`: most games first) |
+| `benchboss activity [--view lineup]` | Games per player this matchup week, day by day, with the bench marked (`games`: most games first, or today's `lineup` order) |
 | `benchboss standings [--view divisions]` | League table with PA, Diff, streaks and playoff odds (`league`, `divisions`, `moves`) |
 | `benchboss playoffs [--pick "Winner>Loser"] [--view games]` | Playoff odds. `--pick` fixes a result (add `@WEEK` for a given week, repeat for more); `--view games` lists the matchups left |
 | `benchboss optimize [today\|tomorrow\|week\|11-04]` | Best lineup for a day or the rest of the week (`--dry-run` to only look) |
@@ -239,9 +291,11 @@ Run `benchboss --help` or `benchboss <command> --help` for every flag. Read comm
 | `benchboss players [NAME] [--from fa\|rostered\|watch\|all] [--pos C] [--sort l7]` | Player finder: every split and the box score (`--view` picks the split for the box score) |
 | `benchboss watch [list\|add\|remove] [PLAYER]` | Your ESPN watch list; `add` and `remove` ask first (`--dry-run` to only look) |
 | `benchboss fa [POS]` · `benchboss trending` | Free agents by % rostered, or rising the fastest |
-| `benchboss news [PLAYER ...] [--watch] [--days 5] [--ai]` | News and spins for your roster, your watch list or named players |
+| `benchboss news [PLAYER ...] [--watch] [--days 5] [-n 10] [--ai]` | News and spins for your roster or your watch list, or the latest news on any NBA player you name |
 | `benchboss trades [--need C] [--with TEAM] [--needs]` | Trade ideas, or every team's positional balance |
 | `benchboss alerts [--mark-read]` | Trade offers, accepted trades, pending claims, unread DMs, new watch-list news (`--mark-read` stops showing the news you saw) |
+| `benchboss autoswap [list\|add\|remove\|clear\|pause\|resume\|log] [PLAYER]` | Auto-swap: arm a player who might turn healthy before his game, so benchboss starts him by itself (`add` shows what would happen and asks; `--notify-only` for an alert alone) |
+| `benchboss monitor [--once] [--live]` | The background process that makes the auto-swaps and sends the notifications. Trial mode (it only says what it would do) unless `--live` |
 | `benchboss add PLAYER [--drop PLAYER]` · `drop` | Sign a free agent or put in a claim; release a player |
 | `benchboss trade --give A --get B [--msg TEXT]` | Send a trade offer |
 | `benchboss chat [TEXT] [--to TEAM]` | Read or post in the league chat or a DM |
@@ -271,6 +325,10 @@ Full reference: [docs/commands.md](docs/commands.md).
   projection, today's injuries only for this week and the next), with a 12% spread. Seeds
   follow ESPN's rules: division winners first, then the league's tiebreaker. ESPN's own odds
   sit next to ours for comparison.
+- **Auto-swap** benches the starter with the lowest value that day (projection times
+  availability) whose game has not started, and only when the change adds at least 1
+  projected point. It never moves a player whose game starts within 3 minutes. Details in
+  [docs/autoswap.md](docs/autoswap.md).
 - **Workload** reads the lineup ESPN has saved for each day of the week. A game counts for you
   only when the player is in a starting slot that day, so the games he spends on your bench
   are marked and left out of the `In` count.
@@ -286,7 +344,10 @@ Details and the API behind them: [docs/how-it-works.md](docs/how-it-works.md) an
 | ESPN cookies | OS keychain (service `benchboss`) | Fallback: `credentials.json` with 0600 permissions |
 | `BENCHBOSS_LEAGUE_ID`, `BENCHBOSS_TEAM_ID`, `BENCHBOSS_SEASON`, `BENCHBOSS_THEME` | Environment | Override the config file |
 | `ESPN_S2`, `ESPN_SWID` | Environment | Cookies for CI or containers |
-| Watch-list news you have seen | `seen-news.json` next to `config.json` | Written when the app shows the news and by `benchboss alerts --mark-read` |
+| Watch-list news you have seen | `seen-news.json` next to `config.json` | Written by `benchboss alerts --mark-read` |
+| Auto-swap marks, the monitor's state, the lineup log | `leagues/<league id>/` and `logs/` next to `config.json` | See [docs/autoswap.md](docs/autoswap.md#files) |
+| `BENCHBOSS_LAYOUT` | Environment | `auto` (compact on a phone or a small window), `compact` or `full` |
+| `BENCHBOSS_NTFY_TOPIC`, `BENCHBOSS_NOTIFY_CMD` | Environment or `notify.env` | Where `benchboss monitor` sends its notes ([notifications](docs/autoswap.md#notifications)) |
 | `ANTHROPIC_API_KEY` | Environment | Enables `benchboss news --ai` |
 | `BENCHBOSS_HOME` | Environment | Use a different config folder |
 
@@ -299,13 +360,20 @@ More in [docs/configuration.md](docs/configuration.md).
 - Nothing changes in your league without a confirmation: every write shows the exact moves and
   asks first. `--dry-run` shows the plan and sends nothing. Demo mode sends nothing to ESPN and
   saves nothing on your computer.
-- One exception. In the app's Player finder, space adds a player to your ESPN watch list (or
+- Two exceptions. In the app's Player finder, space adds a player to your ESPN watch list (or
   takes him off) right away, like the star in the ESPN app. Nobody else in the league sees your
   watch list and the same key undoes it. From the command line, `benchboss watch add|remove`
   asks first like every other write.
-- What stays on your computer: your config, the cookies (in the keychain), and two small files
+- The other one is auto-swap, and you opt in one player at a time. Arming a player shows what
+  would happen and asks first; after that, `benchboss monitor --live` may make that one change
+  without asking again. Without `--live` the monitor only tells you what it would have done.
+  `benchboss autoswap pause` stops it, and disarming always wins over a change about to go out.
+- What stays on your computer: your config, the cookies (in the keychain), two small files
   with the watch-list news you have already seen (`seen-news.json`) and the ones the app already
-  popped up (`toasted-news.json`). Nothing in them leaves your machine.
+  popped up (`toasted-news.json`), and if you use auto-swap, your marks, the monitor's state and
+  a log of every lineup change. Nothing in them leaves your machine.
+- The monitor's notes carry player names and what happened, never your league id or cookies.
+  On the public ntfy server anyone who knows your topic can read it, so pick a long random one.
 - Player news comes from ESPN's public feed and needs no cookies. The optional AI briefing sends
   only your players' names, NBA teams and positions to the Anthropic API, and only when you ask for it.
 - benchboss is not affiliated with, endorsed by or supported by ESPN. It uses the same
@@ -348,7 +416,7 @@ In our league free agents are lovingly called trash. Some trash is gold.
 
 - [ ] Categories leagues (projections per category, punt strategies)
 - [ ] Per-game projections from ESPN once the season starts (finer daily numbers)
-- [ ] Desktop notifications for trade offers and late scratches before lock
+- [ ] Notifications for trade offers and for starters ruled out before lock
 - [ ] Accept, decline and counter trades from the app
 - [ ] Waiver claim editing and FAAB suggestions
 - [ ] PyPI and Homebrew releases

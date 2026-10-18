@@ -20,13 +20,23 @@ _ET = dt.timezone(dt.timedelta(hours=-5))
 @dataclass(frozen=True)
 class Game:
     period: int
-    start: dt.datetime
+    start: dt.datetime           # the scheduled tip-off; format it with clock(), never directly
     home_id: int
     away_id: int
+    tbd: bool = False            # startTimeTBD: the time is a placeholder
+    valid_for_locking: bool = True  # validForLocking: ESPN locks lineups by this game
 
     def opponent(self, team_id: int) -> str:
         other = self.away_id if team_id == self.home_id else self.home_id
         return ("vs " if team_id == self.home_id else "@ ") + PRO_TEAM.get(other, "?")
+
+
+def clock(when: dt.datetime, tz: dt.tzinfo | None = None) -> str:
+    """ "7:00 PM": a tip time on the clock of ``tz`` (pass ``session.now.tzinfo``; None means
+    this computer's zone). Game.start keeps a fixed UTC-5 offset: right for comparing times,
+    an hour early on a clock during daylight saving time, so never format it directly."""
+    local = when.astimezone(tz) if tz else when.astimezone()
+    return f"{local:%I:%M %p}".lstrip("0")
 
 
 class SeasonCalendar:
@@ -48,7 +58,9 @@ class SeasonCalendar:
                     sp = g["scoringPeriodId"]
                     start = dt.datetime.fromtimestamp(g["date"] / 1000, tz=_ET)
                     games.setdefault(team["id"], {})[sp] = Game(
-                        sp, start, g.get("homeProTeamId", 0), g.get("awayProTeamId", 0))
+                        sp, start, g.get("homeProTeamId", 0), g.get("awayProTeamId", 0),
+                        tbd=bool(g.get("startTimeTBD")),
+                        valid_for_locking=g.get("validForLocking") is not False)
                     last = max(last, sp)
                     if sp == 1:
                         first.append(g["date"])

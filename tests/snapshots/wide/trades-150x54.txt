@@ -1,0 +1,54 @@
+ ● benchboss  X.Y.Z   Monstars   demo data
+
+  Dashboard  d              Trade finder  ·  fair 1-for-1 deals that fix a position
+  Optimize today  t
+  Optimize week  w          1. Splash Mountain  (Casey Nguyen)
+  Auto-swap  u                 give Brandon Miller SF 37.4   get Ja Morant PG 37.5   fairness 100%
+  Workload  a                  "Hey Casey! You could use help at SF and you are deep at PG. I need a PG. Brandon Miller for Ja Morant is close in
+  Best trash  f                value and helps both of us. Interested?"
+  Player finder  p          2. Splash Mountain  (Casey Nguyen)
+  Player news  n               give AJ Dybantsa SF 32.9   get Ja Morant PG 37.5   fairness 88%
+  Trade finder  x              "Hey Casey! You could use help at SF and you are deep at PG. I need a PG. AJ Dybantsa for Ja Morant is close in
+  Inbox  i                     value and helps both of us. Interested?"
+  Standings  s              3. Fast Break Cartel  (Chris Moreno)
+  Playoff race  y              give Brandon Miller SF 37.4   get Damian Lillard PG 38.6   fairness 97%
+  Roster  o                    "Hey Chris! You could use help at SF and you are deep at PG. I need a PG. Brandon Miller for Damian Lillard is
+                               close in value and helps both of us. Interested?"
+                            4. Fast Break Cartel  (Chris Moreno)
+                               give AJ Dybantsa SF 32.9   get Damian Lillard PG 38.6   fairness 85%
+                               "Hey Chris! You could use help at SF and you are deep at PG. I need a PG. AJ Dybantsa for Damian Lillard is close
+                               in value and helps both of us. Interested?"
+                            5. Swish Kebab  (Taylor Kim)
+                               give Zach Edey C 33.2   get Jalen Green SG 32.4   fairness 98%
+                               "Hey Taylor! You could use help at C and you are deep at SG. I need a SG. Zach Edey for Jalen Green is close in
+                               value and helps both of us. Interested?"
+                            6. Swish Kebab  (Taylor Kim)
+                               give Alex Sarr C 36.6   get Tyler Herro SG 38.8   fairness 94%
+                               "Hey Taylor! You could use help at C and you are deep at SG. I need a SG. Alex Sarr for Tyler Herro is close in
+                               value and helps both of us. Interested?"
+                            7. Tune Squad  (Jordan Lee)
+                               give Alex Sarr C 36.6   get Stephon Castle PG 36.9   fairness 99%
+                               "Hey Jordan! You could use help at C and you are deep at PG. I need a PG. Alex Sarr for Stephon Castle is close in
+                               value and helps both of us. Interested?"
+                            8. Tune Squad  (Jordan Lee)
+                               give Jalen Duren C 42.2   get Jalen Brunson PG 43.8   fairness 96%
+                               "Hey Jordan! You could use help at C and you are deep at PG. I need a PG. Jalen Duren for Jalen Brunson is close in
+                               value and helps both of us. Interested?"
+
+                            Positional balance  ·  vs league average  ·  proj. pts per game
+
+                             Team                  PG    SG    SF     PF     C
+                             ─────────────────────────────────────────────────
+                             Monstars             -24     0    +9    -17   +27
+                             Tune Squad           +75    +4   -28    -56   -13
+                             Pick and Roll Pros   -22   +31   +30    -15   -21
+                             Fast Break Cartel    +40    +2   -34    -21   +36
+                             Swish Kebab          -17    +2   +40     -5   -44
+                             The Alley Oops        -6   +34   -12     +9   -23
+                             Brick City           +35   -11    +3    -16    +6
+                             Full Court Press     -49    -3   +31     -7    +9                                                                    ▆▆
+                             Splash Mountain      +35   -19   -46    +24   +16
+                             Rim Rockers          -68   -40    +8   +102    +7
+
+ demo data · nothing is sent to ESPN
+ d Dashboard  t Optimize today  w Optimize week  f Best trash  m Menu  r Refresh  ^t Light/Dark  q Quit

@@ -37,14 +37,17 @@ MESSAGE_KIND = {188: "[lineup move]", 239: "[roster drop]", 259: "[sticker]", 26
 
 @dataclass
 class Alert:
-    kind: str       # trade_offer, trade_sent, trade_accepted, waiver, dm, spin
+    kind: str       # trade_offer, trade_sent, trade_accepted, waiver, dm, spin, healthy, autoswap
     text: str
     urgent: bool = False
     news: NewsItem | None = None  # a spin alert's news item
-    player: str = ""              # a spin alert's watch-list player(s)
+    player: str = ""              # a spin alert's watch-list player(s); the monitor's player
+    at: str = ""                  # when the monitor made it (healthy, autoswap), ISO time
 
     def to_dict(self) -> dict:
         out = {"kind": self.kind, "text": self.text, "urgent": self.urgent}
+        if self.kind in MONITOR_KINDS:
+            out.update(player=self.player or None, at=self.at or None)
         if self.news is not None:
             n = self.news
             out.update(player=self.player, headline=n.headline, spin=n.spin or None,
@@ -237,9 +240,41 @@ def alerts(session, include_chat: bool = True, include_spins: bool = True) -> li
                 who = ", ".join(ppl.get(x, "someone") for x in t.get("viewableBy") or [] if x != swid)
                 out.append(Alert("dm", f"{unread} unread message{'s' * (unread > 1)} from {who}",
                                  urgent=True))
+    with contextlib.suppress(BenchbossError):
+        out += monitor_alerts(session)
     if include_spins:
         with contextlib.suppress(BenchbossError):
             out += spin_alerts(session)
+    return out
+
+
+# --- the monitor's alerts -------------------------------------------------------------------------
+
+MONITOR_KINDS = ("healthy", "autoswap")
+MONITOR_HOURS = 24  # how far back the Inbox shows them
+
+
+def monitor_alerts(session, hours: int = MONITOR_HOURS) -> list[Alert]:
+    """What ``benchboss monitor`` found in the last ``hours``, newest first, from its state
+    file (no ESPN read): kind "healthy" (a notify-only mark or a watch-list player turned
+    healthy; urgent when his game today has not started) and kind "autoswap" (what auto-swap
+    did or would have done; urgent when ESPN failed, refused or did not confirm it). The app
+    only shows these: the monitor is the one that sends notifications."""
+    from benchboss import monitor
+
+    cutoff = session.now - dt.timedelta(hours=hours)
+    out = []
+    for a in reversed(monitor.read_state(session).get("alerts") or []):
+        if not isinstance(a, dict) or a.get("kind") not in MONITOR_KINDS:
+            continue
+        try:
+            at = dt.datetime.fromisoformat(str(a.get("at")))
+        except ValueError:
+            continue
+        if at.tzinfo is None or at < cutoff:
+            continue
+        out.append(Alert(a["kind"], str(a.get("text") or ""), bool(a.get("urgent")),
+                         player=str(a.get("player") or ""), at=str(a.get("at"))))
     return out
 
 
