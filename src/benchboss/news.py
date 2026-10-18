@@ -53,38 +53,71 @@ def _parse_time(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+BATCH = 50          # player ids per request: the URL length caps one at about 100
+LATEST = 10         # items a named player shows when no window is asked for
+LATEST_LIMIT = 200  # the most items one latest() request asks the feed for
+
+
 def _get_feed(params: list[tuple[str, object]]) -> dict:
     """One request to the news feed: ``params`` are the query (playerId repeated, days,
-    limit). The seam for another transport; keep its signature and return the feed JSON."""
+    limit, offset). The seam for another transport; keep its signature and return the feed
+    JSON."""
     return http(FEED, params=params)
 
 
-def fetch(player_ids: list[int], days: int = 5, limit: int = 200,
-          include_media: bool = False) -> list[NewsItem]:
-    """Newest first, deduplicated across players."""
+def _parse_item(raw: dict) -> NewsItem:
+    """One feed item. RotoWire's analysis (``story``) becomes the spin."""
+    kind = raw.get("type", "")
+    rotowire = kind == "Rotowire"
+    web = ((raw.get("links") or {}).get("web") or {}).get("href", "")
+    return NewsItem(
+        id=raw.get("id"), published=_parse_time(raw.get("published") or "1970-01-01T00:00:00Z"),
+        headline=(raw.get("headline") or raw.get("title") or "").strip(),
+        spin=(raw.get("story") or "").strip() if rotowire else "",
+        source="RotoWire" if rotowire else "ESPN", kind=kind, link=web,
+        player_ids={raw.get("playerId")})
+
+
+def fetch(player_ids: list[int], days: int | None = 5, limit: int = 200,
+          include_media: bool = False, *, offset: int = 0) -> list[NewsItem]:
+    """News on these players, newest first, deduplicated across players.
+
+    ``days``: only the last ``days`` days (counted back from now); None asks for the newest
+    items whatever their date. ``limit`` and ``offset`` page the feed (per request of
+    ``BATCH`` players). Video items (Media) are left out unless ``include_media``."""
     items: dict[int, NewsItem] = {}
-    for i in range(0, len(player_ids), 50):  # URL length caps a request at about 100 ids
-        chunk = player_ids[i:i + 50]
-        params = [("playerId", pid) for pid in chunk] + [("days", days), ("limit", limit)]
-        for raw in _get_feed(params).get("feed", []):
-            kind = raw.get("type", "")
-            if kind == "Media" and not include_media:
+    for i in range(0, len(player_ids), BATCH):
+        chunk = player_ids[i:i + BATCH]
+        params: list[tuple[str, object]] = [("playerId", pid) for pid in chunk]
+        if days is not None:
+            params.append(("days", days))
+        params.append(("limit", limit))
+        if offset:
+            params.append(("offset", offset))
+        for raw in _get_feed(params).get("feed") or []:
+            if raw.get("type") == "Media" and not include_media:
                 continue
             nid = raw.get("id")
-            if nid in items:
+            if nid in items:  # one item about several players comes once for each of them
                 items[nid].player_ids.add(raw.get("playerId"))
                 continue
-            rotowire = kind == "Rotowire"
-            web = ((raw.get("links") or {}).get("web") or {}).get("href", "")
-            items[nid] = NewsItem(
-                id=nid, published=_parse_time(raw.get("published", "1970-01-01T00:00:00Z")),
-                headline=(raw.get("headline") or raw.get("title") or "").strip(),
-                spin=(raw.get("story") or "").strip() if rotowire else "",
-                source="RotoWire" if rotowire else "ESPN", kind=kind, link=web,
-                player_ids={raw.get("playerId")})
+            items[nid] = _parse_item(raw)
+    found = sorted(items.values(), key=lambda x: x.published, reverse=True)
+    if days is None:
+        return found
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
-    return sorted((x for x in items.values() if x.published >= cutoff),
-                  key=lambda x: x.published, reverse=True)
+    return [x for x in found if x.published >= cutoff]
+
+
+def latest(player_id: int, n: int = LATEST, offset: int = 0) -> list[NewsItem]:
+    """The newest ``n`` items on one player whatever their date, after skipping the newest
+    ``offset`` (so ``offset=10`` is the second page of ten).
+
+    The feed counts video items too, and those are left out, so one request asks for about
+    twice what it keeps."""
+    want = offset + n
+    items = fetch([player_id], days=None, limit=min(LATEST_LIMIT, 2 * want + 10))
+    return items[offset:want]
 
 
 # --- optional AI digest ---------------------------------------------------------------------------
