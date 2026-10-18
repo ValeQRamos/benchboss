@@ -5,11 +5,18 @@ Every download goes through ``news._get_feed``; these tests fake it there (or fa
 """
 
 import datetime as dt
+import io
+import json
 
 import pytest
+from rich.cells import cell_len
+from rich.console import Console
 
 from benchboss import news, text
+from benchboss.cli import main
 from benchboss.espn.models import Player
+from benchboss.ui.screens import news as screen
+from benchboss.ui.theme import DARK, LIGHT
 
 NOW = dt.datetime.now(dt.timezone.utc)
 
@@ -296,3 +303,197 @@ def test_demo_latest_news_has_no_window(session):
     assert len(session.news([BEN], 5)) == 1  # a window still cuts
     roster = [s.player.id for s in session.league().me.roster]
     assert len(session.news(roster + list(session.watch_list()), 5)) == 6  # the tabs as before
+
+
+# --- the news screen's data and drawing ------------------------------------------------------------
+
+
+def text_of(renderable, width: int = 120) -> str:
+    console = Console(width=width, record=True, file=io.StringIO())
+    console.print(renderable)
+    return console.export_text()
+
+
+def ben(session) -> Player:
+    return screen.find(session, "Ben Simmons").best
+
+
+def test_find_picks_one_player_or_offers_several(session):
+    sure = screen.find(session, "ben simmons")
+    assert sure.best.name == "Ben Simmons" and sure.exact
+    typo = screen.find(session, "ben simons")
+    assert typo.best.name == "Ben Simmons" and not typo.exact
+    several = screen.find(session, "jalen")
+    assert several.best is None and not several.sure and len(several.players) == 6
+    assert all("Jalen" in p.name for p in several.players)  # near spellings dropped
+    assert screen.find(session, "zzzz").players == []
+
+
+def test_owner_and_fresh_status(session):
+    daniels = screen.find(session, "dyson daniels").best
+    assert screen.owner_of(session, daniels) == "MONS"
+    b = ben(session)
+    assert screen.owner_of(session, b) == "FA" and not b.injury_known
+    fresh = screen.refreshed(session, b)
+    assert fresh.injury_known and fresh.status == "FREEAGENT"  # one kona read
+    assert screen.refreshed(session, daniels) is daniels  # rostered: no read
+    assert screen.candidate(fresh, "FA").startswith("Ben Simmons SAC PG · FA · ")
+
+
+def test_latest_news_section(session):
+    b = ben(session)
+    data = screen.load_latest(session, [b], 2)
+    sec = data.sections[0]
+    assert data.days is None and sec.key == "players" and sec.more
+    assert len(sec.items) == 2
+    rest = screen.load_latest(session, [b], 2, offset=2).sections[0]
+    assert len(rest.items) == 1 and not rest.more
+    nothing = screen.load_latest(session, [screen.find(session, "jalen duren").best])
+    assert nothing.sections[0].items == []
+
+
+def test_latest_news_errors_raise_or_stay_in_place(session, monkeypatch):
+    from benchboss.errors import NetworkError
+
+    def down(*a, **k):
+        raise NetworkError("could not reach ESPN (offline)")
+
+    monkeypatch.setattr(session, "latest_news", down)
+    with pytest.raises(NetworkError):
+        screen.load_latest(session, [ben(session)])
+    sec = screen.load_latest(session, [ben(session)], catch=True).sections[0]
+    assert sec.error.startswith(screen.UNAVAILABLE) and "offline" in sec.error
+    assert screen.UNAVAILABLE in text_of(screen.draw(screen.load_latest(
+        session, [ben(session)], catch=True), DARK))
+
+
+@pytest.mark.parametrize("width", [40, 46, 60, 80, 120, 150])
+@pytest.mark.parametrize("pal", [DARK, LIGHT])
+def test_latest_news_draws_dates_and_fits(session, width, pal):
+    data = screen.load_latest(session, [screen.refreshed(session, ben(session))])
+    out = text_of(screen.draw(data, pal, width), width)
+    assert all(cell_len(line.rstrip()) <= width for line in out.splitlines())
+    words = " ".join(out.split())
+    assert "Player news · latest news · 3 items" in words or width < 60
+    assert "Simmons went through a full practice" in words
+    if width >= 60:
+        assert "Oct 16" in out and "Oct 27" in out  # older than a few days: the date
+        assert "Tue 3:00 AM" in out                 # recent: the weekday and time
+
+
+def test_a_named_player_without_news_says_so(session):
+    data = screen.load_latest(session, [screen.find(session, "jalen duren").best])
+    out = text_of(screen.draw(data, DARK))
+    assert "No news yet." in out and "nothing new" in out
+
+
+def test_tab_data_keeps_a_feed_error_in_place(session, monkeypatch):
+    from benchboss.errors import NetworkError
+
+    def down(*a, **k):
+        raise NetworkError("could not reach ESPN (offline)")
+
+    monkeypatch.setattr(session, "news", down)
+    data = screen.load_tab(session, "watch", 3)
+    assert data.days == 3 and data.sections[0].key == "watch" and data.sections[0].error
+    assert len(data.sections[0].players) == 4
+    out = text_of(screen.body(data, DARK, 80, headings=False), 80)
+    assert "News is not available right now" in out and "Watch list" not in out
+
+
+def test_json_adds_player_ids(session):
+    data = screen.load(session, 5, ("watch",))
+    rows = screen.to_json(data)
+    assert [r["player_ids"] for r in rows] == [[5175643], [4683688]]
+    assert {"published", "source", "kind", "headline", "spin", "link", "players",
+            "section"} <= set(rows[0])
+
+
+# --- benchboss news -------------------------------------------------------------------------------
+
+
+def run(capsys, *args):
+    main(list(args))
+    return capsys.readouterr()
+
+
+def exit_code(capsys, *args) -> tuple[int, str]:
+    with pytest.raises(SystemExit) as e:
+        main(list(args))
+    return e.value.code, capsys.readouterr().err
+
+
+def test_cli_named_player_shows_his_latest_news(capsys):
+    got = run(capsys, "--demo", "--json", "news", "Ben Simmons")
+    rows = json.loads(got.out)
+    assert len(rows) == 3 and {r["section"] for r in rows} == {"players"}
+    assert rows[0]["players"] == ["Ben Simmons"] and rows[0]["player_ids"] == [BEN]
+    assert got.err == ""  # the exact name: no note
+    assert len(json.loads(run(capsys, "--demo", "--json", "news", "Ben Simmons", "-n", "1").out)) == 1
+    out = run(capsys, "--demo", "news", "Ben Simmons").out
+    assert "latest news" in out and "Oct 16" in out
+
+
+def test_cli_days_keeps_the_window_for_a_named_player(capsys):
+    rows = json.loads(run(capsys, "--demo", "--json", "news", "Ben Simmons", "--days", "5").out)
+    assert len(rows) == 1
+    out = run(capsys, "--demo", "news", "--days", "1", "Ben Simmons").out
+    assert "Nothing in the last 24 hours." in out
+
+
+def test_cli_close_spelling_gets_a_note(capsys):
+    got = run(capsys, "--demo", "news", "demn")
+    assert "Showing Egor Demin, the closest match to 'demn'." in got.err
+    assert "Demin is seeing more minutes" in got.out
+    got = run(capsys, "--demo", "--json", "news", "ben simons")
+    assert json.loads(got.out)[0]["players"] == ["Ben Simmons"]  # the JSON stays clean
+    assert "closest match" in got.err
+
+
+def test_cli_name_for_several_players_is_a_usage_error(capsys):
+    code, err = exit_code(capsys, "--demo", "news", "jalen")
+    assert code == 2 and "'jalen' matches several players" in err
+    assert "Jalen Duren (DET, MONS, " in err and "Jalen Suggs (ORL, FA, " in err
+
+
+def test_cli_no_such_player(capsys):
+    code, err = exit_code(capsys, "--demo", "news", "zzzz")
+    assert code == 1 and "no NBA player matches 'zzzz'" in err
+
+
+@pytest.mark.parametrize("args, says", [
+    (["-n", "3"], "-n is for the players you name"),
+    (["--watch", "-n", "3"], "-n is for the players you name"),
+    (["Ben Simmons", "-n", "3", "--days", "5"], "use one or the other"),
+    (["--watch", "Ben Simmons"], "not both"),
+    (["Ben Simmons", "-n", "0"], "must be 1 or more"),
+])
+def test_cli_news_usage_errors(capsys, args, says):
+    code, err = exit_code(capsys, "--demo", "news", *args)
+    assert code == 2 and says in err
+
+
+def test_cli_roster_and_watch_keep_their_window(capsys):
+    rows = json.loads(run(capsys, "--demo", "--json", "news").out)
+    assert len(rows) == 4 and {r["section"] for r in rows} == {"roster"}
+    assert len(json.loads(run(capsys, "--demo", "--json", "news", "--days", "1").out)) < 4
+    assert len(json.loads(run(capsys, "--demo", "--json", "news", "--watch").out)) == 2
+
+
+def test_cli_ai_with_a_named_player_uses_five_days(capsys, monkeypatch):
+    from benchboss import news as news_mod
+
+    calls = []
+    monkeypatch.setattr(news_mod, "ai_digest",
+                        lambda players, days: calls.append(([p.name for p in players], days))
+                        or "briefing")
+    assert json.loads(run(capsys, "--demo", "--json", "news", "Ben Simmons", "--ai").out) == {
+        "digest": "briefing"}
+    assert calls == [(["Ben Simmons"], 5)]
+
+
+def test_writes_still_need_the_exact_player(session):
+    from benchboss.errors import BenchbossError
+
+    with pytest.raises(BenchbossError):
+        session.find_player("ben simons")  # add, drop, trade and watch never guess
