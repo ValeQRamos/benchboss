@@ -8,18 +8,26 @@ are in [AGENTS.md](../AGENTS.md); these rules are the non-negotiable part.
 - Reads are safe: `dash`, `matchup`, `roster`, `activity`, `trash`, `players`, `watch` (or
   `watch list`), `fa`, `trending`, `news` (`news --watch` for the watch list), `trades`, `alerts`,
   `standings`, `playoffs` (`--pick "Winner>Loser"` only changes the simulation), `chat`
-  (without text), `status`. `--view` only changes the text output; `--json` has everything.
+  (without text), `status`, `autoswap list`, `autoswap log`, and `monitor --once --dry-run`
+  (the only form of the monitor to run yourself). `--view` only changes the text output;
+  `--json` has everything.
 - Writes change the real league: `optimize`, `add`, `drop`, `trade`, `watch add`,
-  `watch remove`, `chat "text"`. Show the plan first with `--dry-run`, wait for the user's
+  `watch remove`, `chat "text"`, `autoswap add` (arms a player), `monitor` (the user runs it).
+  Show the plan first with `--dry-run`, wait for the user's
   explicit yes in chat, then run the same command with `--yes` and quote the `ESPN: ...` line.
   One approval covers one action. (The app's watch-list star skips this on purpose, because
   the list is private and the same key undoes it. From the terminal, `watch add "Player"` and
   `watch remove "Player"` always ask.)
+- Auto-swap is the one automatic lineup write: arming a player is the user's yes for him, and
+  `benchboss monitor` makes the change while it runs. Never arm a player or run
+  `autoswap resume` without the user's yes. Never start `benchboss monitor` yourself (it never
+  exits, and `--live` changes the lineup without asking): give the user the command.
+  `autoswap remove`, `clear` and `pause` lower the risk: run them when asked.
 - `alerts --mark-read` only writes a local file, but those watch-list items then never come
   back in `alerts` or in the app's toasts. Run it only when the user says they have read them.
 - Never run a write command without `--yes` or `--dry-run`: it waits for keyboard input and
   hangs the agent terminal. For the same reason never run `benchboss` with no command,
-  `benchboss app` or `dash --watch` (they are interactive and never exit).
+  `benchboss app`, `dash --watch` or `monitor` without `--once` (they never exit).
 - `news --ai` calls the Anthropic API with the user's key and costs money: run it only when
   the user asks for the AI briefing.
 - Never ask for, print or pass ESPN cookies. If `benchboss` exits with code 3, ask the user to

@@ -13,6 +13,8 @@ GROUPS = [
     ("Find", ["trash", "players", "fa", "trending", "news", "trades", "alerts"]),
     ("Act (writes to ESPN, always asks first)", ["optimize", "add", "drop", "trade", "watch",
                                                  "chat"]),
+    ("Auto-swap (arming a player is your yes; the monitor makes the change)",
+     ["autoswap", "monitor"]),
     ("Account", ["setup", "login", "logout", "status", "app"]),
 ]
 
