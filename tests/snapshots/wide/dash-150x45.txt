@@ -1,0 +1,45 @@
+ ● benchboss  X.Y.Z   Monstars   demo data
+
+  Dashboard  d                 ▄▄█████▄▄
+  Optimize today  t          ▄▀▀█████████▄
+  Optimize week  w          ▄███▀▀████████▄    MONSTARS                                                                                    3:30 pm
+  Workload  a               ███████████████    Demo Hoops League                                                                         Wed Nov 4
+  Best trash  f             ▀▀▀▀██████▀▀█▀▀    2-0  ·  2nd of 10  ·  projected 2nd  ·  streak W2
+  Player finder  p           ████▀▀▀█▀██▀█     29% ESPN playoff odds  ━━━─────────
+  Player news  n              ▀█████████▀
+  Trade finder  x                ▀▀▀▀▀
+  Inbox  i
+  Standings  s              ╭─  WEEK 3  ──────────────────────────────────────────────╮ ╭─  INBOX  ──────────────────────────────────────────────╮
+  Playoff race  y           │                                      Score  Proj.  Left │ │ ● Trade offer from Tune Squad: you give Scotty Pippen  │
+  Roster  o                 │ Monstars                             420.7  1,483    29 │ │ Jr., you get Lauri Markkanen                           │
+                            │ Pick and Roll Pros                   402.5  1,597    33 │ ╰────────────────────────────────────────────────────────╯
+                            │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ ╭─  WORKLOAD THIS WEEK  ─────────────────────────────────╮
+                            │ Up 18.2 now, projected to lose by 114                   │ │ Most games                                             │
+                            ╰──────────────────────────────  Mon Nov 2 to Sun Nov 8  ─╯ │ A. Edwards MIN                        4 games (3 left) │
+                            ╭─  ROSTER  ──────────────────────────────────────────────╮ │ L. Ball MIN                           4 games (3 left) │
+                            │ PG ● L. Ball MIN                                   46.4 │ │ A. Sarr WSH                           4 games (3 left) │
+                            │ SG ● A. Edwards MIN                                47.2 │ │ Fewest games                                           │
+                            │ SF ● B. Miller CHA                                 37.4 │ │ S. Pippen Jr. MEM                     3 games (2 left) │
+                            │ PF ● T. Harris SAS DTD                             30.1 │ │ C. White CHA                          3 games (2 left) │
+                            │ C  ● J. Duren DET                                  42.2 │ │ Z. Edey MEM                           3 games (2 left) │
+                            │ G  ● D. Daniels ATL DTD                            35.7 │ ╰────────────────────────────────────────────────────────╯
+                            │ F  ● A. Dybantsa WSH                               32.9 │ ╭─  RISING ON WAIVERS  ──────────────────────────────────╮
+                            │ UT ● A. Sarr WSH                                   36.6 │ │ E. Demin BKN                                   46 ▲1.7 │
+                            │ UT ● R. Gobert MIN                                 34.3 │ │ P. Watson CLE                                  46 ▲1.1 │
+                            │ UT ● C. White CHA DTD                              32.9 │ │ C. Murray-Boyles TOR                           13 ▲1.1 │
+                            │ BE ● P. Siakam IND                                 41.1 │ ╰───────────────────────  % rostered, change in a week  ─╯
+                            │ BE ● Z. Edey MEM                                   33.2 │ ╭─  LEAGUE  ─────────────────────────────────────────────╮
+                            │ BE ● S. Pippen Jr. MEM                             30.6 │ │  1 Brick City                                      2-0 │▇▇
+                            ╰───────────────────────────────────────  10 play today  ─╯ │  2 Monstars                                        2-0 │
+                            ╭─  BEST TRASH THIS WEEK  ────────────────────────────────╮ │  3 Swish Kebab                                     1-1 │
+                            │ D. Sharpe BKN                         +54 pts · 2 games │ │  4 Pick and Roll Pros                              1-1 │
+                            │ E. Demin BKN                          +38 pts · 2 games │ │  5 Rim Rockers                                     1-1 │
+                            │ J. Suggs ORL                          +36 pts · 2 games │ │  6 Splash Mountain                                 1-1 │
+                            ╰────────────────────────  points added if you grab him  ─╯ │  7 Tune Squad                                      1-1 │
+                                                                                        │  8 Full Court Press                                1-1 │
+                                                                                        │  9 The Alley Oops                                  0-2 │
+                                                                                        │ 10 Fast Break Cartel                               0-2 │
+                                                                                        ╰────────────────────────────────────────────────────────╯
+
+ demo data · nothing is sent to ESPN
+ d Dashboard  t Optimize today  w Optimize week  f Best trash  m Menu  r Refresh  ^t Light/Dark  q Quit

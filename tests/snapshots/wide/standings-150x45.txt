@@ -1,0 +1,45 @@
+ ● benchboss  X.Y.Z   Monstars   demo data
+
+  Dashboard  d              Demo Hoops League  ·  week 3 of 20  ·  top 4 make the playoffs
+  Optimize today  t
+  Optimize week  w            #   Team                 Manager        W-L     Pct    GB        PF        PA     Diff   Strk   Playoffs
+  Workload  a                ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Best trash  f               1   Brick City           Morgan Cruz    2-0   1.000     -   3,218.8   2,856.9   +361.9     W2    87% ━━━━━━━━━─
+  Player finder  p            2   Monstars             Alex Rivera    2-0   1.000     -   2,953.6   2,739.7   +213.9     W2    29% ━━━───────
+  Player news  n              3   Swish Kebab          Taylor Kim     1-1    .500   1.0   2,921.3   2,913.7     +7.6     L1    12% ━─────────
+  Trade finder  x             4   Pick and Roll Pros   Sam Patel      1-1    .500   1.0   2,859.2   2,872.2    -13.0     L1    36% ━━━━──────
+  Inbox  i                   ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  Standings  s                5   Rim Rockers          Riley Santos   1-1    .500   1.0   2,857.9   2,823.2    +34.7     W1    52% ━━━━━─────
+  Playoff race  y             6   Splash Mountain      Casey Nguyen   1-1    .500   1.0   2,846.8   2,889.9    -43.1     W1    57% ━━━━━━────
+  Roster  o                   7   Tune Squad           Jordan Lee     1-1    .500   1.0   2,822.7   2,884.4    -61.7     L1    13% ━─────────
+                              8   Full Court Press     Jamie Ortiz    1-1    .500   1.0   2,735.6   2,777.0    -41.4     W1    16% ━━────────
+                              9   The Alley Oops       Drew Garza     0-2    .000   2.0   3,017.6   3,250.7   -233.1     L2    29% ━━━───────
+                             10   Fast Break Cartel    Chris Moreno   0-2    .000   2.0   2,838.6   3,064.4   -225.8     L2    69% ━━━━━━━───
+
+                            PF points for  ·  PA points against  ·  GB games back  ·  Playoffs ESPN's odds  ·  ╌╌ playoff line
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ League · v for Divisions · r refresh · ctrl+t light/dark · q quit
+ d Dashboard  t Optimize today  w Optimize week  f Best trash  m Menu  r Refresh  ^t Light/Dark  q Quit

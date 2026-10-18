@@ -1,6 +1,7 @@
 """The laptop look does not change: every guarded screen at the window sizes in
-``layout.WIDE_GUARDS`` (120x40 and 150x54) must match its text snapshot in
-tests/snapshots/wide/.
+``layout.WIDE_GUARDS`` (120x40 and 150x54), and at 150x45, must match its text snapshot in
+tests/snapshots/wide/. The snapshots come from the code before the phone work, except the
+dashboard at 120x40, rewritten on purpose (two columns from 78 content columns).
 
 The phone work in 1.0.4 changes how the app reads under 80 columns or 30 rows. These
 snapshots make sure it leaves the wide view alone. When a change to a wide screen is on
@@ -70,7 +71,11 @@ async def _capture(size: tuple[int, int]) -> dict[str, str]:
     return shots
 
 
-@pytest.mark.parametrize("size", layout.WIDE_GUARDS, ids=lambda s: f"{s[0]}x{s[1]}")
+# 150x45: a laptop terminal a little shorter than the README screenshots (150x54)
+SIZES = (*layout.WIDE_GUARDS, (150, 45))
+
+
+@pytest.mark.parametrize("size", SIZES, ids=lambda s: f"{s[0]}x{s[1]}")
 def test_the_wide_view_does_not_change(size):
     shots = asyncio.run(_capture(size))
     tag = f"{size[0]}x{size[1]}"
