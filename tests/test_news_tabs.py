@@ -8,7 +8,8 @@ import datetime as dt
 
 import pytest
 
-from benchboss import news
+from benchboss import news, text
+from benchboss.espn.models import Player
 
 NOW = dt.datetime.now(dt.timezone.utc)
 
@@ -105,3 +106,59 @@ def test_latest_pages_by_items_kept_and_skips_video(feed):
     assert first[-1].published > second[0].published
     assert news.latest(7, 10, offset=20) == []  # 20 Rotowire items in all
     assert dict(f.calls[-1])["limit"] <= news.LATEST_LIMIT
+
+
+# --- text.rank and text.confident ------------------------------------------------------------------
+
+POOL = [Player(1, "Ben Simmons", 1, owned=12.0), Player(2, "Anfernee Simons", 2, owned=40.0),
+        Player(3, "Jeremiah Simmons", 0, owned=0.1), Player(4, "Kobi Simmons", 3, owned=0.4),
+        Player(5, "Nikola Jokić", 4, owned=100.0), Player(6, "Nikola Jović", 5, owned=3.0),
+        Player(7, "Nikola Vučević", 6, owned=88.0), Player(8, "Anthony Edwards", 7, owned=99.9),
+        Player(9, "Justin Edwards", 8, owned=1.0), Player(10, "LaMelo Ball", 9, owned=99.0),
+        Player(11, "Shai Gilgeous-Alexander", 10, owned=100.0),
+        Player(12, "Nickeil Alexander-Walker", 11, owned=20.0)]
+
+
+def ranked(query):
+    return text.rank(POOL, query, lambda p: p.name, lambda p: (p.owned, p.pro_team_id > 0))
+
+
+@pytest.mark.parametrize("query, first, sure", [
+    ("ben simmons", "Ben Simmons", True),
+    ("Ben Simons", "Ben Simmons", True),        # a typo
+    ("jokic", "Nikola Jokić", True),            # accents fold
+    ("JOKIĆ", "Nikola Jokić", True),
+    ("lamelo", "LaMelo Ball", True),
+    ("shai", "Shai Gilgeous-Alexander", True),
+    ("a edwards", "Anthony Edwards", True),     # first initial and last name
+    ("okic", "Nikola Jokić", True),             # inside the name
+    ("simmons", "Ben Simmons", False),          # three of them: the most rostered first
+    ("nikola", "Nikola Jokić", False),
+    ("edwrds", "Anthony Edwards", False),       # a typo that fits two players alike
+])
+def test_rank_and_confident(query, first, sure):
+    r = ranked(query)
+    assert r[0][1].name == first
+    assert text.confident(r) is sure
+
+
+def test_rank_scores_and_order():
+    assert ranked("ben simmons")[0][0] == text.EXACT
+    assert ranked("ben sim")[0][0] == text.PREFIX
+    assert [p.name for _, p in ranked("simmons")] == ["Ben Simmons", "Kobi Simmons",
+                                                      "Jeremiah Simmons", "Anfernee Simons"]
+    assert ranked("simmons")[-1][0] < text.INSIDE  # Simons is only a near spelling
+    assert "Shai Gilgeous-Alexander" in [p.name for _, p in ranked("alexander")]
+    assert ranked("") == [] and ranked("zzzz") == [] and ranked("  ") == []
+    assert len(text.rank(POOL, "i", lambda p: p.name, n=3)) == 3
+    assert not text.confident([])
+
+
+def test_rank_without_a_weight_keeps_the_given_order_for_ties():
+    r = text.rank(POOL, "nikola", lambda p: p.name)
+    assert [p.id for _, p in r] == [5, 6, 7]
+
+
+def test_match_one_for_writes_does_not_guess():
+    with pytest.raises(Exception, match="is not in"):
+        text.match_one(POOL, "Ben Simons", lambda p: p.name, where="the pool")
