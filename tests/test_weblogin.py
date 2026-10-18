@@ -213,6 +213,61 @@ def test_a_form_or_websocket_from_another_site_is_refused():
     run(go())
 
 
+def test_a_browser_that_says_same_origin_gets_in_even_when_origin_is_null():
+    """Browsers send `Origin: null` on same-origin forms under some referrer policies."""
+    async def go():
+        client = await started(make(public_url="https://bb.example.test"))
+        r = await sign_in(client, **{"Sec-Fetch-Site": "same-origin", "Origin": "null"})
+        assert r.status == 303 and cookie(r)
+        await client.close()
+
+    run(go())
+
+
+@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+def test_the_browsers_own_cross_site_verdict_is_final(site):
+    async def go():
+        client = await started(make(public_url="http://bb.example.test"))
+        r = await sign_in(client, **{"Sec-Fetch-Site": site, "Origin": "http://bb.example.test"})
+        assert r.status == 403 and cookie(r) is None
+        await client.close()
+
+    run(go())
+
+
+def test_an_origin_of_null_without_sec_fetch_site_is_refused():
+    async def go():
+        client = await started(make(public_url="http://bb.example.test"))
+        assert (await sign_in(client, Origin="null")).status == 403
+        await client.close()
+
+    run(go())
+
+
+def test_the_proxys_forwarded_host_counts_as_our_address():
+    async def go():
+        client = await started(make())  # no public address configured
+        r = await sign_in(client, **{"Origin": "https://bb.example.test",
+                                     "X-Forwarded-Host": "bb.example.test"})
+        assert r.status == 303
+        r = await sign_in(client, **{"Origin": "https://evil.example",
+                                     "X-Forwarded-Host": "bb.example.test"})
+        assert r.status == 403
+        await client.close()
+
+    run(go())
+
+
+def test_the_login_page_does_not_ask_browsers_to_hide_the_origin():
+    async def go():
+        client = await started(make())
+        r = await client.get("/login")
+        assert r.headers["Referrer-Policy"] == "same-origin"
+        await client.close()
+
+    run(go())
+
+
 # --- GitHub --------------------------------------------------------------------------------------
 
 def github(users=("octocat",), **kw):

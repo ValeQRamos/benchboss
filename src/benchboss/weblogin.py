@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import html
 import json
+import logging
 import os
 import secrets
 import time
@@ -42,7 +43,7 @@ PAGE_HEADERS = {
     "Cache-Control": "no-store",
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    "Referrer-Policy": "same-origin",  # "no-referrer" makes browsers send `Origin: null` on forms
     "Content-Security-Policy": ("default-src 'none'; style-src 'unsafe-inline'; img-src data:; "
                                 "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"),
 }
@@ -50,6 +51,9 @@ PAGE_HEADERS = {
 
 class LoginError(Exception):
     """GitHub did not give an identity."""
+
+
+log = logging.getLogger("benchboss.weblogin")
 
 
 @dataclass
@@ -175,11 +179,24 @@ class Auth:
         return _verify(self.cfg.secret, request.cookies.get(COOKIE, ""), self.now())
 
     def _same_origin(self, request: web.Request) -> bool:
+        """Is this form or websocket from our own page? Browsers say so in Sec-Fetch-Site; the
+        Origin header is the fallback for those that do not."""
+        site = request.headers.get("Sec-Fetch-Site")
         origin = request.headers.get("Origin")
-        if not origin:
-            return True
-        allowed = {request.host, urllib.parse.urlparse(self.cfg.public_url).netloc}
-        return urllib.parse.urlparse(origin).netloc in allowed
+        if site:
+            ok = site in ("same-origin", "none")
+        elif not origin:
+            ok = True
+        else:
+            allowed = {request.host, urllib.parse.urlparse(self.cfg.public_url).netloc}
+            forwarded = request.headers.get("X-Forwarded-Host", "")
+            if forwarded and request.remote in ("127.0.0.1", "::1"):  # set by the proxy here
+                allowed.add(forwarded.split(",")[0].strip())
+            ok = urllib.parse.urlparse(origin).netloc in allowed
+        if not ok:
+            log.warning("refused a cross-site request: Sec-Fetch-Site=%s Origin=%s Host=%s",
+                        site, origin, request.host)
+        return ok
 
     # --- pages ---------------------------------------------------------------------------------
 
