@@ -283,11 +283,12 @@ league and team. A terminal session never shows this screen and behaves as befor
 
 ## Known limits
 
-- **News from a datacenter IP.** ESPN's league data works from a server, but the player news
-  host `site.api.espn.com` answered `403 Access Denied` from a cloud IP in testing. Then
-  `benchboss alerts` prints `Watch list news is not available right now` and still shows
-  trade offers, claims and messages. The same news endpoints answered on the host
-  `site.web.api.espn.com` with identical content, which may be used in a later release.
+- **News from a datacenter IP.** ESPN's player news host `site.api.espn.com` answered
+  `403 Access Denied` from a cloud IP in testing. benchboss therefore asks
+  `site.web.api.espn.com` first, which serves the same feed and answered from the same server,
+  and falls back to `site.api.espn.com`. If both ever refuse a server, `benchboss alerts`
+  prints `Watch list news is not available right now` and still shows trade offers, claims and
+  messages.
 - **Cookies live on the server.** Anyone with shell access to that Linux user can read them.
   Keep the server patched and the SSH key protected.
 

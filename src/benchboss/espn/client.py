@@ -6,7 +6,7 @@ Hosts (all under /apis/v3/games/fba):
                         fields (the watch list)
   lm-api-communication  league chat and direct messages
 Private leagues need the espn_s2 and SWID cookies of a member. Public NBA data (news,
-injuries) comes from site.api.espn.com and needs no cookies.
+injuries) comes from site.web.api.espn.com, then site.api.espn.com, and needs no cookies.
 """
 
 from __future__ import annotations
@@ -28,7 +28,10 @@ from benchboss.errors import AuthError, EspnError, NetworkError
 READS = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba"
 WRITES = "https://lm-api-writes.fantasy.espn.com/apis/v3/games/fba"
 COMM = "https://lm-api-communication.fantasy.espn.com/apis/v3/games/fba"
-SITE = "https://site.api.espn.com/apis"
+SITE = "https://site.web.api.espn.com/apis"
+# Same data. It is tried second because ESPN answers 403 to some cloud servers on this host.
+SITE_FALLBACK = "https://site.api.espn.com/apis"
+NEWS_PATH = "/fantasy/v2/games/fba/news/players"
 USER_AGENT = f"benchboss/{__version__} (+https://github.com/ValeQRamos/benchboss)"
 
 
@@ -170,8 +173,19 @@ class Client:
                     headers=headers, body=body, cookies=self.cookies)
 
 
+def site_get(path: str, params=None) -> Any:
+    """GET a public site endpoint (no cookies): SITE first, then SITE_FALLBACK when that fails.
+    If both fail, the error from SITE is the one raised."""
+    try:
+        return http(SITE + path, params=params)
+    except (EspnError, NetworkError) as first:
+        try:
+            return http(SITE_FALLBACK + path, params=params)
+        except (EspnError, NetworkError):
+            raise first from None
+
+
 def player_news(player_id: int, limit: int = 10) -> list[dict]:
     """Public fantasy news feed for one player (Rotowire blurbs and ESPN media). No cookies."""
-    url = f"{SITE}/fantasy/v2/games/fba/news/players"
-    data = http(url, params=[("playerId", player_id), ("limit", limit)])
+    data = site_get(NEWS_PATH, [("playerId", player_id), ("limit", limit)])
     return data.get("feed", [])

@@ -18,10 +18,9 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from benchboss.errors import BenchbossError
-from benchboss.espn.client import _DROPPED, _SSL, SITE, http
+from benchboss.espn.client import _DROPPED, _SSL, NEWS_PATH, site_get
 from benchboss.espn.models import Player
 
-FEED = f"{SITE}/fantasy/v2/games/fba/news/players"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 DEFAULT_MODEL = "claude-sonnet-5-5"
 
@@ -55,7 +54,7 @@ def fetch(player_ids: list[int], days: int = 5, limit: int = 200,
     for i in range(0, len(player_ids), 50):  # URL length caps a request at about 100 ids
         chunk = player_ids[i:i + 50]
         params = [("playerId", pid) for pid in chunk] + [("days", days), ("limit", limit)]
-        for raw in http(FEED, params=params).get("feed", []):
+        for raw in site_get(NEWS_PATH, params).get("feed", []):
             kind = raw.get("type", "")
             if kind == "Media" and not include_media:
                 continue
