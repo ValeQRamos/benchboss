@@ -361,6 +361,9 @@ Serve the app in a browser (needs the web extra); put a proxy with a login in fr
 ```text
 benchboss web [-h] [--json] [--demo] [--theme {dark,light}] [-y]
                      [--host HOST] [--port PORT] [--url URL] [--allow-remote]
+                     [--password-file FILE] [--login-user NAME]
+                     [--github-client-id ID] [--github-users LOGINS]
+                     [--session-hours HOURS]
 ```
 
 | Option | Meaning |
@@ -369,3 +372,8 @@ benchboss web [-h] [--json] [--demo] [--theme {dark,light}] [-y]
 | `--port` | Port to listen on (default 8000) |
 | `--url` | The public address people type, for example https://bb.example.com (behind a proxy) |
 | `--allow-remote` | Allow --host to be an address other computers can reach |
+| `--password-file` | Turn on the sign in page with the password in this file (chmod 600, 12 characters or more) |
+| `--login-user` | The user name for the password (default owner) |
+| `--github-client-id` | Turn on Sign in with GitHub (also needs --github-users, --url and the BENCHBOSS_GITHUB_CLIENT_SECRET environment variable) |
+| `--github-users` | GitHub logins (or numeric ids) allowed in, comma separated |
+| `--session-hours` | How long a sign in lasts (default 12) |

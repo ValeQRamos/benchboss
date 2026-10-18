@@ -7,10 +7,12 @@ import contextlib
 import datetime as dt
 import getpass
 import json
+import os
 import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from rich.console import Console
 from rich.text import Text
@@ -688,9 +690,43 @@ def cmd_app(c: Ctx):
     run(c.cfg, demo=c.args.demo)
 
 
+def _web_auth(c: Ctx):
+    """The sign in for the web app from the --password-file and --github-* options, or None
+    when none is asked for (then a proxy in front must provide the login)."""
+    from benchboss import weblogin
+
+    a = c.args
+    password = None
+    if a.password_file:
+        path = Path(a.password_file).expanduser()
+        try:
+            mode = path.stat().st_mode
+            password = path.read_text().strip()
+        except OSError as e:
+            raise BenchbossError(f"cannot read {path}: {e.strerror}") from None
+        if mode & 0o077:
+            raise BenchbossError(f"{path} can be read by other users: run chmod 600 on it")
+        if len(password) < 12:
+            raise BenchbossError(f"the password in {path} needs at least 12 characters")
+    client_id = a.github_client_id or os.environ.get("BENCHBOSS_GITHUB_CLIENT_ID", "")
+    secret = os.environ.get("BENCHBOSS_GITHUB_CLIENT_SECRET", "")  # never a command-line argument
+    users = frozenset(u.strip().lower() for u in (a.github_users or "").split(",") if u.strip())
+    github = bool(client_id or secret or users)
+    if github and not (client_id and secret and users and a.url):
+        raise BenchbossError("GitHub sign in needs --github-client-id (or BENCHBOSS_GITHUB_CLIENT_ID), "
+                             "BENCHBOSS_GITHUB_CLIENT_SECRET, --github-users and --url")
+    if not password and not github:
+        return None
+    key = weblogin.load_secret(config_mod.config_dir() / "web-secret")
+    return weblogin.Auth(weblogin.AuthConfig(
+        secret=key, password=password, user=a.login_user, github_client_id=client_id,
+        github_secret=secret, github_users=users, public_url=a.url or "",
+        session_hours=a.session_hours))
+
+
 def cmd_web(c: Ctx):
-    """Serve the app in a browser. It has no login of its own: keep it on localhost and put
-    a reverse proxy with a login in front of it (docs/server.md)."""
+    """Serve the app in a browser. Without --password-file or --github-*, it has no login of
+    its own: keep it on localhost and put a reverse proxy with a login in front of it."""
     from benchboss import web
 
     a = c.args
@@ -704,10 +740,17 @@ def cmd_web(c: Ctx):
         raise BenchbossError("benchboss web needs the web extra: install it with "
                              "`uv tool install --with textual-serve benchboss` or "
                              "`pip install 'benchboss[web]'`") from None
+    auth = _web_auth(c)
+    if auth:
+        from benchboss import weblogin
+
+        Server = weblogin.login_server(Server, auth)
     command = web.session_command(demo=a.demo, theme=getattr(a, "theme", None))
     shown = a.url or f"http://{a.host}:{a.port}"
-    c.err.print(Text(f"benchboss web: serving {'demo data' if a.demo else 'your league'} at {shown}",
-                     style=c.pal.dim))
+    how = "password and GitHub" if auth and auth.cfg.password and auth.cfg.github else (
+        "GitHub" if auth and auth.cfg.github else "password" if auth else "no sign in")
+    c.err.print(Text(f"benchboss web: serving {'demo data' if a.demo else 'your league'} at {shown} "
+                     f"({how})", style=c.pal.dim))
     Server(command, host=a.host, port=a.port, title="benchboss", public_url=a.url).serve()
 
 
@@ -782,6 +825,18 @@ def build_parser() -> argparse.ArgumentParser:
                                               "https://bb.example.com (behind a proxy)")
     p.add_argument("--allow-remote", action="store_true",
                    help="allow --host to be an address other computers can reach")
+    p.add_argument("--password-file", metavar="FILE",
+                   help="turn on the sign in page with the password in this file (chmod 600, "
+                        "12 characters or more)")
+    p.add_argument("--login-user", default="owner", metavar="NAME",
+                   help="the user name for the password (default owner)")
+    p.add_argument("--github-client-id", metavar="ID",
+                   help="turn on Sign in with GitHub (also needs --github-users, --url and the "
+                        "BENCHBOSS_GITHUB_CLIENT_SECRET environment variable)")
+    p.add_argument("--github-users", metavar="LOGINS",
+                   help="GitHub logins (or numeric ids) allowed in, comma separated")
+    p.add_argument("--session-hours", type=float, default=12, metavar="HOURS",
+                   help="how long a sign in lasts (default 12)")
     p = add("dash", cmd_dash, "the dashboard: matchup, roster, workload, trash, standings")
     p.add_argument("--watch", nargs="?", type=int, const=60, metavar="SECONDS",
                    help="keep it open and refresh (default every 60 s)")

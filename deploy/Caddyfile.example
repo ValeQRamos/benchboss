@@ -1,10 +1,7 @@
 # /etc/caddy/Caddyfile
-# Caddy gets and renews the HTTPS certificate by itself. The login protects everything: the
-# app has none of its own. Make the hash with: caddy hash-password
-# (Caddy 2.8 and newer also accept the name basic_auth.)
+# Caddy gets and renews the HTTPS certificate by itself. The sign in is benchboss web's own
+# (--password-file and/or --github-*). If you run benchboss web without one, put a login here
+# instead (a basicauth block with a hash from `caddy hash-password`).
 bb.example.com {
-    basicauth {
-        owner PASTE_THE_BCRYPT_HASH_HERE
-    }
     reverse_proxy 127.0.0.1:8000
 }

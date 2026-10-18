@@ -222,15 +222,18 @@ open from any browser, including a phone.
 
 ```mermaid
 flowchart LR
-    B[Browser] -->|HTTPS, user and password| C[Caddy]
-    C -->|127.0.0.1:8000| W[benchboss web]
+    B[Browser] -->|HTTPS| C[Caddy]
+    C -->|127.0.0.1:8000| W[benchboss web: sign in page, then the app]
 ```
 
-**The app has no login of its own.** Anyone who reaches the page acts as the ESPN account on
-the server and can press Apply. So `benchboss web` listens on `127.0.0.1` only (it refuses any
-other `--host` unless you add `--allow-remote`), and a reverse proxy with a login and HTTPS
-sits in front. This is built for one person: everyone who knows the login is the same ESPN
-account.
+`benchboss web` has its own sign in page, in the style of the app, with a password and
+optionally GitHub. It sits in front of everything the web app serves, including the
+websocket, so the app never starts for someone who is not signed in. A reverse proxy (Caddy)
+only adds HTTPS. Without `--password-file` or the `--github-*` options there is **no login at
+all**: anyone who reaches the page acts as the ESPN account on the server and can press Apply.
+In that case put a proxy with a login in front. Either way `benchboss web` listens on
+`127.0.0.1` only (it refuses any other `--host` unless you add `--allow-remote`). This is built
+for one person: everyone who can sign in is the same ESPN account.
 
 ### Install and run
 
@@ -242,15 +245,62 @@ benchboss --demo web          # try it with the fictional league first
 `--demo` sends nothing to ESPN. Leave off `--demo` to serve your real league.
 
 To keep it running and restart it after a reboot, use the systemd unit in
-[deploy/benchboss-web.service](../deploy/benchboss-web.service) (put your public address in
-`--url`):
+[deploy/benchboss-web.service](../deploy/benchboss-web.service). Put your public address in
+`--url`, and make the password file first (next section):
 
 ```bash
 sudo cp deploy/benchboss-web.service /etc/systemd/system/
-sudo systemctl enable --now benchboss-web
+sudo systemctl daemon-reload && sudo systemctl enable --now benchboss-web
 ```
 
-### Put a login and HTTPS in front
+### Sign in with a password
+
+```bash
+(umask 077; openssl rand -base64 24 | tr -d '=+/' | cut -c1-24 > ~/.bb-web-password)
+cat ~/.bb-web-password           # the password; the user name is owner (--login-user)
+benchboss web --url https://bb.example.com --password-file ~/.bb-web-password
+```
+
+The file must not be readable by other users and the password needs 12 characters or more.
+What the sign in does:
+
+- A signed session cookie (`HttpOnly`, `SameSite=Lax`, `Secure` when `--url` is `https`) that
+  lasts 12 hours (`--session-hours`). Open `/logout` to end it.
+- Five wrong passwords from one address lock it out for ten minutes, and every wrong try
+  waits half a second. The page tells you nothing about which half was wrong.
+- Forms and websockets from another site are refused.
+- The signing key is `web-secret` in the config folder, made on first use with `0600`
+  permissions. Delete it and restart to sign everyone out.
+
+### Sign in with GitHub
+
+GitHub sign in lets only the GitHub users you list in. It needs an OAuth app that you register
+once under GitHub, Settings, Developer settings, OAuth Apps, New OAuth App:
+
+- Homepage URL: your public address, for example `https://bb.example.com`.
+- Authorization callback URL: `https://bb.example.com/login/github/callback`.
+
+Copy the client id, generate a client secret and keep it out of the command line (anyone on
+the server can read command lines). Put it in an environment file the service reads:
+
+```bash
+sudo install -d -m 700 /etc/benchboss
+read -rsp 'GitHub client secret: ' s && printf 'BENCHBOSS_GITHUB_CLIENT_SECRET=%s\n' "$s" | sudo tee /etc/benchboss/web.env >/dev/null; unset s
+sudo chmod 600 /etc/benchboss/web.env
+```
+
+Then add the id and the allowed users (comma separated GitHub logins or numeric ids) to the
+`ExecStart` line, next to or instead of `--password-file`, and restart:
+
+```
+--github-client-id YOUR_CLIENT_ID --github-users yourlogin
+```
+
+The page then shows a Sign in with GitHub button. A GitHub account that is not on the list sees
+"is not allowed here" and gets no session. `--url` is required, since GitHub sends the browser
+back to that address.
+
+### HTTPS in front
 
 Use [Caddy](https://caddyserver.com). It gets and renews the certificate by itself. You need a
 name that points at the server: your own domain, or a free name such as
@@ -258,21 +308,18 @@ name that points at the server: your own domain, or a free name such as
 
 ```bash
 sudo apt-get install -y caddy
-pw=$(openssl rand -base64 24 | tr -d '=+/' | cut -c1-24)   # a long random password
-echo "$pw" > ~/.bb-web-password && chmod 600 ~/.bb-web-password
-caddy hash-password --plaintext "$pw"                     # the hash goes in the Caddyfile
 ```
 
 Copy [deploy/Caddyfile.example](../deploy/Caddyfile.example) to `/etc/caddy/Caddyfile`, set
-your name and paste the hash, then open ports 80 and 443 and reload:
+your name, then open ports 80 and 443 and reload:
 
 ```bash
 sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
 sudo systemctl reload caddy
 ```
 
-Read the password with `cat ~/.bb-web-password` over SSH when you need it. Use a long random
-password: basic auth has no lockout of its own. Never serve the app over plain `http://`.
+Never serve the app over plain `http://`: the password and the cookies would travel in the
+clear.
 
 ### First run
 
@@ -325,6 +372,7 @@ The second command should show `passwordauthentication no` and `permitrootlogin 
 - Private keys stay out of git, chat and cloud-synced folders.
 - Reach SSH over Tailscale and close port 22 to the internet once that works.
 - No cookies or keys in the provisioning script or in user data.
-- If you use the web app: a login and HTTPS in front of it, `benchboss web` on `127.0.0.1`,
-  port 8000 closed to the internet, and a long random password.
+- If you use the web app: a sign in (`--password-file` or GitHub) and HTTPS in front of it,
+  `benchboss web` on `127.0.0.1`, port 8000 closed to the internet, and a long random
+  password.
 - Keep a spare way in (the provider's web console) in case you lock yourself out.

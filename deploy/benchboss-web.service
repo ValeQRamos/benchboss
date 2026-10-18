@@ -1,13 +1,16 @@
 [Unit]
-Description=benchboss web app (listens on localhost, a reverse proxy with a login sits in front)
+Description=benchboss web app (listens on localhost; Caddy adds HTTPS)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=bb
 WorkingDirectory=/home/bb
-# Replace the address with the public URL people type in the browser.
-ExecStart=/home/bb/.local/bin/benchboss web --host 127.0.0.1 --port 8000 --url https://bb.example.com
+# Optional: BENCHBOSS_GITHUB_CLIENT_SECRET for GitHub sign in (see docs/server.md).
+EnvironmentFile=-/etc/benchboss/web.env
+# Replace the address with the public URL people type in the browser. For GitHub sign in add:
+#   --github-client-id YOUR_CLIENT_ID --github-users yourlogin
+ExecStart=/home/bb/.local/bin/benchboss web --host 127.0.0.1 --port 8000 --url https://bb.example.com --password-file /home/bb/.bb-web-password
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
