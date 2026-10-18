@@ -4,6 +4,10 @@ How ESPN fills the bracket: ``playoffTeamCount`` teams make it, ranked by record
 with divisions the division winners are seeded first. Ties go to the league's tiebreaker
 (``scheduleSettings.playoffSeedingRule``) and then, as ESPN's settings page says, to
 head-to-head record, points for, division record, points against and finally a coin flip.
+ESPN works the seeds out on its servers (the web app only sorts teams by
+``teams[].playoffSeed``), so two details come from the settings page and have not been
+checked against a real tie: more points against ranks first, and the division winners take
+the top seeds even with a worse record.
 
 ``race`` plays the rest of the regular season ``sims`` times. A team's score in a week is
 drawn around what it is expected to score that week: its points per day so far, blended
@@ -13,6 +17,11 @@ only simulates what is still to come: the days left and today's games that have 
 off. Two teams with nothing projected (empty rosters before the draft) play a coin flip, not
 a 0-0 tie. Results you pick (``picks``: matchup id -> winning team id) are fixed in every
 simulation; that is how the scenarios work.
+
+Every count of simulated seasons is ``SIMS``: the first view, every pick in the app and the
+CLI. The random draws are the same for every game whether it is picked or not (the coin of
+a 0-0 game is drawn every time), so a race with picks plays the same seasons as the race
+without them, and only what the picks change moves (``rerun``).
 
 "Clinched" and "eliminated" are certain, not simulated: clinched means no combination of
 the results not yet picked can keep the team out, eliminated means none can get it in. Both
@@ -30,6 +39,7 @@ from benchboss.espn.constants import IR
 from benchboss.espn.models import League, Matchup, Team
 from benchboss.text import match_one
 
+SIMS = 5000            # simulated seasons, everywhere: one count, so the +/- of a pick is real
 SPREAD = 0.12          # weekly score standard deviation, as a share of the expected score
 TEAM_SPREAD = 0.05     # how far a team's level can drift over the season (trades, injuries)
 NEAR_WEEKS = 2         # this week and next use the injury-aware projection; later, healthy
@@ -97,6 +107,9 @@ class Race:
     seeding_rule: str = ""
     me: int | None = None          # your team id
     baseline: Race | None = None   # the same race without the picks, when the caller ran it
+    # what ``race`` was called with, so ``rerun`` can play the same seasons with other picks
+    league: League | None = field(default=None, repr=False, compare=False)
+    inputs: dict = field(default_factory=dict, repr=False, compare=False)
 
     def odds(self, team_id: int) -> TeamOdds | None:
         return next((t for t in self.teams if t.team.id == team_id), None)
@@ -217,7 +230,7 @@ def projected_daily(team: Team, spots: int | None = None) -> float:
     return sum(best) * GAMES_PER_DAY * BENCH_LOSS
 
 
-def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, *,
+def race(league: League, picks: dict[int, int] | None = None, sims: int = SIMS, *,
          daily: dict[int, float] | None = None, days_by_week: dict[int, int] | None = None,
          week_progress: float = 0.0, live_left: dict[int, float] | None = None,
          in_season: bool = True, seed: int | None = 0) -> Race:
@@ -238,7 +251,12 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
     Each simulated season also moves every team's level a little (TEAM_SPREAD) for all the
     weeks ahead: trades, injuries and waiver luck make a team better or worse for a stretch,
     not just for one week, and without it the odds of the best rosters come out too sure.
+
+    Every game takes the same draws whether it is picked or not, so with the same ``seed``
+    and ``sims`` a race with picks plays the same seasons as the race without them.
     """
+    inputs = {"daily": daily, "days_by_week": days_by_week, "week_progress": week_progress,
+              "live_left": live_left, "in_season": in_season, "seed": seed}
     picks = dict(picks or {})
     games = season_games(league, in_season)
     by_id = {g.id: g for g in games}
@@ -277,8 +295,15 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
     last_near = league.current_matchup + NEAR_WEEKS - 1
 
     base = _standing_base(league, games)
+    known_h2h = base_h2h(games)   # the games ESPN decided: the same in every simulation
     # picked games are simulated too, for their points; only the winner is fixed
     open_games = [g for g in games if not g.decided or g.picked]
+    # each game's expected points before the season's level: its rate times its days
+    plan = []
+    for g in open_games:
+        rate = near_day if g.week <= last_near else per_day
+        week_days = days.get(g.week, 7)
+        plan.append((g, rate[g.home] * week_days, rate[g.away] * week_days))
     rng = random.Random(seed)
     n_seeds = league.playoff_teams or 0
     made = defaultdict(int)
@@ -289,36 +314,43 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
     home_wins = defaultdict(int)
     away_wins = defaultdict(int)
     runs = max(1, sims)
+    gauss, coin_flip = rng.gauss, rng.random
     for _ in range(runs):
         st = {tid: list(v) for tid, v in base.items()}   # wins, losses, ties, pf, pa
-        h2h = defaultdict(float)
-        level = {tid: rng.gauss(1.0, TEAM_SPREAD) for tid in teams}
-        for g in open_games:
-            rate = near_day if g.week <= last_near else per_day
-            mh = rate[g.home] * days.get(g.week, 7) * level[g.home]
-            ma = rate[g.away] * days.get(g.week, 7) * level[g.away]
+        h2h = defaultdict(float, known_h2h)
+        level = {tid: gauss(1.0, TEAM_SPREAD) for tid in teams}
+        for g, home_rate, away_rate in plan:
+            home, away = g.home, g.away
+            mh = home_rate * level[home]
+            ma = away_rate * level[away]
             rest_h, rest_a = mh, ma
             if g.live:  # only what is still to come: the live score holds the rest
-                rest_h = _live_rest(g.home, mh, progress, live_left, level)
-                rest_a = _live_rest(g.away, ma, progress, live_left, level)
-            hp = g.home_points + _draw(rng, mh, rest_h)
-            ap = g.away_points + _draw(rng, ma, rest_a)
-            if g.picked and (g.winner == g.home) != (hp > ap):
-                hp, ap = ap, hp  # keep the points in line with the result you picked
+                rest_h = _live_rest(home, mh, progress, live_left, level)
+                rest_a = _live_rest(away, ma, progress, live_left, level)
+            # points drawn around what is still to come of a week expected to bring mh (ma):
+            # the days score independently, so the spread grows with the square root of the
+            # part left, SPREAD of the whole week and none once nothing is left
+            hp = g.home_points + gauss(rest_h, SPREAD * max(0.0, mh * rest_h) ** 0.5)
+            ap = g.away_points + gauss(rest_a, SPREAD * max(0.0, ma * rest_a) ** 0.5)
+            # drawn for every game, used or not: picking a game never shifts the draws of
+            # the games after it, so a pick only moves what it changes
+            coin = coin_flip()
             if g.picked:
                 win = g.winner
+                if (win == home) != (hp > ap):
+                    hp, ap = ap, hp  # keep the points in line with the result you picked
             elif hp != ap:
-                win = g.home if hp > ap else g.away
+                win = home if hp > ap else away
             elif mh or ma:
                 win = 0  # a real tie
             else:  # nothing projected for either team: no reason to favor one, nor a 0-0 tie
-                win = g.home if rng.random() < 0.5 else g.away
-            if win == g.home:
+                win = home if coin < 0.5 else away
+            if win == home:
                 home_wins[g.id] += 1
-            elif win == g.away:
+            elif win == away:
                 away_wins[g.id] += 1
-            _record(st, h2h, g.home, g.away, hp, ap, win)
-        order, champs = seed_order(league, st, _merge_h2h(base_h2h(games), h2h), rng)
+            _record(st, h2h, home, away, hp, ap, win)
+        order, champs = seed_order(league, st, h2h, rng)
         for i, tid in enumerate(order[:n_seeds]):
             made[tid] += 1
             seed_count[tid][i] += 1
@@ -350,7 +382,18 @@ def race(league: League, picks: dict[int, int] | None = None, sims: int = 5000, 
     return Race(odds, open_games, {g.id: home_wins[g.id] / runs for g in open_games},
                 {g.id: away_wins[g.id] / runs for g in open_games},
                 n_seeds, league.divisions, picks, runs, weeks_left, league.seeding_rule,
-                me=league.my_team_id)
+                me=league.my_team_id, league=league, inputs=inputs)
+
+
+def rerun(base: Race, picks: dict[int, int] | None = None) -> Race:
+    """``base`` again with ``picks`` fixed: the same league, inputs, seed and number of
+    seasons, so every difference from ``base`` comes from the picks. The result carries
+    ``base`` as its baseline (``base`` itself when it has no picks of its own)."""
+    if base.league is None:
+        raise BenchbossError("this playoff race cannot be replayed: it has no league")
+    out = race(base.league, picks, base.sims, **base.inputs)
+    out.baseline = base.baseline if base.picks else base
+    return out
 
 
 def _live_rest(tid: int, week: float, progress: float, live_left: dict[int, float] | None,
@@ -360,13 +403,6 @@ def _live_rest(tid: int, week: float, progress: float, live_left: dict[int, floa
     if live_left is not None and tid in live_left:
         return live_left[tid] * level[tid]
     return week * (1 - progress)
-
-
-def _draw(rng: random.Random, week: float, rest: float) -> float:
-    """Points drawn around ``rest``, what is still to come of a week expected to bring
-    ``week``. The days score independently, so the spread grows with the square root of the
-    part left: SPREAD of the whole week, none once nothing is left."""
-    return rng.gauss(rest, SPREAD * max(0.0, week * rest) ** 0.5)
 
 
 def _standing_base(league: League, games: list[Game]) -> dict[int, list[float]]:
@@ -384,13 +420,6 @@ def base_h2h(games: list[Game]) -> dict[tuple[int, int], float]:
         if g.decided and not g.picked:
             _h2h(h2h, g.home, g.away, g.winner)
     return h2h
-
-
-def _merge_h2h(a: dict, b: dict) -> dict:
-    out = defaultdict(float, a)
-    for k, v in b.items():
-        out[k] += v
-    return out
 
 
 def _record(st, h2h, home, away, hp, ap, winner) -> None:
@@ -443,17 +472,33 @@ def seed_order(league: League, st: dict[int, list[float]], h2h, rng: random.Rand
         lost = sum(h2h.get((r, tid), 0.0) for r in rivals)
         return won / (won + lost) if won + lost else 0.0
 
+    def tie_key(tid, tied: list[int]):
+        """The tiebreakers among ``tied`` (the teams with tid's win share): the league's rule,
+        head-to-head (the combined record against the others), points for, division record,
+        points against (more ranks first) and the coin flip."""
+        won = sum(h2h.get((tid, o), 0.0) for o in tied if o != tid)
+        lost = sum(h2h.get((o, tid), 0.0) for o in tied if o != tid)
+        head = won / (won + lost) if won + lost else 0.5
+        rule = {"H2H_RECORD": head, "TOTAL_POINTS_SCORED": st[tid][3],
+                "INTRA_DIVISION_RECORD": div_pct(tid),
+                "TOTAL_POINTS_AGAINST": st[tid][4]}.get(league.seeding_rule, head)
+        return (-rule, -head, -st[tid][3], -div_pct(tid), -st[tid][4], flip[tid])
+
     def rank(tids: list[int]) -> list[int]:
-        def key(tid):
-            others = [x for x in tids if x != tid and _pct(st[x]) == _pct(st[tid])]
-            won = sum(h2h.get((tid, o), 0.0) for o in others)
-            lost = sum(h2h.get((o, tid), 0.0) for o in others)
-            head = won / (won + lost) if won + lost else 0.5
-            rule = {"H2H_RECORD": head, "TOTAL_POINTS_SCORED": st[tid][3],
-                    "INTRA_DIVISION_RECORD": div_pct(tid),
-                    "TOTAL_POINTS_AGAINST": st[tid][4]}.get(league.seeding_rule, head)
-            return (-_pct(st[tid]), -rule, -head, -st[tid][3], -div_pct(tid), -st[tid][4], flip[tid])
-        return sorted(tids, key=key)
+        # by win share; the tiebreakers only run inside a group of teams that share one
+        # (the same order as sorting every team by the whole chain, much faster)
+        share = {tid: _pct(st[tid]) for tid in tids}
+        ordered = sorted(tids, key=share.__getitem__, reverse=True)
+        out: list[int] = []
+        i = 0
+        while i < len(ordered):
+            j = i + 1
+            while j < len(ordered) and share[ordered[j]] == share[ordered[i]]:
+                j += 1
+            group = ordered[i:j]
+            out += group if len(group) == 1 else sorted(group, key=lambda t: tie_key(t, group))
+            i = j
+        return out
 
     if len(divs) > 1 and all(k is not None for k in divs):
         champs = rank([rank(members)[0] for members in divs.values()])
@@ -470,6 +515,13 @@ def certainties(league: League, games: list[Game]) -> tuple[set[int], set[int]]:
     above its best case and it cannot win its division; it is in when it is sure to win its
     division, or when too few teams can reach its worst case to push it out (counting one
     possible division winner from below for every other division).
+
+    A division title only guarantees a spot when there are at least as many spots as
+    divisions. With fewer (3 divisions, 2 spots), only the best division winners get in, as
+    ``seed_order`` seeds them: a team in when it is sure to win its division and fewer than
+    ``playoff_teams`` other divisions can produce a winner at or above its worst case; out
+    when it cannot win its division, or when enough other divisions are sure to have a
+    winner above its best case.
     """
     n = league.playoff_teams
     if not n:
@@ -490,17 +542,32 @@ def certainties(league: League, games: list[Game]) -> tuple[set[int], set[int]]:
         lo[tid] = (w + 0.5 * ti) / total if total else 0.0
         hi[tid] = (w + k + 0.5 * ti) / total if total else 0.0
     division = {tid: t.division_id for tid, t in league.teams.items()}
-    n_divs = len({d for d in division.values() if d is not None})
-    other_divs = max(0, n_divs - 1) if n_divs > 1 else 0
+    members: dict[int | None, list[int]] = defaultdict(list)
+    for tid, d in division.items():
+        members[d].append(tid)
+    # the same test seed_order uses to seed the division winners first
+    seeded = len(members) > 1 and None not in members
+    n_divs = len(members) if seeded else 0
+    other_divs = n_divs - 1 if seeded else 0
+    only_winners = seeded and n < n_divs   # fewer spots than divisions
     clinched, eliminated = set(), set()
     for tid in league.teams:
-        rivals = [r for r in league.teams if r != tid and division[r] == division[tid]]
+        rivals = [r for r in members[division[tid]] if r != tid]
         others = [r for r in league.teams if r != tid]
-        wins_division = n_divs > 1 and bool(rivals) and all(lo[tid] > hi[r] for r in rivals)
+        sure_div = seeded and bool(rivals) and all(lo[tid] > hi[r] for r in rivals)
+        can_win_div = seeded and not any(lo[r] > hi[tid] for r in rivals)
+        if only_winners:
+            divs = [m for d, m in members.items() if d != division[tid]]
+            reach = sum(1 for m in divs if any(hi[r] >= lo[tid] for r in m))
+            above = sum(1 for m in divs if max(lo[r] for r in m) > hi[tid])
+            if sure_div and reach < n:
+                clinched.add(tid)
+            if not can_win_div or above >= n:
+                eliminated.add(tid)
+            continue
         can_be_passed = sum(1 for r in others if hi[r] >= lo[tid]) + other_divs
-        if wins_division or can_be_passed < n:
+        if sure_div or can_be_passed < n:
             clinched.add(tid)
-        can_win_div = n_divs > 1 and not any(lo[r] > hi[tid] for r in rivals)
         if sum(1 for r in others if lo[r] > hi[tid]) >= n and not can_win_div:
             eliminated.add(tid)
     return clinched, eliminated

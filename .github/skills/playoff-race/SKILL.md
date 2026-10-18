@@ -14,8 +14,10 @@ Everything here is a read. Nothing is sent to ESPN.
    benchboss playoffs --json
    ```
 
-   Top level: `playoff_teams` (spots), `sims` (simulated seasons, 5,000 by default),
-   `seeding_rule` (the league's tiebreaker), `weeks_left`, `picks`. Each row of `teams`, best
+   Top level: `playoff_teams` (spots), `sims` (simulated seasons, 5,000: the same count for
+   the first view, every pick and the app), `seeding_rule` (the league's tiebreaker),
+   `weeks_left`, `final_stretch_from` (the first of the last 5 regular-season weeks still
+   open, null when none is left), `picks`. Each row of `teams`, best
    projected seed first: `team`, `manager`, `division`, `record`, `points_for`,
    `projected_record` (average final record), `playoffs`, `division_title`, `seeds` (odds per
    seed, 1st first), `status` (`clinched`, `eliminated` or null), `espn_playoffs` (ESPN's own
@@ -31,7 +33,8 @@ Everything here is a read. Nothing is sent to ESPN.
 
    Team or manager names work. Without `@WEEK` the pick is the next game between the two that
    is not decided yet. With picks, each team row adds `playoffs_without_picks`, so you can say
-   what the result changes. An unknown team, a team playing itself or a pair with no game left
+   what the result changes. Both runs play the same simulated seasons, so a team that the
+   picks do not touch barely moves; quote the change in whole percents. An unknown team, a team playing itself or a pair with no game left
    stops with a message (exit code 1).
 3. Answer in a few lines: the user's odds and likely seed, the teams around the playoff line,
    and the swing games left (their matchups in `games`, closest `home_win` to 0.5). For a
@@ -42,6 +45,8 @@ How to talk about the numbers:
 - `playoffs` comes from benchboss's simulation; `espn_playoffs` (and `playoff_pct` in
   `benchboss standings --json`) is ESPN's. Say which one you quote. Early in the season they
   can differ a lot.
+- With more than 5 weeks in `weeks_left`, say that the odds move a lot this early and that
+  results matter most from `final_stretch_from` on; do not read much into a single pick.
 - Odds are shares from 0 to 1, not promises. Only `status` is certain: `clinched` means no mix
   of the open results keeps the team out, `eliminated` means none gets it in.
 - Seeding follows ESPN: division winners first when the league has divisions, then the
