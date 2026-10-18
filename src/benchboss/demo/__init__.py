@@ -221,8 +221,10 @@ class DemoSession(Session):
         me = next(t for t in data["league"]["teams"] if t["id"] == data["my_team_id"])
         self._watched = list(me.get("watchList") or [])  # as shipped, before any edit
         # the news seen stays in memory: the frozen demo shows the same alerts on every run
-        # and never writes to your config folder
+        # and never writes to your config folder; the same goes for every other local file
+        # (auto-swap marks, the monitor's state, the lineup log)
         self.seen_news = {}
+        self.local_state = {}
 
     @property
     def demo(self) -> bool:
