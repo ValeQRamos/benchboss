@@ -390,7 +390,8 @@ class Benchboss(App):
         width, height = self.size
         if not width or not height:
             return  # the first size can be 0: the first resize fits it
-        self.compact = layout.is_compact(width, height, self.cfg.layout, self.compact)
+        was = self.compact
+        self.compact = layout.is_compact(width, height, self.cfg.layout, was)
         self.short = height < layout.COMPACT_HEIGHT
         self.screen.set_class(self.compact, "-compact")
         self.screen.set_class(self.short, "-short")
@@ -403,6 +404,10 @@ class Benchboss(App):
             if menu.has_class("page"):
                 self._set_menu(False)
             self._fit_menu()
+        if self.compact != was:  # an interactive screen lays itself out for the new mode
+            relayout = getattr(self._panel_widget, "relayout", None)
+            if callable(relayout):
+                relayout()
         self._top()
         self.refresh_keys()
 
