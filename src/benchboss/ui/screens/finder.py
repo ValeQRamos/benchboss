@@ -778,12 +778,13 @@ class FinderView(Vertical):
         if not self._live():
             return []
         if self.query_one("#finder-search", Input).has_focus:
-            return [KeyItem("⏎", "search", "", 10), KeyItem("esc", "cancel", "", 15)]
+            return [KeyItem("⏎", "search", "", 10)]  # an empty search shows the whole pool
         current = self._current()
         watched = current is not None and current.id in self.watched
         star = KeyItem("space", "★ unwatch" if watched else "★ watch", "", 14)
         if self.detail_id is not None:
-            return [KeyItem("esc", "close", "back", 11), star, KeyItem("j k", "scroll", "", 50)]
+            # enter, backspace and esc all close it; a phone has the first two
+            return [KeyItem("⏎", "close", "back", 11), star, KeyItem("j k", "scroll", "", 50)]
         return [KeyItem("/", "search", "search", 10), KeyItem("⏎", "card", "details", 12), star,
                 KeyItem("1-4", "pool", "", 20), KeyItem("( )", "position", "position(1)", 35),
                 KeyItem(", .", "sort", "sort_by(1)", 40), KeyItem("j k", "row", "", 55)]
