@@ -152,13 +152,15 @@ def draw(data: WorkloadData, pal: Palette, width: int = 120, view: int = 0) -> R
 def _groups(acts: list[Activity], by_lineup: bool = False) -> list[list[Activity]]:
     """The active roster (most games first, or today's slot order with ``by_lineup``:
     starters, then the bench, in one block), IR, then whoever left the roster this week."""
+    gone = [a for a in acts if a.gone]
     if by_lineup:
         starters, bench, ir = activity_mod.by_lineup(acts)
         active = starters + bench
     else:
         active = sorted((a for a in acts if not a.on_ir and not a.gone), key=activity_mod.by_games)
         ir = sorted((a for a in acts if a.on_ir and not a.gone), key=activity_mod.by_games)
-    return [active, ir, [a for a in acts if a.gone]]
+        gone.sort(key=activity_mod.by_games)
+    return [active, ir, gone]
 
 
 def _ordered(acts: list[Activity], by_lineup: bool = False) -> list[Activity]:

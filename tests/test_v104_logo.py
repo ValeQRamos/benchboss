@@ -63,6 +63,20 @@ def test_header_ball_is_whole_at_every_width_from_the_minimum(dash, pal, width):
     assert dash.league.me.name.upper() in "\n".join(lines)
 
 
+@pytest.mark.parametrize("pal", [DARK, LIGHT], ids=["dark", "light"])
+def test_header_ball_is_whole_or_absent_at_every_single_width(dash, pal):
+    """Every width from 20 to 260, not just the usual ones: the ball is cell for cell
+    logo.ball() from LOGO_MIN up, and gone below it; no line is ever wider than the screen."""
+    rows = ball_rows(pal)
+    for width in range(20, 261):
+        lines = lines_of(dashboard.header(dash, pal, width), width)
+        assert all(len(line) <= width for line in lines), width
+        if width >= dashboard.LOGO_MIN:
+            assert [line[:logo.BALL_WIDTH] for line in lines[:logo.BALL_HEIGHT]] == rows, width
+        else:
+            assert not HALF_BLOCKS & set("\n".join(lines)), width
+
+
 @pytest.mark.parametrize("width", [40, 46, 60, 71])
 def test_header_drops_the_ball_below_the_minimum(dash, width):
     assert width < dashboard.LOGO_MIN

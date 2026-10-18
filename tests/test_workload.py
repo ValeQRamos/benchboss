@@ -118,6 +118,18 @@ def test_default_view_is_most_games_with_ir_and_gone_blocks(session, monkeypatch
     assert blanks == [at[len(active)] - 1, at[-1] - 1]
 
 
+def test_players_who_left_are_sorted_by_games_too(session):
+    from benchboss.core.activity import Activity
+
+    roster = [a.player for a in workload.load(session).acts]
+    one = Activity(roster[0], 1, 0, ["vs LAC"], None, [BENCH], gone=True)
+    three = Activity(roster[1], 3, 0, ["vs LAC"] * 3, None, [BENCH] * 3, gone=True)
+    active, ir, gone = workload._groups([one, three])
+    assert not active and not ir and gone == [three, one]
+    # the lineup view keeps the order they came in
+    assert workload._groups([one, three], by_lineup=True)[2] == [one, three]
+
+
 @pytest.mark.parametrize("width", [60, 140])
 def test_bench_marks_stay_in_the_default_view(session, width):
     data = workload.load(session)
