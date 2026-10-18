@@ -249,7 +249,8 @@ def test_cli_view_flag(capsys):
     # the old key keeps its meaning: today's slot order (starters, then the bench)
     main(["--demo", "activity", "--view", "lineup"])
     out = capsys.readouterr().out
-    assert out.index("LaMelo Ball") < out.index("Scotty Pippen Jr.")
+    # surnames: a narrower console (Windows) shortens the first names
+    assert out.index("Ball") < out.index("Pippen")
     with pytest.raises(SystemExit) as e:
         main(["--demo", "activity", "--view", "nope"])
     assert e.value.code == 2

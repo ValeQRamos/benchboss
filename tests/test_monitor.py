@@ -602,9 +602,10 @@ def test_one_monitor_per_league(live):
 
 
 def test_an_expired_lease_is_taken_over_and_the_old_one_knows(live):
+    # expired long ago (2001: Windows cannot turn times close to 1970 into local time)
     old = mon.Lease(live.client.league_id, memory=live.local_state, host="mac-mini",
-                    clock=lambda: 1000.0)
-    old.acquire()  # expired long ago
+                    clock=lambda: 1_000_000_000.0)
+    old.acquire()
     new = mon.Lease(live.client.league_id, memory=live.local_state)
     new.acquire()
     assert new.held() and not old.held() and not old.renew()

@@ -322,7 +322,8 @@ def test_the_dashboard_goes_two_columns_from_78():
     assert not any(isinstance(r, dashboard.Columns) for r in dashboard.render(d, DARK, 77).renderables)
     out = text_of(dashboard.render(d, DARK, 78), 78)
     assert max(len(x.rstrip()) for x in out.splitlines()) <= 78
-    assert "╮ ╭" in out  # two cards side by side
+    # two cards side by side (square corners where Rich swaps boxes for a legacy Windows console)
+    assert "╮ ╭" in out or "┐ ┌" in out
 
 
 @pytest.mark.parametrize("width", range(34, 61, 2))
