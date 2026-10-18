@@ -14,6 +14,7 @@ cmd=${1:-}; host=${2:-}; ref=${3:-}
 # shellcheck disable=SC2206
 ssh_opts=(${SSH_OPTS:-})
 here=$(cd "$(dirname "$0")" && pwd)
+root=$(git -C "$here" rev-parse --show-toplevel)   # git archive only takes the folder it runs in
 remote=/opt/benchboss/update.sh
 
 case "$cmd" in
@@ -29,11 +30,11 @@ case "$cmd" in
       ref=$(git -C "$here" rev-parse HEAD)
       if ! git -C "$here" branch -r --contains "$ref" 2>/dev/null | grep -q .; then
         echo "==> $ref is not on GitHub yet: sending your local copy instead"
-        git -C "$here" archive --format=tar HEAD | ssh "${ssh_opts[@]}" "$host" "$remote -"
+        git -C "$root" archive --format=tar HEAD | ssh "${ssh_opts[@]}" "$host" "$remote -"
         exit 0
       fi
     elif [ "$ref" = --local ]; then
-      git -C "$here" archive --format=tar HEAD | ssh "${ssh_opts[@]}" "$host" "$remote -"
+      git -C "$root" archive --format=tar HEAD | ssh "${ssh_opts[@]}" "$host" "$remote -"
       exit 0
     fi
     ssh "${ssh_opts[@]}" "$host" "$remote $ref"
