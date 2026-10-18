@@ -3,12 +3,17 @@
 Every menu entry has a one-key shortcut. Reads run in a background thread so the interface
 never freezes; writes (lineup moves) always show the plan first and wait for an explicit
 "Apply".
+
+On a phone or a short window (ui/layout.py) the app goes compact: the menu opens as a page of
+its own, a one-row key bar takes the place of the footer and the status line, the gutters
+shrink and the pixel ball stays off a short dashboard. A laptop window looks as it always did.
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -27,7 +32,9 @@ from textual.worker import get_current_worker
 from benchboss import __version__
 from benchboss import config as config_mod
 from benchboss.errors import BenchbossError
-from benchboss.ui import common, dashboard, views
+from benchboss.ui import common, dashboard, layout, views
+from benchboss.ui.keybar import KeyBar
+from benchboss.ui.layout import KeyItem
 from benchboss.ui.screens import SCREENS
 from benchboss.ui.theme import DARK, LIGHT, Palette, palette
 
@@ -64,12 +71,31 @@ NARROW = 110  # below this many columns the menu hides itself (m shows it again)
 # or a theme change can draw the screen again without asking ESPN.
 Draw = Callable[[Palette, int], RenderableType]
 SPIN_CHECK = 300  # seconds between checks for new spins on watch-list players
+APPLY_PAUSE = 0.6  # seconds after a tap moves the focus to Apply in which Apply does nothing
 
 
 @dataclass
 class Mount:
     """An interactive screen: a Textual widget shown in place of the static drawing."""
     make: Callable[[], Widget]
+
+
+class MenuList(OptionList):
+    """The menu. When it is a page of its own (compact), escape or backspace close it."""
+
+    BINDINGS = [Binding("escape,backspace", "app.close_menu", "Close the menu", show=False),
+                Binding("j", "cursor_down", "Down", show=False),
+                Binding("k", "cursor_up", "Up", show=False)]
+
+
+class ScrollPane(VerticalScroll):
+    """Where the static screens are drawn. Besides the arrows and page keys, j and k move a
+    line and space and b a page: keys a phone keyboard has."""
+
+    BINDINGS = [Binding("j", "scroll_down", "Down", show=False),
+                Binding("k", "scroll_up", "Up", show=False),
+                Binding("space", "page_down", "Page down", show=False),
+                Binding("b", "page_up", "Page up", show=False)]
 
 
 class Benchboss(App):
@@ -82,15 +108,24 @@ class Benchboss(App):
     #menu { width: 26; height: 1fr; border: none; padding: 1 0; background: $surface; }
     #menu.hidden { display: none; }
     #menu > .option-list--option { padding: 0 2; }
+    #menu.page { width: 1fr; padding: 1 1; }
     #content { padding: 1 2; }
     #content.hidden { display: none; }
     #panel { width: 1fr; height: 1fr; padding: 1 2; display: none; }
     #panel.visible { display: block; }
+    #main.-page #content, #main.-page #panel.visible { display: none; }
     #body { width: 1fr; }
     #actions { dock: bottom; height: auto; padding-top: 1; background: $background; display: none; }
     #actions.visible { display: block; }
     #actions Button { margin-right: 2; }
     #status { height: 1; padding: 0 1; color: $text-muted; }
+    Screen.-compact #content { padding: 0 1; scrollbar-size-vertical: 1; }
+    Screen.-compact #panel { padding: 0 1; }
+    Screen.-compact #actions { padding-top: 0; }
+    Screen.-compact #actions Button { height: 1; min-width: 10; margin-right: 1;
+                                      border: none !important; }
+    Screen.-compact #status, Screen.-compact Footer { display: none; }
+    Screen.-compact KeyBar { display: block; }
     """
     BINDINGS = [Binding(key, f"show('{sid}')", label, show=sid in ("dash", "today", "week", "trash"))
                 for sid, label, key in MENU] + [
@@ -114,28 +149,35 @@ class Benchboss(App):
         self._narrow: bool | None = None
         self._panel_widget: Widget | None = None  # the interactive screen on #panel, if any
         self.views: dict[str, int] = {}  # screen id -> index into its module's VIEWS
+        # ui/layout.py: compact on a phone or a short window (or always or never, --layout);
+        # short when the window has fewer than COMPACT_HEIGHT rows. Widgets read both.
+        self.compact = False
+        self.short = False
+        self.status_short = ""  # the context the key bar shows on the right in compact
+        self._apply_focused_at = 0.0  # when a tap last moved the focus to Apply (APPLY_PAUSE)
 
     # --- layout --------------------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
         yield Static(id="top")
         with Horizontal(id="main"):
-            yield OptionList(*[Option(f"{label}  [dim]{key}[/]", id=sid) for sid, label, key in MENU],
-                             id="menu")
-            with VerticalScroll(id="content"):
+            yield MenuList(*[Option(f"{label}  [dim]{key}[/]", id=sid) for sid, label, key in MENU],
+                           id="menu")
+            with ScrollPane(id="content"):
                 yield Static(id="body")
                 with Horizontal(id="actions"):
                     yield Button("Apply", id="apply", variant="primary")
                     yield Button("Cancel", id="cancel")
             yield Vertical(id="panel")
         yield Static(id="status")
+        yield KeyBar(id="keybar")
         yield Footer()
 
     def on_mount(self) -> None:
         for t in THEMES.values():
             self.register_theme(t)
         self.theme = THEMES[self.cfg.theme].name
-        self._fit_menu()  # also gives the focus to the menu, or to the screen when it is hidden
+        self._fit_layout()  # also gives the focus to the menu, or to the screen when it is hidden
         self._top()
         self.action_show("dash")
         # not "_auto_refresh": Textual keeps its own attribute by that name on every node
@@ -161,21 +203,89 @@ class Benchboss(App):
         return self._session
 
     def _top(self, extra: str = "") -> None:
+        """The top bar, fitted to the window: on a phone the version goes first, then "demo
+        data" says "demo", then the team name goes."""
         from benchboss.ui import logo
 
+        pal = self.pal
         name = self.cfg.team_name
         if not name and self._session is not None and getattr(self._session, "_league", None):
             name = self._session._league.me.name
-        left = Text.assemble(logo.mark(self.pal), (" benchboss", f"bold {self.pal.accent}"),
-                             (f"  {__version__}", self.pal.dim),
-                             (f"   {name}" if name else "", self.pal.text),
-                             ("   demo data" if self.demo else "", self.pal.warn), (extra, self.pal.dim))
-        self.query_one("#top", Static).update(left)
+        team = f"   {name}" if name else ""
+        demo = ("   demo data", "   demo") if self.demo else ("", "")
+        room = (self.size.width or 120) - 2  # the bar's padding
+        left = Text()
+        for version, who, tag in ((f"  {__version__}", team, demo[0]), ("", team, demo[0]),
+                                  ("", team, demo[1]), ("", "", demo[1])):
+            left = Text.assemble(logo.mark(pal), (" benchboss", f"bold {pal.accent}"),
+                                 (version, pal.dim), (who, pal.text), (tag, pal.warn),
+                                 (extra, pal.dim))
+            if left.cell_len <= room:
+                break
+        for top in self.query("#top").results(Static):
+            top.update(left)
 
-    def _status(self, text: str) -> None:
+    def _status(self, text: str, short: str | None = None) -> None:
+        """The status line under the screen (laptop), and ``short``, the context the key bar
+        shows on a phone (by default ``text`` itself when it is short)."""
+        self.status_short = short if short is not None else (text if len(text) <= 24 else "")
         # a worker can finish while the app shuts down, after the status line is gone
         for status in self.query("#status").results(Static):
             status.update(Text(text, style=self.pal.dim))
+        self.refresh_keys()
+
+    def refresh_keys(self) -> None:
+        """Draw the key bar again: an interactive screen calls this when its keys change (a
+        card opened, a search box took the keys)."""
+        for bar in self.query(KeyBar):
+            bar.refresh()
+
+    def key_entries(self) -> list[tuple[KeyItem, object]]:
+        """What the key bar shows, as (item, the node its tap action runs on): m menu first,
+        then the keys of the screen on show, then v with the next view, d r q. The bar drops
+        the items with the highest priority number first when the row is short."""
+        app_items: list[KeyItem] = []
+        if not self.query("#menu"):
+            return []
+        if self._menu_page():
+            return [(item, self) for item in (
+                KeyItem("m", "close", "app.close_menu", 0), KeyItem("⏎", "open", "", 10),
+                KeyItem("j k", "move", "", 20), KeyItem("q", "quit", "app.quit", 90))]
+        out: list[tuple[KeyItem, object]] = [(KeyItem("m", "menu", "app.toggle_menu", 0), self)]
+        widget = self._panel_widget
+        own = getattr(widget, "key_items", None)
+        if callable(own):
+            with contextlib.suppress(Exception):  # a screen's keys never take the bar down
+                out += [(item, widget) for item in own()]
+        if self.pending and self.query_one("#actions").has_class("visible"):
+            on_apply = isinstance(self.focused, Button) and self.focused.id == "apply"
+            # a tap only moves the focus to Apply: sending always takes a key press on it
+            app_items.append(KeyItem("⏎", "send to ESPN", "", 5) if on_apply
+                             else KeyItem("tab", "apply", "app.focus_apply", 5))
+        module = SCREENS.get(self.current)
+        views_ = getattr(module, "VIEWS", ()) if module else ()
+        following = getattr(widget, "next_view", None)
+        if views_ and (callable(following) or (self._last and self._last[0] == self.current)):
+            i = following() if callable(following) else self.views.get(self.current, 0) + 1
+            app_items.append(KeyItem("v", views_[i % len(views_)][1], "app.key('v')", 30))
+        if widget is None and not self._menu_page():
+            app_items.append(KeyItem("j k", "scroll", "", 60))
+        if self.current != "dash":
+            app_items.append(KeyItem("d", "dashboard", "app.show('dash')", 70))
+        app_items += [KeyItem("r", "refresh", "app.reload", 80), KeyItem("q", "quit", "app.quit", 90)]
+        return out + [(item, self) for item in app_items]
+
+    def action_key(self, key: str) -> None:
+        """A tap on the key bar that stands for a key press."""
+        self.simulate_key(key)
+
+    def action_focus_apply(self) -> None:
+        """Move the focus to Apply (a tap on "tab apply"). Nothing is sent: that takes a key
+        press or a tap on the button itself, and not within the next moment."""
+        if self.pending and self.query_one("#actions").has_class("visible"):
+            self._apply_focused_at = time.monotonic()
+            self.query_one("#apply", Button).focus()
+            self.refresh_keys()
 
     def _show(self, renderable: RenderableType, actions: bool = False) -> None:
         self._unmount_panel()
@@ -241,18 +351,30 @@ class Benchboss(App):
         self.pending = pending
 
     def _width(self) -> int:
-        """Columns the screen can use: the window minus the menu, the padding and the scrollbar."""
-        menu = 0 if self.query_one("#menu").has_class("hidden") else MENU_WIDTH
-        return max(20, self.size.width - menu - 6)
+        """Columns the screen can use: the window minus the menu beside it (not the menu page,
+        which covers the screen), the padding and the scrollbar."""
+        menu = self.query_one("#menu")
+        beside = not menu.has_class("hidden") and not menu.has_class("page")
+        return max(20, self.size.width - (MENU_WIDTH if beside else 0)
+                   - layout.GUTTER[self.compact])
+
+    def _menu_page(self) -> bool:
+        return any(m.has_class("page") for m in self.query("#menu"))
 
     def _set_menu(self, visible: bool, focus: bool = True) -> None:
+        """Show or hide the menu: beside the screen on a laptop, as a page of its own in the
+        compact layout (the screen behind it keeps its width, so nothing is drawn again)."""
         menu = self.query_one("#menu", OptionList)
+        page = visible and self.compact
         menu.set_class(not visible, "hidden")
+        menu.set_class(page, "page")
+        self.query_one("#main").set_class(page, "-page")
         if visible:
             if focus:
                 menu.focus()
         elif self.focused is None or self.focused is menu:  # a hidden menu must not keep the keys
             self._focus_home()
+        self.refresh_keys()
 
     def _fit_menu(self) -> None:
         """Hide the menu on a narrow window so the tables keep their columns; m shows it."""
@@ -261,6 +383,28 @@ class Benchboss(App):
             self._narrow = narrow
             # an interactive screen keeps the keys when a wider window brings the menu back
             self._set_menu(not narrow, focus=self._panel_widget is None)
+
+    def _fit_layout(self) -> None:
+        """Compact or not for this window (layout.is_compact), then the menu: closed on a
+        phone until m opens its page; on a laptop beside the screen from NARROW columns."""
+        width, height = self.size
+        if not width or not height:
+            return  # the first size can be 0: the first resize fits it
+        self.compact = layout.is_compact(width, height, self.cfg.layout, self.compact)
+        self.short = height < layout.COMPACT_HEIGHT
+        self.screen.set_class(self.compact, "-compact")
+        self.screen.set_class(self.short, "-short")
+        menu = self.query_one("#menu")
+        if self.compact:
+            self._narrow = None  # out of compact, the side menu finds its place again
+            if not menu.has_class("hidden") and not menu.has_class("page"):
+                self._set_menu(False)  # no room for it beside the screen
+        else:
+            if menu.has_class("page"):
+                self._set_menu(False)
+            self._fit_menu()
+        self._top()
+        self.refresh_keys()
 
     # --- navigation ----------------------------------------------------------------------------
 
@@ -273,13 +417,14 @@ class Benchboss(App):
         self._last = None
         # the screen being left goes first, so the keys never go back to it
         self._show(Text("Loading...", style=self.pal.dim))
-        if self._narrow:
+        if self._narrow or self.compact:
             self._set_menu(False)  # on a narrow window the menu closes once you pick a screen
         menu = self.query_one("#menu", OptionList)
         idx = next((i for i, (s, _, _) in enumerate(MENU) if s == sid), None)
         if idx is not None and menu.highlighted != idx:
             menu.highlighted = idx
-        self._status("talking to ESPN..." if not self.demo else "demo data")
+        self._status("talking to ESPN..." if not self.demo else "demo data",
+                     "loading..." if not self.demo else "demo")
         self.load(sid)
 
     def action_cycle_view(self) -> None:
@@ -301,11 +446,21 @@ class Benchboss(App):
             # an interactive screen may skip some views (the finder skips splits with no numbers)
             following = getattr(self._panel_widget, "next_view", None)
             nxt = views_[(following() if callable(following) else i + 1) % len(views_)][1]
-            self._status(f"{views_[i][1]} · v for {nxt} · r refresh · ctrl+t light/dark · q quit")
+            # an interactive screen that does not follow v (the playoff builder) gets no label
+            short = views_[i][1] if self._panel_widget is None or callable(following) else ""
+            self._status(f"{views_[i][1]} · v for {nxt} · r refresh · ctrl+t light/dark · q quit",
+                         short)
 
     def action_toggle_menu(self) -> None:
+        page = self.compact or self._menu_page()
         self._set_menu(self.query_one("#menu").has_class("hidden"))
-        self._rerender()
+        if not page:  # the page covers the screen: its width does not change
+            self._rerender()
+
+    def action_close_menu(self) -> None:
+        """escape or backspace on the menu page: back to the screen."""
+        if self._menu_page():
+            self._set_menu(False)
 
     def action_reload(self) -> None:
         if self._own_session and not self.demo:
@@ -344,7 +499,7 @@ class Benchboss(App):
     def _resized(self) -> None:
         if not self.query("#menu"):
             return  # the window can report its size before the widgets exist
-        self._fit_menu()
+        self._fit_layout()
         self._rerender()
 
     def _rerender(self) -> None:
@@ -374,7 +529,7 @@ class Benchboss(App):
         self._top()
         self._present(draw, pending)
         self._status("demo data · nothing is sent to ESPN" if self.demo
-                     else "r refresh · ctrl+t light/dark · q quit")
+                     else "r refresh · ctrl+t light/dark · q quit", "demo" if self.demo else "")
         self._status_views()
 
     # --- watch list spins -------------------------------------------------------------------------
@@ -423,7 +578,10 @@ class Benchboss(App):
             return (lambda pal, w: module.draw(data, pal, w, self.views.get(sid, 0))), None
         if sid == "dash":
             d = dashboard.collect(s)
-            return (lambda pal, w: dashboard.render(d, pal, w, news_hint="n for more")), None
+            # the pixel ball only on a window tall enough for it and the cards under it
+            return (lambda pal, w: dashboard.render(
+                d, pal, w, news_hint="n for more",
+                logo=self.size.height >= layout.LOGO_MIN_HEIGHT)), None
         if sid in PLANS:
             return self._build_plan(s, sid)
         if sid in ("news", "ainews"):
@@ -455,7 +613,7 @@ class Benchboss(App):
             return (lambda pal, w: Group(
                 common.fit_title("Trade finder", pal, w, ("fair 1-for-1 deals that fix a position",)),
                 Text(""),
-                views.trades(ideas, pal), Text(""), views.needs(bal, lg.me.name, pal, w),
+                views.trades(ideas, pal, width=w), Text(""), views.needs(bal, lg.me.name, pal, w),
                 Text("\nSend one from a terminal: benchboss trade --give \"A\" --get \"B\" --msg \"...\"",
                      style=pal.dim))), None
         if sid == "inbox":
@@ -519,6 +677,8 @@ class Benchboss(App):
             pending = self.pending
             if not pending or pending["kind"] != self.current or self.current not in PLANS:
                 return
+            if time.monotonic() - self._apply_focused_at < APPLY_PAUSE:
+                return  # a tap that moved the focus here, then a stray second tap or key repeat
             if self._session is None or self._session.today != pending["day"]:
                 self._present(lambda pal, w: Text("The fantasy day changed since this plan was made. "
                                                   "Press t or w to rebuild it.", style=pal.warn))
@@ -578,8 +738,12 @@ class Benchboss(App):
         self.call_from_thread(self._status, "")
 
 
-def run(cfg: config_mod.Config | None = None, demo: bool = False) -> None:
+def run(cfg: config_mod.Config | None = None, demo: bool = False,
+        layout: str | None = None) -> None:
+    """Open the app. ``layout`` (auto, compact or full) overrides the config for this run."""
     cfg = cfg or config_mod.load()
+    if layout in config_mod.LAYOUTS:
+        cfg.layout = layout
     if not demo and not cfg.league_id and not os.environ.get("BENCHBOSS_LEAGUE_ID"):
         raise BenchbossError("no league configured yet: run `benchboss setup` "
                              "(or try `benchboss --demo` to look around)")
