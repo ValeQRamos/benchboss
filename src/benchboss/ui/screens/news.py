@@ -55,6 +55,7 @@ PICKS = 8                                        # players a search offers to pi
 SEARCH_WIDTH = 28                                # the app's search box (less when narrow)
 SEARCH_MIN = 10
 UNAVAILABLE = "News is not available right now"
+NO_MATCH = "No NBA player matches"
 
 
 @dataclass
@@ -617,8 +618,9 @@ class NewsView(Vertical):
             text = Text(f"'{self.query_text}' matches {n} players: pick one with the arrows "
                         "and enter, or esc to go back.", style=pal.dim)
         elif self.mode == "search" and self.message and self.shown is None:
-            text = Text(self.message, style=pal.warn if self.message.startswith(UNAVAILABLE)
-                        else pal.dim)
+            # no match is an answer; a feed or a search that failed is a warning
+            text = Text(self.message, style=pal.dim if self.message.startswith(NO_MATCH)
+                        else pal.warn)
         elif self.mode == "search":
             parts: list[RenderableType] = []
             if self.player is not None:
@@ -867,7 +869,7 @@ class NewsView(Vertical):
         if err or found is None:
             self.message = f"Search failed: {err}" if err else ""
         elif not found.players:
-            self.message = f"No NBA player matches '{query}'."
+            self.message = f"{NO_MATCH} '{query}'."
         elif player is None:
             self.mode = "picks"
         else:
