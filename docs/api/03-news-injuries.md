@@ -155,8 +155,17 @@ History depth per player is uneven (13 to 46 items; oldest dates from 2025-04 to
 
 - **Roster news panel:** one request with the 13 roster ids, `days=7` (or `days=30` to match ESPN), `limit=200`, gzip. Dedupe by `id`, group by `playerId`, show RotoWire `headline` as the news and `story` as the spin, and label the source "RotoWire" or "ESPN" the way ESPN does.
 - **League or waiver watch:** chunk ids into batches of 50 and merge client side.
+- **One player's latest items, whatever their date (search):** leave out `days` and send a
+  `limit`. Re-verified live on 2026-10-17: Ben Simmons (3907387) with `limit=10` and no `days`
+  returned his 10 newest items (Oct 6 to Oct 17, RotoWire and Media mixed), 5 KB gzip,
+  `cache-control: max-age=1`. Media items count toward `limit`, so ask for about twice what you
+  keep if you drop them, and page by the items you keep.
+- **Sizes (live, 2026-10-17):** 50 ids with `days=1` returned 91 items (215 KB plain, 0.45 s);
+  with `days=5`, 187 items (879 KB plain, 1.4 s).
 - **Polling:** cheap and public. Every 10 to 15 minutes is plenty. Use `lastNewsDate` from the roster call as an extra trigger (section 3), but keep polling, because `lastNewsDate` lags.
 - Never send the league cookies to this host; they are not needed.
+- In benchboss every request to this feed goes through one function, `news._get_feed`
+  (`src/benchboss/news.py`), so a different way to reach it changes one place.
 
 ---
 
@@ -268,6 +277,32 @@ x-fantasy-filter: {"filterIds":{"value":[4433287,3913176]}}      (no "players" w
 VERIFIED live without cookies. Returns a bare JSON array of `{id, fullName, firstName, lastName, proTeamId, defaultPositionId, eligibleSlots, droppable, lastNewsDate, ownership{percentOwned}, universeId}`. No `injuryStatus`.
 
 Use: a no-auth way to check `lastNewsDate` for arbitrary players. Same lag as section 3.
+
+### Every active player in one request
+
+```
+GET https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{season}/players?scoringPeriodId=0&view=players_wl
+x-fantasy-filter: {"filterActive":{"value":true}}
+```
+
+Re-verified live on 2026-10-17, without cookies:
+
+| Fact | Value |
+|---|---|
+| Players | 1,096 (`x-fantasy-filter-player-count: 1096`) |
+| With `lastNewsDate` | 670 of them (preseason) |
+| Size | 34 KB gzip on the wire, 0.29 s |
+| Caching | `cache-control: max-age=300` |
+| Without `filterActive` | only 50 players |
+| `sortLastNewsDate` with a `limit` | 400 `FILTER_LIMIT_MISSING_SORT`: there is no such sort, so sort by `lastNewsDate` on your side |
+
+Players with `lastNewsDate` in the last 1, 2, 5 and 7 days on that date: 183, 277, 396 and 430.
+
+benchboss reads this list for the news search (`Session.nba_players`, cached on disk for a
+day) and ranks names locally, because kona `filterName` only matches the start of a first,
+last or full name (no typos, no "a edwards"). Players on a roster in your league are taken
+from the league views instead, which carry the injury status this list lacks; a searched
+free agent gets one kona `filterIds` read for his status.
 
 ---
 
@@ -455,7 +490,7 @@ Status: all rows VERIFIED (live).
 
 ### League-wide fantasy news feed
 
-Not found. `fantasy/v2/games/fba/news` is 404, `news/players` without `playerId` is 500, and v3 without `playerId` is 500. The NOW API and the NBA news endpoint carry ESPN content but no RotoWire items. Recommended substitute: section 1 in batches of 50 ids over the players you care about (rostered players plus top free agents), plus section 5 for every injured player in the NBA.
+Not found. `fantasy/v2/games/fba/news` is 404, `news/players` without `playerId` is 500, and v3 without `playerId` is 500. The NOW API and the NBA news endpoint carry ESPN content but no RotoWire items. Recommended substitute: section 1 in batches of 50 ids over the players you care about (rostered players plus top free agents), plus section 5 for every injured player in the NBA. For "the freshest news in the whole NBA", section 4 sorted by `lastNewsDate` (on your side) picks the players, then section 1 in pages of 50; mind the `lastNewsDate` lag. benchboss does not do this yet.
 
 ---
 

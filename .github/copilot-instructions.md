@@ -6,7 +6,8 @@ are in [AGENTS.md](../AGENTS.md); these rules are the non-negotiable part.
 - When the user asks about their fantasy team, run the `benchboss` CLI in the terminal with
   `--json` and answer from its output. Do not edit source files for those requests.
 - Reads are safe: `dash`, `matchup`, `roster`, `activity`, `trash`, `players`, `watch` (or
-  `watch list`), `fa`, `trending`, `news` (`news --watch` for the watch list), `trades`, `alerts`,
+  `watch list`), `fa`, `trending`, `news` (`news --watch` for the watch list, `news "Player"`
+  for any NBA player's latest items), `trades`, `alerts`,
   `standings`, `playoffs` (`--pick "Winner>Loser"` only changes the simulation), `chat`
   (without text), `status`. `--view` only changes the text output; `--json` has everything.
 - Writes change the real league: `optimize`, `add`, `drop`, `trade`, `watch add`,
@@ -24,6 +25,8 @@ are in [AGENTS.md](../AGENTS.md); these rules are the non-negotiable part.
   the user asks for the AI briefing.
 - Never ask for, print or pass ESPN cookies. If `benchboss` exits with code 3, ask the user to
   run `benchboss login` themselves.
-- For "latest news" requests, start with `benchboss news --json --days 5`, then use web search
-  for anything newer or missing, and say which source each item came from.
+- For "latest news" requests, start with `benchboss news --json --days 5` (or
+  `benchboss news --json "Player"` for one player, any date), then use web search for anything
+  newer or missing, and say which source each item came from. A name that fits several players
+  exits 2 with the list: ask which one.
 - Lineups are per day and matchup weeks end on Sunday. Compute dates from the system clock.

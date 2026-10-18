@@ -33,7 +33,8 @@ Every read command supports `--json` and prints stable keys, ISO dates and names
 | Find players by any split (free agents, rostered, watch list, all) | `benchboss players --json [--from fa\|rostered\|watch\|all] [--pos C] [--sort l7] [-n 20] [NAME]` |
 | The user's ESPN watch list | `benchboss watch --json` |
 | Free agents by ownership / rising | `benchboss fa --json [POS]`, `benchboss trending --json` |
-| News and spins (last N days) | `benchboss news --json [--days 5] [PLAYER ...]` |
+| News and spins on the roster (last N days) | `benchboss news --json [--days 5]` |
+| Any NBA player's latest news, any date (exit 2 lists the players a name fits: ask which) | `benchboss news --json "PLAYER" [-n 10]`, `--days N` for a window |
 | News on watch-list players | `benchboss news --json --watch [--days 5]` |
 | Trade ideas | `benchboss trades --json [--need C] [--with TEAM]` |
 | Every team's positional balance | `benchboss trades --needs --json` |
@@ -141,6 +142,9 @@ Rules:
 
 - Keep `core/` free of I/O so it stays testable with the demo data.
 - New ESPN calls go through `espn/client.py`; document new endpoints in `docs/api/`.
+- Every news download goes through `news._get_feed`, the one request to the feed: another way
+  to reach it (a host, headers, a proxy) replaces that function and nothing else. Other code
+  asks `Session.news` (a window of days) or `Session.latest_news` (one player, any date).
 - Every new read command gets a `--json` output and a test in `tests/test_cli.py`.
 - Every write must go through a confirmation (`Ctx.confirm` in the CLI, the Apply button in
   the app). The finder's watch-list star is the only exception; do not add another.

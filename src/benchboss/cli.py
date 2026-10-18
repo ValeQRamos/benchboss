@@ -393,7 +393,8 @@ def _partner(s, q):
 
 
 def cmd_news(c: Ctx):
-    """News on your roster, on your watch list (--watch) or on the players you name."""
+    """News on your roster, on your watch list (--watch) or on the players you name: their
+    latest items whatever the date, or the last --days days."""
     from benchboss import news as news_mod
     from benchboss.ui.screens import news as screen
 
@@ -401,8 +402,14 @@ def cmd_news(c: Ctx):
     s = c.session
     if a.watch and a.players:
         c.usage("name players or use --watch, not both")
-    named = [s.find_player(q) for q in a.players] if a.players else None
+    if a.n is not None and not a.players:
+        c.usage('-n is for the players you name, for example: benchboss news "Ben Simmons" -n 20')
+    if a.n is not None and a.days is not None:
+        c.usage("-n counts a player's latest items and --days keeps a window: use one or "
+                "the other")
+    named = [_news_player(c, q) for q in a.players] if a.players else None
     which = () if named else ("watch",) if a.watch else ("roster",)
+    days = a.days or screen.DAYS
     if a.ai:
         players = list({p.id: p for sec in screen.sections(s, which, named)
                         for p in sec.players}.values())
@@ -410,11 +417,43 @@ def cmd_news(c: Ctx):
             raise BenchbossError(f"{screen.EMPTY_WATCH} {screen.WATCH_ADD}" if a.watch else
                                  "your roster is empty")
         with c.out.status("Asking Claude to search the web..."):
-            text = news_mod.ai_digest(players, a.days)
+            text = news_mod.ai_digest(players, days)
         c.emit(text, {"digest": text})
         return
-    data = screen.load(s, a.days, which, named)
+    if named and a.days is None:  # a named player: his latest items, however old
+        data = screen.load_latest(s, named, a.n or news_mod.LATEST)
+    else:
+        data = screen.load(s, days, which, named)
     c.emit(screen.draw(data, c.pal, c.out.width), screen.to_json(data))
+
+
+def _news_player(c: Ctx, query: str):
+    """The player a name means, for reading news only: any NBA player, typos allowed. A
+    guess gets a note on stderr; a name that fits several players is a usage error that
+    lists them. Writes never come here (they use Session.find_player)."""
+    from benchboss.ui.screens import news as screen
+
+    s = c.session
+    found = screen.find(s, query)
+    if not found.players:
+        raise BenchbossError(f"no NBA player matches '{query}'")
+    if not found.sure:
+        names = ", ".join(_news_choice(s, p) for p in found.players)
+        c.usage(f"'{query}' matches several players: {names}. Name one of them")
+    player = screen.refreshed(s, found.best)
+    if not found.exact:
+        c.err.print(Text(f"Showing {player.name}, the closest match to '{query}'.",
+                         style=c.pal.dim))
+    return player
+
+
+def _news_choice(session, p) -> str:
+    """ "Ben Simmons (SAC, FA, 12%)": enough to tell players with the same name apart."""
+    from benchboss.ui.common import rostered
+    from benchboss.ui.screens import news as screen
+
+    team = [p.pro_team] if p.pro_team_id > 0 else []
+    return f"{p.name} ({', '.join([*team, screen.owner_of(session, p), f'{rostered(p.owned)}%'])})"
 
 
 def cmd_alerts(c: Ctx):
@@ -793,11 +832,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-n", type=_count, default=25, help="how many (default 25)")
     p = add("trending", cmd_fa, "free agents being added the most")
     p.add_argument("-n", type=_count, default=15, help="how many (default 15)")
-    p = add("news", cmd_news, "recent news and spins on your players, your watch list (--watch) "
-                              "or the players you name")
-    p.add_argument("players", nargs="*", help="player names; default: your roster")
+    p = add("news", cmd_news, "recent news and spins on your players or your watch list "
+                              "(--watch), or the latest news on any NBA player you name")
+    p.add_argument("players", nargs="*",
+                   help="any NBA player (a close spelling works); default: your roster")
     p.add_argument("--watch", action="store_true", help="your watch-list players instead of your roster")
-    p.add_argument("--days", type=_count, default=5, help="how many days back (default 5)")
+    p.add_argument("--days", type=_count,
+                   help="how many days back (default 5; a named player shows his latest news "
+                        "whatever the date unless you give --days)")
+    p.add_argument("-n", type=_count,
+                   help="how many of a named player's latest items to show (default 10)")
     p.add_argument("--ai", action="store_true", help="AI briefing with web search (needs ANTHROPIC_API_KEY)")
     p = add("trades", cmd_trades, "trade finder: fair 1-for-1 deals that fix positional needs")
     p.add_argument("--need", choices=["PG", "SG", "SF", "PF", "C", "pg", "sg", "sf", "pf", "c"],
