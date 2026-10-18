@@ -704,7 +704,7 @@ def _web_auth(c: Ctx):
             password = path.read_text().strip()
         except OSError as e:
             raise BenchbossError(f"cannot read {path}: {e.strerror}") from None
-        if mode & 0o077:
+        if mode & 0o077 and os.name != "nt":  # Windows has no file modes to check
             raise BenchbossError(f"{path} can be read by other users: run chmod 600 on it")
         if len(password) < 12:
             raise BenchbossError(f"the password in {path} needs at least 12 characters")

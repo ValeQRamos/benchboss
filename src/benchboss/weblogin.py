@@ -284,7 +284,7 @@ class Auth:
         try:
             login, uid = await self.exchange(self.cfg.github_client_id, self.cfg.github_secret,
                                              code, self._callback)
-        except (LoginError, ClientError, TimeoutError, KeyError, ValueError):
+        except (LoginError, ClientError, asyncio.TimeoutError, KeyError, ValueError):
             return self._page("GitHub did not answer. Try again.", status=502)
         if login.lower() not in self.cfg.github_users and str(uid) not in self.cfg.github_users:
             return self._page(f"{login} is not allowed here.", status=403)

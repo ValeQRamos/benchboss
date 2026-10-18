@@ -1,0 +1,83 @@
+name: Deploy
+
+# After CI passes on main, install that commit on the server. Also runnable by hand from the
+# Actions tab to deploy a commit or tag, or to roll back. Set up once: docs/deploy.md.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Deploy a version, or go back to the one before the current"
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+      ref:
+        description: "Full commit sha or version tag to deploy (empty: the commit this run is on)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # a push to this repository's main that passed CI; never a fork's pull request
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      HOST: ${{ vars.DEPLOY_HOST }}
+      SITE: ${{ vars.DEPLOY_URL }}
+    steps:
+      - name: Decide what to send
+        id: what
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          ACTION: ${{ inputs.action }}
+          INPUT_REF: ${{ inputs.ref }}
+          THIS_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ] && [ "$ACTION" = rollback ]; then
+            what=rollback
+          elif [ "$EVENT" = workflow_dispatch ]; then
+            what=${INPUT_REF:-$THIS_SHA}
+          else
+            what=$RUN_SHA
+          fi
+          echo "what=$what" >> "$GITHUB_OUTPUT"
+          echo "Sending: $what"
+
+      - name: Prepare SSH
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          WHAT: ${{ steps.what.outputs.what }}
+        run: ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes "$HOST" "$WHAT"
+
+      - name: Check the site
+        run: |
+          for i in 1 2 3 4 5 6; do
+            curl -fsS -m 10 "$SITE/login" | grep -q benchboss && exit 0
+            sleep 5
+          done
+          echo "the sign in page does not answer at $SITE" >&2
+          exit 1

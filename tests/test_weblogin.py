@@ -386,6 +386,10 @@ def test_github_trouble_shows_a_message_and_signs_nobody_in():
 
 # --- the signing key and the command line --------------------------------------------------------
 
+POSIX = pytest.mark.skipif(sys.platform == "win32", reason="needs Unix file modes")
+
+
+@POSIX
 def test_the_signing_key_is_made_once_and_kept_private(tmp_path):
     path = tmp_path / "sub" / "web-secret"
     first = weblogin.load_secret(path)
@@ -426,6 +430,7 @@ def pw(tmp_path, text=PASSWORD, mode=0o600):
     return str(f)
 
 
+@POSIX
 def test_web_starts_with_a_password_file(serve, tmp_path, capsys):
     cli.main(["--demo", "web", "--password-file", pw(tmp_path)])
     assert serve[-1] == "served"
@@ -438,6 +443,7 @@ def test_web_without_a_sign_in_option_says_so(serve, capsys):
     assert "(no sign in)" in capsys.readouterr().err
 
 
+@POSIX
 def test_web_refuses_a_password_file_other_users_can_read(serve, tmp_path, capsys):
     assert code("--demo", "web", "--password-file", pw(tmp_path, mode=0o644)) == 1
     assert "chmod 600" in capsys.readouterr().err and serve == []
