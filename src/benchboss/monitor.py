@@ -983,6 +983,7 @@ class Monitor:
                 stopped.append(why)
                 return "not sent: " + ("another monitor runs this league" if why == "lease"
                                        else f"{p.name} was disarmed or auto-swap was paused")
+            undo = (c.get("writes", 0), moved.get("count", 0), self.state.get("last_write", ""))
             self.state["intents"][intent] = {"at": self._now_iso(), "period": period,
                                              "items": plan.items(), "trigger": p.id,
                                              "outcome": None, "resent": 0}
@@ -990,6 +991,10 @@ class Monitor:
             moved["count"] = int(moved.get("count", 0)) + 1
             self.state["last_write"] = self._now_iso()
             if not self._save():
+                # nothing goes out, so nothing may be counted: a later save must not
+                # record a write or a move that never happened
+                self.state["intents"].pop(intent, None)
+                c["writes"], moved["count"], self.state["last_write"] = undo
                 stopped.append("save")
                 return "not sent: benchboss could not save what it was about to send"
             return ""
@@ -1001,7 +1006,7 @@ class Monitor:
             return
         if stopped:
             self._settle(p, key, edge, r0, "NOT_SENT", swap, [],
-                         ["benchboss could not save what it was about to send"], revert, intent)
+                         ["benchboss could not save what it was about to send"], revert, None)
             return
         sent = intent in self.state["intents"]  # before_send ran: the POST went out
         outcome = r1.outcome

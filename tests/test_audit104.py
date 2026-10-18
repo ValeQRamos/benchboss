@@ -10,7 +10,9 @@ import datetime as dt
 import pytest
 
 from benchboss import monitor as mon
+from benchboss import store
 from benchboss.core.lineup import DayPlan
+from benchboss.errors import BenchbossError
 from benchboss.espn.constants import BENCH, SLOT_ID
 from benchboss.service import OptimizeResult
 from test_monitor import (
@@ -133,3 +135,41 @@ def test_a_revert_too_close_to_his_tip_says_so(live, monkeypatch):
     assert len(espn.bodies) == 1
     (late,) = [n for n in notes.notes if "too close" in n.body]
     assert late.priority == "urgent" and "Dyson Daniels is OUT" in late.body
+
+
+# --- a save that fails before a send counts nothing ----------------------------------------------
+
+def test_a_send_stopped_by_a_failed_save_counts_no_write_and_no_move(live, monkeypatch):
+    armed(live)
+    espn = FakeEspn(live)
+    live.client.transaction = espn
+    set_status(live, "Dyson Daniels", "ACTIVE")
+    real_plan, real_write = live.apply_plan, store.write_json
+    broken = []
+
+    def plan(*a, **k):
+        if k.get("send") is False:
+            broken.append(1)  # the disk fills up right after the pre-flight
+        return real_plan(*a, **k)
+
+    def write(path, data, **k):
+        if broken and path.name == "monitor.json":
+            raise BenchbossError(f"could not save {path} (No space left on device)")
+        return real_write(path, data, **k)
+
+    monkeypatch.setattr(live, "apply_plan", plan)
+    monkeypatch.setattr(mon.store, "write_json", write)
+    m = monitor(live, live=True)
+    m.start()
+    m.tick()
+    assert espn.bodies == []
+    broken.clear()  # the disk works again later in the same process
+    monkeypatch.setattr(live, "apply_plan", real_plan)
+    later(live)
+    m.tick()
+    m.close()
+    state = mon.read_state(live)
+    pid = str(player(live, "Dyson Daniels").id)
+    assert state["counters"]["writes"] == 0 and state["intents"] == {}
+    assert int((state["moved"].get(pid) or {}).get("count", 0)) == 0
+    assert state["last_write"] == "" and espn.bodies == []
