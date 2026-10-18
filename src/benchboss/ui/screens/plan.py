@@ -15,7 +15,7 @@ from rich.table import Table
 from rich.text import Text
 
 from benchboss.core.calendar import SeasonCalendar
-from benchboss.core.lineup import DayPlan, Move, day_value
+from benchboss.core.lineup import DayPlan, Move, plan_gain
 from benchboss.espn.constants import BENCH, INJURY_FACTOR, IR, SLOT
 from benchboss.espn.models import Player
 from benchboss.text import surname
@@ -70,18 +70,7 @@ def draw(plans: list[DayPlan], cal: SeasonCalendar, pal: Palette, width: int) ->
 
 # --- numbers ----------------------------------------------------------------------------------
 
-def gain(p: DayPlan, cal: SeasonCalendar) -> float:
-    """Projected points the moves add that day: who comes in minus who goes out."""
-    values = {pl.id: v for pl, _, v in p.starters}
-    out = 0.0
-    for m in p.moves:
-        starts_now = m.from_slot not in (BENCH, IR)
-        starts_after = m.to_slot not in (BENCH, IR)
-        if starts_after and not starts_now:
-            out += values.get(m.player.id, day_value(m.player, p.period, cal))
-        elif starts_now and not starts_after:
-            out -= day_value(m.player, p.period, cal)
-    return out
+gain = plan_gain  # lives in core.lineup, so the monitor can use it without the UI
 
 
 def playing(p: DayPlan, cal: SeasonCalendar) -> int:

@@ -9,11 +9,18 @@ slots (G, F) and utility slots are filled optimally.
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, field
 
 from benchboss.core.calendar import SeasonCalendar
 from benchboss.espn.constants import BENCH, INJURY_FACTOR, IR, SLOT
 from benchboss.espn.models import Player, RosterSpot
+
+# A player whose game starts within this margin counts as locked, even while ESPN's
+# lineupLocked flag still says false. One value for every caller (Optimize, the monitor).
+LOCK_MARGIN = dt.timedelta(minutes=3)
+# The smallest gain (projected points that day) an automatic change must bring to be sent.
+MIN_GAIN_AUTO = 1.0
 
 
 def day_value(p: Player, period: int, cal: SeasonCalendar) -> float:
@@ -68,6 +75,32 @@ class Move:
         return f"{self.player.name} {SLOT.get(self.from_slot)} -> {SLOT.get(self.to_slot)}"
 
 
+@dataclass(frozen=True)
+class PlanOptions:
+    """How ``plan_day`` may change a day. ``None`` (no options) keeps the 1.0.3 behavior.
+
+    now          freeze every player whose game starts at or before ``now + lock_margin``
+                 (he keeps his slot and is never moved), on top of ESPN's lineupLocked flag
+    lock_margin  see LOCK_MARGIN
+    movable      the scope guard for automatic changes: None lets the optimizer move anyone;
+                 a set of player ids lets only them change between bench and lineup, plus at
+                 most ``displace`` starters each, the lowest valued unlocked starters they can
+                 replace (directly or through slot shuffles among starters). Nobody else
+                 changes between bench and lineup.
+    displace     see movable
+    min_gain     a plan that gains less than this is not sent (Outcome.BELOW_MIN_GAIN)
+    auto         an unattended run: every guard in core/guard.py applies, ESPN's day must be
+                 today (Session.current_period(strict=True)), a player with an unknown status
+                 or a TBD tip time is frozen, and only ROSTER (today) is ever sent
+    """
+    now: dt.datetime | None = None
+    lock_margin: dt.timedelta = LOCK_MARGIN
+    movable: frozenset[int] | None = None
+    displace: int = 1
+    min_gain: float = 0.0
+    auto: bool = False
+
+
 @dataclass
 class DayPlan:
     period: int
@@ -75,6 +108,9 @@ class DayPlan:
     starters: list[tuple[Player, int, float]] = field(default_factory=list)  # player, slot, value
     bench: list[tuple[Player, str]] = field(default_factory=list)            # player, reason
     projected: float = 0.0
+    projected_before: float = 0.0  # the same day as the lineup stands, before the moves
+    frozen: dict[int, str] = field(default_factory=dict)  # player id -> "locked", "tipped 7:00 PM"
+    notes: list[str] = field(default_factory=list)        # one line each, shown under the plan
 
     @property
     def changed(self) -> bool:
@@ -85,12 +121,14 @@ class DayPlan:
 
 
 def plan_day(roster: list[RosterSpot], slot_counts: dict[int, int], period: int,
-             cal: SeasonCalendar) -> DayPlan:
+             cal: SeasonCalendar, opts: PlanOptions | None = None) -> DayPlan:
     """Best lineup for one day.
 
     Players whose lineup is locked (their game has started; ESPN locks each player at his own
     tip-off) stay exactly where they are: they keep their slot and are never moved, so a
-    late run only rearranges players who can still be changed.
+    late run only rearranges players who can still be changed. ``opts`` (PlanOptions) adds
+    the freeze by tip time, the scope guard and the rules for unattended runs; without it
+    the plan is exactly what 1.0.3 made.
     """
     plan = DayPlan(period)
     active = [s for s in roster if s.slot_id != IR]
@@ -120,6 +158,20 @@ def plan_day(roster: list[RosterSpot], slot_counts: dict[int, int], period: int,
             plan.bench.append((spot.player, _bench_reason(spot.player, period, cal)))
     plan.starters.sort(key=lambda x: (x[1], -x[2]))
     return plan
+
+
+def plan_gain(p: DayPlan, cal: SeasonCalendar) -> float:
+    """Projected points the moves add that day: who comes in minus who goes out."""
+    values = {pl.id: v for pl, _, v in p.starters}
+    out = 0.0
+    for m in p.moves:
+        starts_now = m.from_slot not in (BENCH, IR)
+        starts_after = m.to_slot not in (BENCH, IR)
+        if starts_after and not starts_now:
+            out += values.get(m.player.id, day_value(m.player, p.period, cal))
+        elif starts_now and not starts_after:
+            out -= day_value(m.player, p.period, cal)
+    return out
 
 
 def _bench_reason(p: Player, period: int, cal: SeasonCalendar) -> str:
