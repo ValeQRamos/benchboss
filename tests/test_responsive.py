@@ -451,6 +451,29 @@ def test_the_finder_keeps_rows_with_the_keyboard_up(size):
     drive(scenario, size=size)
 
 
+def test_the_key_bar_offers_no_letter_keys_while_a_search_box_types():
+    async def scenario(pilot, app):
+        await pilot.press("p")
+        await settle(pilot, 0.3)
+        await pilot.press("slash")
+        await settle(pilot)
+        bar = app.query_one(KeyBar)
+        search = app.query_one(finder.FinderView).query_one(Input)
+        assert search.has_focus
+        # v d r q would go into the box as letters (and a tap on v typed a "v")
+        assert [item.key for item, _ in bar._entries] == ["m", "⏎"]
+        assert "v " not in bottom_row(app) and "d dashboard" not in bottom_row(app)
+        start = next(r[0] for r in bar.regions if bar._entries[r[2]][0].key == "m")
+        await pilot.click(KeyBar, offset=(start + 1 + bar.styles.padding.left, 0))
+        await settle(pilot)
+        assert app.query_one("#menu").has_class("page") and search.value == ""
+        await pilot.press("escape")
+        await settle(pilot)
+        assert "d dashboard" in bottom_row(app) or "v " in bottom_row(app)
+
+    drive(scenario, size=(100, 12))
+
+
 def test_the_card_covers_the_table_on_a_phone_and_scrolls():
     async def scenario(pilot, app):
         await pilot.press("p")

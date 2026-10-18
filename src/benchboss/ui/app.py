@@ -25,7 +25,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.theme import Theme
 from textual.widget import Widget
-from textual.widgets import Button, Footer, OptionList, Static
+from textual.widgets import Button, Footer, Input, OptionList, Static
 from textual.widgets.option_list import Option
 from textual.worker import get_current_worker
 
@@ -257,6 +257,10 @@ class Benchboss(App):
         if callable(own):
             with contextlib.suppress(Exception):  # a screen's keys never take the bar down
                 out += [(item, widget) for item in own()]
+        if isinstance(self.focused, Input):
+            # a search box takes the letters: v d r q would type, and a tap on v would put a
+            # "v" in the box. The screen's own items say how to leave it.
+            return out
         if self.pending and self.query_one("#actions").has_class("visible"):
             on_apply = isinstance(self.focused, Button) and self.focused.id == "apply"
             # a tap only moves the focus to Apply: sending always takes a key press on it
