@@ -338,12 +338,19 @@ class Session:
 
         return news.fetch(player_ids, days)
 
-    def playoff_race(self, picks: dict[int, int] | None = None, sims: int = 5000):
+    def playoff_race(self, picks: dict[int, int] | None = None, sims: int | None = None, *,
+                     base=None):
         """Playoff odds and who is in or out, with the results you pick fixed (see
-        core.playoffs.race: ``picks`` maps a matchup id to the team id you say wins it)."""
+        core.playoffs.race: ``picks`` maps a matchup id to the team id you say wins it).
+        ``sims`` defaults to core.playoffs.SIMS. ``base``: a race this returned earlier; the
+        new one replays its seasons with the same league and inputs (core.playoffs.rerun), so
+        it differs from ``base`` only by the picks, whatever the clock says now."""
         from benchboss.core import playoffs
         from benchboss.core.projection import not_started, week_projection
 
+        if base is not None and base.league is not None:
+            return playoffs.rerun(base, picks)
+        sims = playoffs.SIMS if sims is None else sims
         lg, cal = self.league(), self.calendar
         weeks = range(1, playoffs.regular_season_weeks(lg) + 1)
         days = {w: len(cal.matchup_periods(w, lg.matchup_periods)) for w in weeks}
