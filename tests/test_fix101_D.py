@@ -181,7 +181,9 @@ def test_theme_change_on_the_ai_briefing_does_not_call_the_api_again(monkeypatch
 # --- F36, F62, F23: narrow windows --------------------------------------------------------------
 
 def test_narrow_window_hides_the_menu_and_trash_keeps_net():
-    app = Benchboss(Config(), demo=True)
+    # the menu beside the screen, as on a laptop (80x24 is compact by default since 1.0.4,
+    # where m opens the menu as a page: tests/test_responsive.py)
+    app = Benchboss(Config(layout="full"), demo=True)
     picks = demo_session().trash(n=12)
 
     async def scenario(pilot):

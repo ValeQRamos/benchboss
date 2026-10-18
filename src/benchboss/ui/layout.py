@@ -46,8 +46,9 @@ class KeyItem:
 
 
 def is_compact(width: int, height: int, layout: str = "auto", was: bool = False) -> bool:
-    """Whether a ``width`` x ``height`` window uses the compact layout. ``was`` is the
-    current state, for the height hysteresis."""
+    """Whether a ``width`` x ``height`` window uses the compact layout. ``was`` says the
+    window is compact because it got short (the height hysteresis), not because it was
+    narrow: a phone turned from portrait to landscape starts over."""
     if layout == "compact":
         return True
     if layout == "full":
@@ -57,6 +58,21 @@ def is_compact(width: int, height: int, layout: str = "auto", was: bool = False)
     return was and height <= COMPACT_HEIGHT_EXIT
 
 
+def screen_text(app) -> str:
+    """What a running Textual app shows right now, as plain text: one line per row, trailing
+    blanks removed. The same render ``App.export_screenshot`` turns into an SVG; the tests and
+    ``tools/responsive.py`` compare it across window sizes."""
+    import io
+
+    from rich.console import Console
+
+    width, height = app.size
+    console = Console(width=width, height=height, file=io.StringIO(), record=True,
+                      color_system=None, legacy_windows=False, safe_box=False)
+    console.print(app.screen._compositor.render_update(full=True))
+    return "\n".join(line.rstrip() for line in console.export_text().splitlines())
+
+
 __all__ = ["COMPACT_HEIGHT", "COMPACT_HEIGHT_EXIT", "COMPACT_WIDTH", "DASH_TWO_COLUMNS",
            "FIT_WIDTHS", "GUTTER", "KeyItem", "LAYOUTS", "LOGO_MIN_HEIGHT", "WIDE_GUARDS",
-           "is_compact"]
+           "is_compact", "screen_text"]

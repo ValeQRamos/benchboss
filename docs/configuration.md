@@ -67,6 +67,7 @@ Environment variables override the file. They are handy for scripts, CI and AI a
 | `BENCHBOSS_TEAM_ID` | Your team id inside the league |
 | `BENCHBOSS_SEASON` | Season year, for example `2027` |
 | `BENCHBOSS_THEME` | `dark` or `light` |
+| `BENCHBOSS_LAYOUT` | The app's layout: `auto` (compact on a phone or a window under 80 columns or 30 rows), `compact` or `full`. Also `"layout"` in `config.json`, or `--layout` for one run |
 | `BENCHBOSS_HOME` | Use another folder for settings, cache, `seen-news.json` and fallback cookies |
 | `ESPN_S2`, `ESPN_SWID` | Cookies from the environment instead of the keychain |
 | `ANTHROPIC_API_KEY` | Enables the AI briefing in `benchboss news --ai` and the app's news screen |

@@ -1,0 +1,40 @@
+ ● benchboss  X.Y.Z   Monstars   demo data
+
+  Dashboard  d                 ▄▄█████▄▄
+  Optimize today  t          ▄▀▀█████████▄
+  Optimize week  w          ▄███▀▀████████▄    MONSTARS                                                      3:30 pm
+  Workload  a               ███████████████    Demo Hoops League                                           Wed Nov 4
+  Best trash  f             ▀▀▀▀██████▀▀█▀▀    2-0 · 2nd of 10 · projected 2nd · streak W2
+  Player finder  p           ████▀▀▀█▀██▀█     29% ESPN playoff odds  ━━━─────────
+  Player news  n              ▀█████████▀
+  Trade finder  x                ▀▀▀▀▀
+  Inbox  i
+  Standings  s              ╭─  WEEK 3  ───────────────────────────────╮ ╭─  WORKLOAD THIS WEEK  ──────────────────╮
+  Playoff race  y           │                       Score  Proj.  Left │ │ Most games                              │
+  Roster  o                 │ Monstars              420.7  1,483    29 │ │ A. Edwards MIN         4 games (3 left) │
+                            │ Pick and Roll Pros    402.5  1,597    33 │ │ L. Ball MIN            4 games (3 left) │
+                            │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ │ A. Sarr WSH            4 games (3 left) │
+                            │ Up 18.2 now, projected to lose by 114    │ │ Fewest games                            │
+                            ╰───────────────  Mon Nov 2 to Sun Nov 8  ─╯ │ S. Pippen Jr. MEM      3 games (2 left) │
+                            ╭─  ROSTER  ───────────────────────────────╮ │ C. White CHA           3 games (2 left) │
+                            │ PG ● L. Ball MIN                    46.4 │ │ Z. Edey MEM            3 games (2 left) │
+                            │ SG ● A. Edwards MIN                 47.2 │ ╰─────────────────────────────────────────╯
+                            │ SF ● B. Miller CHA                  37.4 │ ╭─  BEST TRASH THIS WEEK  ────────────────╮
+                            │ PF ● T. Harris SAS DTD              30.1 │ │ D. Sharpe BKN         +54 pts · 2 games │
+                            │ C  ● J. Duren DET                   42.2 │ │ E. Demin BKN          +38 pts · 2 games │▇▇
+                            │ G  ● D. Daniels ATL DTD             35.7 │ │ J. Suggs ORL          +36 pts · 2 games │
+                            │ F  ● A. Dybantsa WSH                32.9 │ ╰────────  points added if you grab him  ─╯
+                            │ UT ● A. Sarr WSH                    36.6 │ ╭─  RISING ON WAIVERS  ───────────────────╮
+                            │ UT ● R. Gobert MIN                  34.3 │ │ E. Demin BKN                    46 ▲1.7 │
+                            │ UT ● C. White CHA DTD               32.9 │ │ P. Watson CLE                   46 ▲1.1 │
+                            │ BE ● P. Siakam IND                  41.1 │ │ C. Murray-Boyles TOR            13 ▲1.1 │
+                            │ BE ● Z. Edey MEM                    33.2 │ ╰────────  % rostered, change in a week  ─╯
+                            │ BE ● S. Pippen Jr. MEM              30.6 │ ╭─  LEAGUE  ──────────────────────────────╮
+                            ╰────────────────────────  10 play today  ─╯ │  1 Brick City                       2-0 │
+                            ╭─  INBOX  ────────────────────────────────╮ │  2 Monstars                         2-0 │
+                            │ ● Trade offer from Tune Squad: you give  │ │  3 Swish Kebab                      1-1 │
+                            │ Scotty Pippen Jr., you get Lauri         │ │  4 Pick and Roll Pros               1-1 │
+                            │ Markkanen                                │ │  5 Rim Rockers                      1-1 │
+
+ demo data · nothing is sent to ESPN
+ d Dashboard  t Optimize today  w Optimize week  f Best trash  m Menu  r Refresh  ^t Light/Dark  q Quit

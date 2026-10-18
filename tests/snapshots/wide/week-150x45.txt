@@ -1,0 +1,45 @@
+ ● benchboss  X.Y.Z   Monstars   demo data
+
+  Dashboard  d              Optimize  ·  Rest of the matchup week  ·  Wed Nov 4 to Sun Nov 8
+  Optimize today  t
+  Optimize week  w          18 moves on 4 of 5 days  ·  projected 1,062.1 pts  ·  +188.2 from the moves
+  Workload  a
+  Best trash  f             Wed Nov 4   13 of your players play  ·  projected 382.0  ·  +30.9
+  Player finder  p           Moves    Pascal Siakam       BE → PF   41.1     Tobias Harris       PF → BE
+  Player news  n                      Scotty Pippen Jr.   BE → G    30.6     Dyson Daniels       G  → BE
+  Trade finder  x                     Zach Edey           BE → UT   33.2     Coby White          UT → BE
+  Inbox  i                   Lineup   PG L. Ball       46.4   SG A. Edwards    47.2   SF B. Miller     37.4   PF P. Siakam     41.1
+  Standings  s                        C  J. Duren      42.2   G  S. Pippen Jr. 30.6   F  A. Dybantsa   32.9   UT A. Sarr       36.6
+  Playoff race  y                     UT R. Gobert     34.3   UT Z. Edey       33.2
+  Roster  o                  Bench    Dyson Daniels  DTD: 35.7 × 75% = 26.8, below Scotty Pippen Jr. 30.6
+                                      Coby White     DTD: 32.9 × 75% = 24.7, below Scotty Pippen Jr. 30.6
+                                      Tobias Harris  DTD: 30.1 × 75% = 22.6, below AJ Dybantsa 32.9
+
+                            Thu Nov 5   no games for your players
+
+                            Fri Nov 6   11 of your players play  ·  projected 350.0  ·  +51.4
+                             Moves    Coby White          BE → UT   24.7
+                                      Dyson Daniels       BE → UT   26.8
+                                      Alex Sarr           UT → PF   36.6     Pascal Siakam       PF → BE
+                                      Rudy Gobert         UT → C    34.3     Jalen Duren         C  → BE
+                             Lineup   PG L. Ball       46.4   SG A. Edwards    47.2   SF B. Miller     37.4   PF A. Sarr       36.6
+                                      C  R. Gobert     34.3   G  S. Pippen Jr. 30.6   F  A. Dybantsa   32.9   UT Z. Edey       33.2
+                                      UT D. Daniels    26.8   UT C. White      24.7
+                             Bench    Tobias Harris  DTD: 30.1 × 75% = 22.6, below Coby White 24.7
+                                      No game        Jalen Duren, Pascal Siakam
+
+                            Sat Nov 7   5 of your players play  ·  projected 159.9  ·  +63.7
+                             Moves    Pascal Siakam       BE → UT   41.1     Coby White          UT → BE
+                                      Tobias Harris       BE → UT   22.6     Zach Edey           UT → BE
+                             Lineup   PG L. Ball          -   SG A. Edwards       -   SF B. Miller        -   PF A. Sarr       36.6
+                                      C  R. Gobert        -   G  S. Pippen Jr.    -   F  A. Dybantsa   32.9   UT P. Siakam     41.1
+                                      UT D. Daniels    26.8   UT T. Harris     22.6                                                               ▅▅
+                             Bench    No game  Jalen Duren, Coby White, Zach Edey
+
+
+                            ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+                                 Apply             Cancel
+                            ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+
+ demo data · nothing is sent to ESPN
+ d Dashboard  t Optimize today  w Optimize week  f Best trash  m Menu  r Refresh  ^t Light/Dark  q Quit

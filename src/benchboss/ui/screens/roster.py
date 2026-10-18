@@ -44,10 +44,10 @@ DROPS: tuple[tuple[str, ...], ...] = (
     ("pos",),
     ("pts", "reb", "ast"),
     ("base",),
-    ("today",),
 )
-# Then the names: full with the NBA team, short with the team, short alone.
-NAMES = ((False, True), (True, True), (True, False))
+# Then the names go short ("A. Edwards MIN"). Who plays today matters most on a phone: Today
+# turns into a one-cell dot (and the Slot header goes), then the NBA team goes, and Today
+# goes last of all (_layouts).
 
 BOX = box.Box(  # SIMPLE_HEAD, plus a thin dashed rule between starters, bench and IR
     "    \n"
@@ -147,6 +147,7 @@ class _Layout:
     hidden: set[str]              # column keys left out
     short: bool = False
     team: bool = True
+    dot: bool = False             # a phone: Today as one cell (● plays today), no Slot header
 
 
 # the counting stats of the box score: (column key, header, stat id, its leader is colored)
@@ -174,13 +175,15 @@ def _columns(rows: list[_Row], data: RosterData, lay: _Layout, pal: Palette) -> 
     def each(fn: Callable[[Player], Text]) -> list[Text]:
         return [fn(p) if p else blank for p in players]
 
-    add("slot", "Slot", "who", [Text(r.slot, style=pal.dim) for r in rows], justify="left")
+    # PG, SG, UT... need no header on a phone, and the two cells it saves keep the dot
+    add("slot", "" if lay.dot else "Slot", "who", [Text(r.slot, style=pal.dim) for r in rows],
+        justify="left")
     add("player", "Player", "who",
         [player_cell(r.player, pal, short=lay.short, team=lay.team,
                      style=pal.dim if r.spot.slot_id == IR else None) if r.player
          else Text("Empty", style=f"italic {pal.dim}") for r in rows], justify="left")
     add("pos", "Pos", "who", each(lambda p: Text(p.positions, style=pal.dim)), justify="left")
-    add("today", "Today", "who", each(lambda p: _today(p, data, pal)))
+    add("today", "" if lay.dot else "Today", "who", each(lambda p: _today(p, data, pal, lay.dot)))
 
     # fantasy points per game, every split; the trend arrow rides on L7 (or on Avg without it),
     # in front of the number: right-justified cells lose trailing spaces, so an arrow after
@@ -250,10 +253,12 @@ def _leader(v: float, pool: list[float | None], pal: Palette) -> str:
     return pal.good if v == best and scale(v, pool, pal) == pal.good else pal.text
 
 
-def _today(p: Player, data: RosterData, pal: Palette) -> Text:
+def _today(p: Player, data: RosterData, pal: Palette, dot: bool = False) -> Text:
     opp = data.opponents.get(p.id) or ("●" if p.id in data.plays_today else "")
     if not opp:
         return Text("·", style=pal.border)
+    if dot:
+        return Text("●", style=pal.dim if p.injury in ("OUT", "SUSP", "IR") else pal.good)
     return Text(opp, style=pal.dim if p.injury in ("OUT", "SUSP", "IR") else pal.text)
 
 
@@ -270,14 +275,16 @@ def _total(widths: list[int]) -> int:
 
 
 def _layouts(sel: str, base: str, hidden: set[str]):
-    """Every layout from the widest to the narrowest (see DROPS and NAMES)."""
+    """Every layout from the widest to the narrowest (see DROPS)."""
     gone = set(hidden)
     yield _Layout(sel, base, set(gone))
     for step in DROPS:
         gone |= set(step)
         yield _Layout(sel, base, set(gone))
-    for short, team in NAMES[1:]:
-        yield _Layout(sel, base, set(gone), short=short, team=team)
+    yield _Layout(sel, base, set(gone), short=True)
+    yield _Layout(sel, base, set(gone), short=True, dot=True)
+    yield _Layout(sel, base, set(gone), short=True, team=False, dot=True)
+    yield _Layout(sel, base, gone | {"today"}, short=True, team=False, dot=True)
 
 
 def _fit(rows: list[_Row], data: RosterData, sel: str, base: str, hidden: set[str], pal: Palette,
@@ -359,6 +366,8 @@ def _legend(cols: list[_Col], pal: Palette, width: int) -> Text:
         items.append((4, "▲▼", f"{week} well above or below Avg"))
     if "rost" in keys:
         items.append((3, "Rost%", "of ESPN leagues, ▲▼ change in a week"))
+    if any(c.key == "today" and not c.header for c in cols):  # Today as a dot (a phone)
+        items.append((5, "●", "plays today"))
     while items and legend(pal, *[i[1:] for i in items]).cell_len > width:
         items.remove(min(items))
     return legend(pal, *[i[1:] for i in items])

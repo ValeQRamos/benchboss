@@ -29,12 +29,13 @@ from benchboss.espn.models import League, Player
 from benchboss.inbox import Alert
 from benchboss.text import surname
 from benchboss.ui import logo
-from benchboss.ui.common import day_label, meter, odds_color, pct, player_cell, rost_cell
+from benchboss.ui.common import Fit, day_label, meter, odds_color, pct, player_cell, rost_cell
+from benchboss.ui.layout import DASH_TWO_COLUMNS
 from benchboss.ui.theme import Palette
 
 NEWS_DAYS = 3     # how far back the news card looks
 NEWS_MAX = 8      # items on a wide screen; the side panel shows fewer
-WIDE = 92         # from here on the cards sit side by side and the news spans the bottom
+WIDE = DASH_TWO_COLUMNS  # from here on the cards sit side by side and the news spans the bottom
 THREE = 150       # from here on there are three columns
 LOGO_MIN = 72     # narrower than this the header drops the pixel ball
 LOGO_GAP = 4      # columns between the ball and the team name
@@ -168,8 +169,10 @@ def _dot(pal: Palette) -> tuple[str, str]:
     return ("  ·  ", pal.border)
 
 
-def header(d: Dashboard, pal: Palette, width: int = 120) -> RenderableType:
-    """The pixel ball (when it fits), then the team, the league, the record and the clock."""
+def header(d: Dashboard, pal: Palette, width: int = 120, logo_ok: bool = True) -> RenderableType:
+    """The pixel ball (when it fits and ``logo_ok``: the app leaves it off a short window),
+    then the team, the league, the record and the clock."""
+    ball = logo_ok and width >= LOGO_MIN
     me = d.league.me
     teams = len(d.league.teams)
     place = d.place()
@@ -181,7 +184,7 @@ def header(d: Dashboard, pal: Palette, width: int = 120) -> RenderableType:
     info.add_row(Text(d.league.name, style=pal.dim), Text(day_label(d.today), style=pal.dim))
     # the clock column (and the 2 spaces before it) sits on the right of every row, so this
     # line gets what is left
-    room = (width - (logo.BALL_WIDTH + LOGO_GAP if width >= LOGO_MIN else 0)
+    room = (width - (logo.BALL_WIDTH + LOGO_GAP if ball else 0)
             - max(len(clock), len(day_label(d.today))) - 2)
     dot = _dot(pal) if room >= 60 else (" · ", pal.border)
     line = Text(me.record, style=pal.text)
@@ -203,7 +206,7 @@ def header(d: Dashboard, pal: Palette, width: int = 120) -> RenderableType:
             line.append("  ")
             line.append_text(meter(odds, bar, pal, color))
         info.add_row(line, "")
-    if width < LOGO_MIN:
+    if not ball:
         return info
     outer = Table.grid(expand=True, padding=(0, LOGO_GAP, 0, 0))
     outer.add_column(width=logo.BALL_WIDTH, no_wrap=True)
@@ -251,21 +254,26 @@ def matchup_card(d: Dashboard, pal: Palette) -> Panel:
     return _panel(Group(*rows) if rows else Text("-", style=pal.dim), title, pal, note)
 
 
-def _verdict(now: float, final: float, pal: Palette) -> Text:
-    """ "Up 18.2 now, projected to lose by 114": the score in plain words."""
-    out = Text()
-    if abs(now) < 0.05:
-        out.append("Tied now", style=pal.text)
-    else:
-        out.append(f"{'Up' if now > 0 else 'Down'} {abs(now):,.1f}", style=pal.good if now > 0 else pal.bad)
-        out.append(" now", style=pal.dim)
-    out.append(", projected to ", style=pal.dim)
-    if abs(final) < 0.5:
-        out.append("finish even", style=pal.text)
-    else:
-        out.append(f"{'win' if final > 0 else 'lose'} by {abs(final):,.0f}",
-                   style=pal.good if final > 0 else pal.bad)
-    return out
+def _verdict(now: float, final: float, pal: Palette) -> Fit:
+    """ "Up 18.2 now, projected to lose by 114": the score in plain words, in shorter
+    wordings on a phone ("Up 18.2, proj. to lose by 114") so it never wraps."""
+    def one(when: str, projected: str) -> Text:
+        out = Text()
+        if abs(now) < 0.05:
+            out.append("Tied", style=pal.text)
+        else:
+            out.append(f"{'Up' if now > 0 else 'Down'} {abs(now):,.1f}",
+                       style=pal.good if now > 0 else pal.bad)
+        out.append(when, style=pal.dim)
+        out.append(f", {projected} ", style=pal.dim)
+        if abs(final) < 0.5:
+            out.append("finish even", style=pal.text)
+        else:
+            out.append(f"{'win' if final > 0 else 'lose'} by {abs(final):,.0f}",
+                       style=pal.good if final > 0 else pal.bad)
+        return out
+
+    return Fit(one(" now", "projected to"), one(" now", "proj. to"), one("", "proj. to"))
 
 
 def roster_card(d: Dashboard, pal: Palette) -> Panel:
@@ -516,8 +524,10 @@ class Columns:
 
 
 def render(d: Dashboard, pal: Palette, width: int,
-           news_hint: str = "benchboss news for more") -> RenderableType:
-    """``news_hint`` is the subtitle of the news card: the app passes its own key for it."""
+           news_hint: str = "benchboss news for more", logo: bool = True) -> RenderableType:
+    """``news_hint`` is the subtitle of the news card: the app passes its own key for it.
+    ``logo`` False leaves the pixel ball out (a window shorter than
+    layout.LOGO_MIN_HEIGHT rows)."""
     wide = width >= WIDE
     limit = news_limit(width)
     news = news_card(d, pal, news_hint, limit=limit,
@@ -526,7 +536,7 @@ def render(d: Dashboard, pal: Palette, width: int,
     right = [c for c in (alerts_card(d, pal), activity_card(d, pal), None if wide else news,
                          trash_card(d, pal), trending_card(d, pal), standings_card(d, pal))
              if c is not None]
-    parts: list[RenderableType] = [header(d, pal, width), Text("")]
+    parts: list[RenderableType] = [header(d, pal, width, logo), Text("")]
     if not wide:
         parts += left + right
     else:

@@ -1,0 +1,40 @@
+ ● benchboss  X.Y.Z   Monstars   demo data
+
+  Dashboard  d              Demo Hoops League  ·  week 3 of 20  ·  top 4 make the playoffs
+  Optimize today  t
+  Optimize week  w            #   Team                 W-L    GB        PF        PA     Diff   Playoffs
+  Workload  a                ───────────────────────────────────────────────────────────────────────────
+  Best trash  f               1   Brick City           2-0     -   3,218.8   2,856.9   +361.9        87%
+  Player finder  p            2   Monstars             2-0     -   2,953.6   2,739.7   +213.9        29%
+  Player news  n              3   Swish Kebab          1-1   1.0   2,921.3   2,913.7     +7.6        12%
+  Trade finder  x             4   Pick and Roll Pros   1-1   1.0   2,859.2   2,872.2    -13.0        36%
+  Inbox  i                   ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  Standings  s                5   Rim Rockers          1-1   1.0   2,857.9   2,823.2    +34.7        52%
+  Playoff race  y             6   Splash Mountain      1-1   1.0   2,846.8   2,889.9    -43.1        57%
+  Roster  o                   7   Tune Squad           1-1   1.0   2,822.7   2,884.4    -61.7        13%
+                              8   Full Court Press     1-1   1.0   2,735.6   2,777.0    -41.4        16%
+                              9   The Alley Oops       0-2   2.0   3,017.6   3,250.7   -233.1        29%
+                             10   Fast Break Cartel    0-2   2.0   2,838.6   3,064.4   -225.8        69%
+
+                            PF points for  ·  PA points against  ·  GB games back  ·  Playoffs ESPN's odds
+                            ╌╌ playoff line
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ League · v for Divisions · r refresh · ctrl+t light/dark · q quit
+ d Dashboard  t Optimize today  w Optimize week  f Best trash  m Menu  r Refresh  ^t Light/Dark  q Quit

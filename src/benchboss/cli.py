@@ -44,6 +44,8 @@ class Ctx:
             self.cfg = config_mod.Config()  # the demo league does not need the real config
         if getattr(args, "theme", None):
             self.cfg.theme = args.theme
+        if getattr(args, "layout", None):
+            self.cfg.layout = args.layout
         self.pal = palette(self.cfg.theme)
         self.out = Console(highlight=False)
         self.err = Console(stderr=True, highlight=False)
@@ -182,10 +184,14 @@ def cmd_dash(c: Ctx):
         return
     from rich.live import Live
 
+    from benchboss.ui.layout import LOGO_MIN_HEIGHT
+
     with Live(console=c.out, screen=True, auto_refresh=False) as live:
         while True:
             try:
-                board = dashboard.render(once(), c.pal, c.out.width)
+                # the pixel ball only on a pane tall enough for it and the cards under it
+                board = dashboard.render(once(), c.pal, c.out.width,
+                                         logo=c.out.height >= LOGO_MIN_HEIGHT)
                 live.update(_fit_height(c.out, board, c.out.height, c.pal), refresh=True)
             except BenchbossError as e:
                 live.update(f"[{c.pal.bad}]{e}[/] (retrying)", refresh=True)
@@ -662,7 +668,7 @@ def cmd_chat(c: Ctx):
 def cmd_app(c: Ctx):
     from benchboss.ui.app import run
 
-    run(c.cfg, demo=c.args.demo)
+    run(c.cfg, demo=c.args.demo, layout=getattr(c.args, "layout", None))
 
 
 # --- parser -------------------------------------------------------------------------------------------
@@ -710,6 +716,9 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("--demo", action="store_true",
                        help="use built-in sample data, no ESPN account needed", **kw)
         g.add_argument("--theme", choices=config_mod.THEMES, help="color palette for this run", **kw)
+        g.add_argument("--layout", choices=config_mod.LAYOUTS,
+                       help="app layout for this run: auto (compact on a phone or a small "
+                            "window), compact or full", **kw)
         g.add_argument("-y", "--yes", action="store_true", help="skip the confirmation on writes", **kw)
         return g
 

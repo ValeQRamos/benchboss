@@ -594,7 +594,10 @@ def test_watch_pool_in_the_cli_has_no_star_column():
 def test_narrow_window_keeps_every_tab_and_split_and_scrolls_by_whole_columns():
     async def scenario(pilot, app, view):
         t = view.query_one(DataTable)
-        await wait_until(pilot, lambda: t.scroll_x > 0)
+        # 1.0.4: a phone keeps the split next to the name, so the table opens unscrolled
+        await wait_until(pilot, lambda: [c.key.value for c in t.ordered_columns][:3]
+                         == ["star", "name", "proj"])
+        assert app.compact and t.fixed_columns == 3
         tabs = view.query_one("#finder-tabs")
         search = view.query_one("#finder-search", Input)
         assert [r[4] for r in tabs.regions] == list(finder.TABS)
@@ -605,7 +608,7 @@ def test_narrow_window_keeps_every_tab_and_split_and_scrolls_by_whole_columns():
         widths = [c.get_render_width(t) for c in t.ordered_columns]
         fixed = sum(widths[:t.fixed_columns])
         starts = {sum(widths[:j]) - fixed for j in range(t.fixed_columns, len(widths))}
-        assert t.scroll_x > 0 and t.scroll_x in starts
+        assert t.scroll_x == 0 and t.scroll_x in starts
         last = next(r for r in filters.regions if r[3] == "split" and r[4] == "last")
         await pilot.click("#finder-filters", offset=(last[1] + 1, 1))
         await pilot.pause()
