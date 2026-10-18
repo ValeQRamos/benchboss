@@ -249,7 +249,7 @@ def test_cli_trash_at_80_columns(capsys, monkeypatch):
 
 def test_apply_forgets_the_cached_league():
     s = demo_session()
-    s.apply_days = lambda periods: []  # stands in for ESPN
+    s.apply_days = lambda periods, **kw: []  # stands in for ESPN
     app = Benchboss(Config(), demo=False, session=s)
 
     async def scenario(pilot):

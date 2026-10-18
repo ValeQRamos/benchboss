@@ -320,6 +320,8 @@ def reason(pl: Player, why: str, p: DayPlan, cal: SeasonCalendar, pal: Palette,
     on a second line)."""
     if why == "locked":
         return Text("locked, his game has started", style=pal.dim)
+    if pl.id in p.frozen and why == p.frozen[pl.id]:
+        return Text(_frozen(why), style=pal.dim)
     factor = INJURY_FACTOR.get(pl.injury_status or "", 1.0)
     if factor == 0:
         return Text(pl.injury or "out", style=pal.bad)
@@ -340,12 +342,25 @@ def reason(pl: Player, why: str, p: DayPlan, cal: SeasonCalendar, pal: Palette,
     return out
 
 
+def _frozen(why: str) -> str:
+    """A frozen bench player's reason, short: "locked, tipped 7:00 PM"."""
+    if why.startswith("tipped "):
+        return f"locked, {why}"
+    if why.startswith("starts "):
+        return f"{why}, too close to change"
+    return {"unknown status": "no status from ESPN, left as is",
+            "tip time TBD": "tip time not set, left as is",
+            "game does not lock": "his game does not lock, left as is",
+            "no clock": "left as is"}.get(why, why)
+
+
 def _weakest_starter(pl: Player, p: DayPlan) -> tuple[Player, float] | None:
-    """The starter with the lowest projection in a slot ``pl`` could fill. Locked starters
-    do not count: they keep their slot whatever they project."""
+    """The starter with the lowest projection in a slot ``pl`` could fill. Frozen starters
+    (locked, or their game is about to start) do not count: they keep their slot whatever
+    they project."""
     slots = set(pl.eligible_slots)
     fits = [(other, v) for other, slot, v in p.starters
-            if slot in slots and v and not other.locked]
+            if slot in slots and v and not other.locked and other.id not in p.frozen]
     return min(fits, key=lambda x: x[1]) if fits else None
 
 

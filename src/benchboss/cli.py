@@ -444,13 +444,15 @@ def cmd_alerts(c: Ctx):
 # --- write ------------------------------------------------------------------------------------------
 
 def cmd_optimize(c: Ctx):
+    from benchboss.core.lineup import PlanOptions
     from benchboss.service import periods_for
 
     s = c.session
     periods = [p for p in periods_for(s, c.args.when) if p >= s.league().scoring_period]
     if not periods:
         raise BenchbossError("those days are already over")
-    plans = s.plan_days(periods)
+    # players whose game starts within the lock margin keep their slot, whatever ESPN's flag says
+    plans = s.plan_days(periods, PlanOptions(now=s.now))
     todo = [p for p in plans if p.changed]
     if c.args.json:
         _optimize_json(c, s, plans, todo)
@@ -467,9 +469,9 @@ def cmd_optimize(c: Ctx):
         return
     if not c.confirm(f"Apply the lineup for {len(plans)} day{'s' * (len(plans) != 1)}?"):
         return
-    results = s.apply_days([p.period for p in plans])
+    results = s.apply_days([p.period for p in plans], opts=PlanOptions(now=s.now), writer="cli")
     for r in results:
-        if not r.error and r.status != "ALREADY_OPTIMAL":
+        if _sent(r):
             c.out.print(Text(f"{_label(s.calendar.date_of(r.plan.period))}: ESPN: {r.status}",
                              style=c.pal.dim))
     moves, days = _check_results(c, s, results)
@@ -481,16 +483,29 @@ def cmd_optimize(c: Ctx):
     c.out.print(Text(msg, style=f"bold {c.pal.good}"))
 
 
+def _sent(r) -> bool:
+    """ESPN took this day's moves (EXECUTED, or a status 1.0.3 also counted as sent)."""
+    from benchboss.service import Outcome
+
+    return (not r.error and bool(r.status) and r.status != "ALREADY_OPTIMAL"
+            and r.outcome not in (Outcome.BELOW_MIN_GAIN, Outcome.WOULD_SEND, Outcome.NOT_SENT))
+
+
 def _optimize_json(c: Ctx, s, plans, todo) -> None:
     """JSON mode: the plan (dry run or not confirmed) or what ESPN answered for each day.
     stdout stays valid JSON; errors go to stderr with the usual exit codes."""
-    from benchboss.service import OptimizeResult
+    from benchboss.core.lineup import PlanOptions
+    from benchboss.service import OptimizeResult, Outcome
 
     def row(plan, result=None):
         out = {"date": s.calendar.date_of(plan.period).isoformat(),
-               "moves": [str(m) for m in plan.moves], "projected": round(plan.projected, 1)}
+               "moves": [str(m) for m in plan.moves], "projected": round(plan.projected, 1),
+               "frozen": [{"player": p.name, "reason": plan.frozen[p.id]}
+                          for p in _frozen_players(plan) if plan.frozen[p.id] != "IR"]}
         if result is not None:
-            out.update(status=result.status or None, error=result.error or None)
+            out.update(status=result.status or None, error=result.error or None,
+                       outcome=result.outcome or None,
+                       guards=[v.to_dict() for v in result.guards if v.fatal])
         return out
 
     if c.args.dry_run or not c.args.yes:
@@ -499,27 +514,45 @@ def _optimize_json(c: Ctx, s, plans, todo) -> None:
             raise NotConfirmed("NOT DONE: nothing was sent; repeat with --yes to apply the plan")
         return
     if todo:
-        results = s.apply_days([p.period for p in plans])
+        results = s.apply_days([p.period for p in plans], opts=PlanOptions(now=s.now),
+                               writer="cli")
     else:
-        results = [OptimizeResult(p, status="ALREADY_OPTIMAL") for p in plans]
+        results = [OptimizeResult(p, status="ALREADY_OPTIMAL", outcome=Outcome.ALREADY_OPTIMAL)
+                   for p in plans]
     print(json.dumps([row(r.plan, r) for r in results], indent=2))
     _check_results(c, s, results)
 
 
+def _frozen_players(plan) -> list:
+    seen = [pl for pl, _, _ in plan.starters] + [pl for pl, _ in plan.bench]
+    return [pl for pl in seen if pl.id in plan.frozen]
+
+
 def _check_results(c: Ctx, s, results) -> tuple[int, int]:
-    """Count what ESPN applied; raise WriteFailed (exit 4) when any day was not set."""
-    moves, days, failed = 0, 0, []
+    """Count what ESPN applied. Raise WriteFailed (exit 4) when any day was not set, or
+    GuardRefused (exit 5) when the only days not set are ones a safety check stopped before
+    anything was sent (core/guard.py)."""
+    from benchboss.errors import GuardRefused
+    from benchboss.service import Outcome
+
+    moves, days, failed, refused = 0, 0, [], []
     for r in results:
-        if r.error:
-            failed.append(f"{_label(s.calendar.date_of(r.plan.period))}: {r.error}")
-        elif r.status != "ALREADY_OPTIMAL":
+        label = _label(s.calendar.date_of(r.plan.period))
+        if r.outcome == Outcome.NOT_SENT and any(v.fatal for v in r.guards):
+            refused.append(f"{label}: {r.error}")
+        elif r.error:
+            failed.append(f"{label}: {r.error}")
+        elif _sent(r):
             moves += len(r.plan.moves)
             days += 1
-    for f in failed:
+    for f in failed + refused:
         c.err.print(Text(f"✗ {f}", style=c.pal.bad))
+    rest = "nothing was changed" if days == 0 else f"{days} other day(s) were set"
     if failed:
-        rest = "nothing was changed" if days == 0 else f"{days} other day(s) were set"
-        raise WriteFailed(f"{len(failed)} day(s) were not set; {rest}")
+        raise WriteFailed(f"{len(failed) + len(refused)} day(s) were not set; {rest}")
+    if refused:
+        raise GuardRefused(f"{len(refused)} day(s) were not sent: a safety check stopped "
+                           f"them; {rest}")
     return moves, days
 
 

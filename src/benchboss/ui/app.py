@@ -471,6 +471,7 @@ class Benchboss(App):
         raise BenchbossError(f"unknown screen {sid}")
 
     def _build_plan(self, s, sid: str) -> tuple[Draw, dict | None]:
+        from benchboss.core.lineup import PlanOptions
         from benchboss.service import periods_for
 
         cal = s.calendar
@@ -483,7 +484,8 @@ class Benchboss(App):
         if sid == "today" and day > cal.final_period:
             return (lambda pal, w: Text("The fantasy season is over.", style=pal.text)), None
         periods = [p for p in periods_for(s, sid) if p >= s.league().scoring_period]
-        plans = s.plan_days(periods)
+        # a player whose game starts within the lock margin keeps his slot (ESPN's flag lags)
+        plans = s.plan_days(periods, PlanOptions(now=s.now))
         todo = [p for p in plans if p.changed]
         moves = sum(len(p.moves) for p in todo)
         title = "Today" if sid == "today" else "Rest of the matchup week"
@@ -530,6 +532,9 @@ class Benchboss(App):
 
     @work(thread=True, exclusive=True, group="write")
     def apply(self, pending: dict) -> None:
+        from benchboss.core.lineup import PlanOptions
+        from benchboss.service import Outcome
+
         s = self.session
         span = "day" if pending["kind"] == "today" else "week"
         if s.today != pending["day"]:
@@ -538,7 +543,7 @@ class Benchboss(App):
             self.call_from_thread(self._status, "nothing was sent")
             return
         if self.demo:
-            plans = s.plan_days(pending["periods"])
+            plans = s.plan_days(pending["periods"], PlanOptions(now=s.now))
             moves = sum(len(p.moves) for p in plans)
             days = sum(1 for p in plans if p.changed)
             msg = (f"Your {span} is set: {moves} move{'s' * (moves != 1)} across {days} "
@@ -548,7 +553,7 @@ class Benchboss(App):
             self.call_from_thread(self._status, "")
             return
         try:
-            results = s.apply_days(pending["periods"])
+            results = s.apply_days(pending["periods"], opts=PlanOptions(now=s.now), writer="tui")
         except BenchbossError as e:
             results, fatal = [], str(e)
         else:
@@ -560,7 +565,8 @@ class Benchboss(App):
             label = f"{s.calendar.date_of(r.plan.period):%a %b %d}"
             if r.error:
                 errors.append(f"{label}: {r.error}")
-            elif r.status != "ALREADY_OPTIMAL":
+            elif r.status and r.status != "ALREADY_OPTIMAL" and r.outcome not in (
+                    Outcome.BELOW_MIN_GAIN, Outcome.WOULD_SEND, Outcome.NOT_SENT):
                 days += 1
                 moves += len(r.plan.moves)
                 lines.append(f"{label}: ESPN: {r.status}")
