@@ -251,10 +251,15 @@ class CommandBackend(Backend):
 
     @staticmethod
     def _split(command: str) -> list[str]:
+        windows = sys.platform == "win32"  # posix rules would eat the backslashes of a path
         try:
-            return shlex.split(command, posix=sys.platform != "win32")
+            argv = shlex.split(command, posix=not windows)
         except ValueError as e:
             raise NotifyError(f"{ENV_CMD} cannot be read as a command ({e})") from None
+        if windows:  # the non-posix split keeps the quotes around a quoted argument
+            argv = [a[1:-1] if len(a) >= 2 and a[0] == a[-1] and a[0] in "\"'" else a
+                    for a in argv]
+        return argv
 
     def send(self, note: Note) -> str:
         argv = self._split(self.command)
