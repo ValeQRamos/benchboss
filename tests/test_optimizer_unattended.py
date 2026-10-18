@@ -499,8 +499,32 @@ def test_below_the_minimum_gain_nothing_is_sent(session, monkeypatch):
     assert r.outcome == Outcome.EXECUTED and espn.sent
 
 
+def test_an_automatic_change_keeps_the_minimum_gain_even_when_asked_for_less(session, monkeypatch):
+    pippen = by_name(optimized(session), "Scotty Pippen Jr.").player.proj
+    roster = [replace(s, player=replace(s.player, injury_status="ACTIVE", proj=pippen + 0.4))
+              if s.player.name == "Dyson Daniels" else s for s in optimized(session)]
+    espn = Espn(session, monkeypatch, roster)
+    opts = replace(auto_opts(session, "Dyson Daniels"), min_gain=0.0)
+    r = session.apply_plan(session.today_period, opts=opts, writer="monitor")
+    assert r.outcome == Outcome.BELOW_MIN_GAIN and not espn.sent
+    assert moves(r.plan) == ["Dyson Daniels BE -> G", "Scotty Pippen Jr. G -> BE"]
+    r = session.apply_plan(session.today_period, opts=PlanOptions(now=session.now))
+    assert r.outcome == Outcome.EXECUTED and espn.sent  # +0.4 is fine when a person asks
+
+
+def test_an_automatic_change_never_plans_on_an_old_clock(session, monkeypatch):
+    roster = with_status(optimized(session), "Dyson Daniels", "ACTIVE")
+    espn = Espn(session, monkeypatch, roster)
+    session._now = at(session, 19, 15)  # Daniels tipped at 7:00 PM
+    r = session.apply_plan(session.today_period, writer="monitor",
+                           opts=auto_opts(session, "Dyson Daniels", now=at(session, 15, 30)))
+    daniels = by_name(roster, "Dyson Daniels").player.id
+    assert r.plan.frozen[daniels] == "tipped 7:00 PM" and not r.plan.moves and not espn.sent
+
+
 @pytest.mark.parametrize("day, why", [
     (15, "ESPN is on Tue Nov 3"),                 # this computer's clock is a day ahead
+    (17, "ESPN is on Thu Nov 5"),                 # ESPN already moved on to the next day
     (0, "ESPN did not say which day it is"),      # no latestScoringPeriod: strict refuses
 ])
 def test_an_automatic_change_needs_espn_to_agree_on_the_day(session, monkeypatch, day, why):
@@ -510,6 +534,8 @@ def test_an_automatic_change_needs_espn_to_agree_on_the_day(session, monkeypatch
                            writer="monitor")
     assert r.outcome == Outcome.NOT_SENT and not espn.sent
     assert [v.code for v in r.guards if v.fatal] == ["G9"] and why in r.error
+    rec = lineup_log.read(session)[-1]
+    assert rec["outcome"] == "NOT_SENT" and rec["guards"] == ["G9"]
 
 
 def test_an_automatic_change_needs_a_league_that_locks_by_game(session, monkeypatch):

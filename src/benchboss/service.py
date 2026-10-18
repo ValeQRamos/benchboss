@@ -22,7 +22,7 @@ from benchboss.core import activity as activity_mod
 from benchboss.core import trades as trades_mod
 from benchboss.core import trash as trash_mod
 from benchboss.core.calendar import SeasonCalendar
-from benchboss.core.lineup import DayPlan, PlanOptions, plan_day, plan_gain
+from benchboss.core.lineup import MIN_GAIN_AUTO, DayPlan, PlanOptions, plan_day, plan_gain
 from benchboss.core.projection import MatchupOutlook, matchup_outlook
 from benchboss.errors import AuthError, BenchbossError, EspnError, GuardRefused, NetworkError
 from benchboss.espn.client import Client
@@ -463,7 +463,8 @@ class Session:
         (core/guard.py: fatal ones give NOT_SENT and ``result.guards``), stop below
         ``opts.min_gain`` (BELOW_MIN_GAIN), then send. ``opts.auto`` adds the strict day check
         (ESPN's day, this computer's day and ``period`` all agree, or NOT_SENT with G9), a
-        schedule at most SCHEDULE_MAX_AGE old, and always sends ROSTER. ``before_send(plan)``
+        schedule at most SCHEDULE_MAX_AGE old, a clock no older than this computer's, a
+        minimum gain of at least MIN_GAIN_AUTO, and always sends ROSTER. ``before_send(plan)``
         runs right before the POST; a non-empty string it returns stops the send (NOT_SENT,
         the string is the error): the monitor re-checks its marks and its lease there and
         saves its intent.
@@ -476,8 +477,14 @@ class Session:
 
         lg = self.league()
         auto = bool(opts and opts.auto)
-        if auto and opts.now is None:
-            opts = replace(opts, now=self.now)
+        if auto:
+            # never plan an automatic change on an older clock than this computer's: a stale
+            # ``now`` could leave a player who just tipped movable
+            now = self.now
+            if opts.now is not None:
+                given = opts.now if opts.now.tzinfo else opts.now.astimezone()
+                now = max(now, given)
+            opts = replace(opts, now=now)
         cal = self.calendar
         try:
             if auto:
@@ -498,7 +505,7 @@ class Session:
             return OptimizeResult(DayPlan(period), error=f"could not read the lineup: {e}",
                                   outcome=Outcome.ERROR)
         plan = plan_day(roster, lg.slot_counts, period, cal, opts)
-        if period < current:
+        if period < current and not auto:  # an automatic run gets G9 (and a log line) below
             return OptimizeResult(plan, error="that day is already over on ESPN",
                                   outcome=Outcome.NOT_SENT)
         guards = guard.check(roster, plan, lg.slot_counts, cal, opts)
@@ -518,7 +525,10 @@ class Session:
             return self._logged(OptimizeResult(plan, error=f"not sent: {reasons}{more}",
                                                outcome=Outcome.NOT_SENT, kind=kind,
                                                guards=guards), writer, send, note)
-        if opts is not None and opts.min_gain > 0 and plan_gain(plan, cal) < opts.min_gain - 1e-9:
+        need = opts.min_gain if opts is not None else 0.0
+        if auto:  # an automatic change never goes out for less, whatever the caller passed
+            need = max(need, MIN_GAIN_AUTO)
+        if need > 0 and plan_gain(plan, cal) < need - 1e-9:
             return self._logged(OptimizeResult(plan, outcome=Outcome.BELOW_MIN_GAIN, kind=kind,
                                                guards=guards), writer, send, note, quiet=True)
         if not send:

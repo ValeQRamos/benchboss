@@ -129,7 +129,8 @@ class PlanOptions:
                  replace (directly or through slot shuffles among starters). Nobody else
                  changes between bench and lineup.
     displace     see movable
-    min_gain     a plan that gains less than this is not sent (Outcome.BELOW_MIN_GAIN)
+    min_gain     a plan that gains less than this is not sent (Outcome.BELOW_MIN_GAIN); with
+                 ``auto`` it is never less than MIN_GAIN_AUTO, whatever this says
     auto         an unattended run: every guard in core/guard.py applies, ESPN's day must be
                  today (Session.current_period(strict=True)), a player with an unknown status
                  or a TBD tip time is frozen, and only ROSTER (today) is ever sent. Without
