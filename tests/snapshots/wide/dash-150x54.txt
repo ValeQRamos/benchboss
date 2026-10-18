@@ -3,16 +3,16 @@
   Dashboard  d                 ▄▄█████▄▄
   Optimize today  t          ▄▀▀█████████▄
   Optimize week  w          ▄███▀▀████████▄    MONSTARS                                                                                    3:30 pm
-  Workload  a               ███████████████    Demo Hoops League                                                                         Wed Nov 4
-  Best trash  f             ▀▀▀▀██████▀▀█▀▀    2-0  ·  2nd of 10  ·  projected 2nd  ·  streak W2
-  Player finder  p           ████▀▀▀█▀██▀█     29% ESPN playoff odds  ━━━─────────
-  Player news  n              ▀█████████▀
-  Trade finder  x                ▀▀▀▀▀
-  Inbox  i
-  Standings  s              ╭─  WEEK 3  ──────────────────────────────────────────────╮ ╭─  INBOX  ──────────────────────────────────────────────╮
-  Playoff race  y           │                                      Score  Proj.  Left │ │ ● Trade offer from Tune Squad: you give Scotty Pippen  │
-  Roster  o                 │ Monstars                             420.7  1,483    29 │ │ Jr., you get Lauri Markkanen                           │
-                            │ Pick and Roll Pros                   402.5  1,597    33 │ ╰────────────────────────────────────────────────────────╯
+  Auto-swap  u              ███████████████    Demo Hoops League                                                                         Wed Nov 4
+  Workload  a               ▀▀▀▀██████▀▀█▀▀    2-0  ·  2nd of 10  ·  projected 2nd  ·  streak W2
+  Best trash  f              ████▀▀▀█▀██▀█     29% ESPN playoff odds  ━━━─────────
+  Player finder  p            ▀█████████▀
+  Player news  n                 ▀▀▀▀▀
+  Trade finder  x
+  Inbox  i                  ╭─  WEEK 3  ──────────────────────────────────────────────╮ ╭─  INBOX  ──────────────────────────────────────────────╮
+  Standings  s              │                                      Score  Proj.  Left │ │ ● Trade offer from Tune Squad: you give Scotty Pippen  │
+  Playoff race  y           │ Monstars                             420.7  1,483    29 │ │ Jr., you get Lauri Markkanen                           │
+  Roster  o                 │ Pick and Roll Pros                   402.5  1,597    33 │ ╰────────────────────────────────────────────────────────╯
                             │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ ╭─  WORKLOAD THIS WEEK  ─────────────────────────────────╮
                             │ Up 18.2 now, projected to lose by 114                   │ │ Most games                                             │
                             ╰──────────────────────────────  Mon Nov 2 to Sun Nov 8  ─╯ │ A. Edwards MIN                        4 games (3 left) │

@@ -1,7 +1,8 @@
 """The laptop look does not change: every guarded screen at the window sizes in
 ``layout.WIDE_GUARDS`` (120x40 and 150x54), and at 150x45, must match its text snapshot in
 tests/snapshots/wide/. The snapshots come from the code before the phone work, except the
-dashboard at 120x40, rewritten on purpose (two columns from 78 content columns).
+dashboard at 120x40, rewritten on purpose (two columns from 78 content columns), and the
+menu column, which gained "Auto-swap  u" when the 1.0.4 packages were put together.
 
 The phone work in 1.0.4 changes how the app reads under 80 columns or 30 rows. These
 snapshots make sure it leaves the wide view alone. When a change to a wide screen is on

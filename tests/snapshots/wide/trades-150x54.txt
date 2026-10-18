@@ -3,16 +3,16 @@
   Dashboard  d              Trade finder  ·  fair 1-for-1 deals that fix a position
   Optimize today  t
   Optimize week  w          1. Splash Mountain  (Casey Nguyen)
-  Workload  a                  give Brandon Miller SF 37.4   get Ja Morant PG 37.5   fairness 100%
-  Best trash  f                "Hey Casey! You could use help at SF and you are deep at PG. I need a PG. Brandon Miller for Ja Morant is close in
-  Player finder  p             value and helps both of us. Interested?"
-  Player news  n            2. Splash Mountain  (Casey Nguyen)
-  Trade finder  x              give AJ Dybantsa SF 32.9   get Ja Morant PG 37.5   fairness 88%
-  Inbox  i                     "Hey Casey! You could use help at SF and you are deep at PG. I need a PG. AJ Dybantsa for Ja Morant is close in
-  Standings  s                 value and helps both of us. Interested?"
-  Playoff race  y           3. Fast Break Cartel  (Chris Moreno)
-  Roster  o                    give Brandon Miller SF 37.4   get Damian Lillard PG 38.6   fairness 97%
-                               "Hey Chris! You could use help at SF and you are deep at PG. I need a PG. Brandon Miller for Damian Lillard is
+  Auto-swap  u                 give Brandon Miller SF 37.4   get Ja Morant PG 37.5   fairness 100%
+  Workload  a                  "Hey Casey! You could use help at SF and you are deep at PG. I need a PG. Brandon Miller for Ja Morant is close in
+  Best trash  f                value and helps both of us. Interested?"
+  Player finder  p          2. Splash Mountain  (Casey Nguyen)
+  Player news  n               give AJ Dybantsa SF 32.9   get Ja Morant PG 37.5   fairness 88%
+  Trade finder  x              "Hey Casey! You could use help at SF and you are deep at PG. I need a PG. AJ Dybantsa for Ja Morant is close in
+  Inbox  i                     value and helps both of us. Interested?"
+  Standings  s              3. Fast Break Cartel  (Chris Moreno)
+  Playoff race  y              give Brandon Miller SF 37.4   get Damian Lillard PG 38.6   fairness 97%
+  Roster  o                    "Hey Chris! You could use help at SF and you are deep at PG. I need a PG. Brandon Miller for Damian Lillard is
                                close in value and helps both of us. Interested?"
                             4. Fast Break Cartel  (Chris Moreno)
                                give AJ Dybantsa SF 32.9   get Damian Lillard PG 38.6   fairness 85%

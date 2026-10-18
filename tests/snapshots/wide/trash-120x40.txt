@@ -3,16 +3,16 @@
   Dashboard  d              Best trash  ·  Wed Nov 4 to Sun Nov 8  ·  points added if you grab him
   Optimize today  t
   Optimize week  w            #   Player                  Games   G   Grab    +Pts   Drop               Net   Proj
-  Workload  a                ─────────────────────────────────────────────────────────────────────────────────────
-  Best trash  f               1   Day'Ron Sharpe BKN         ●●   2   Sat 7   54.1   Zach Edey*       +54.1   27.0
-  Player finder  p            2   Egor Demin BKN          ○··●●   2   Wed 4   60.1   Tobias Harris*   +37.5   30.0
-  Player news  n              3   Jalen Suggs ORL         ·●·●·   2   Wed 4   58.2   Tobias Harris*   +35.6   29.1
-  Trade finder  x             4   Khaman Maluach PHX       ●·●·   2   Thu 5   44.3   Zach Edey*       +33.7   22.1
-  Inbox  i                    5   Mitchell Robinson BOS      ·●   1   Sat 7   30.3   Zach Edey*       +30.3   30.3
-  Standings  s                6   Bobby Portis MIA        ○●··●   2   Wed 4   52.0   Tobias Harris*   +29.4   26.0
-  Playoff race  y             7   Davion Mitchell MIA     ○●··●   2   Wed 4   51.0   Tobias Harris*   +28.5   25.5
-  Roster  o                   8   P.J. Washington DAL         ●   1   Sun 8   26.9   Tobias Harris*   +26.9   26.9
-                              9   Ace Bailey UTA              ●   1   Sun 8   26.8   Tobias Harris*   +26.8   26.8
+  Auto-swap  u               ─────────────────────────────────────────────────────────────────────────────────────
+  Workload  a                 1   Day'Ron Sharpe BKN         ●●   2   Sat 7   54.1   Zach Edey*       +54.1   27.0
+  Best trash  f               2   Egor Demin BKN          ○··●●   2   Wed 4   60.1   Tobias Harris*   +37.5   30.0
+  Player finder  p            3   Jalen Suggs ORL         ·●·●·   2   Wed 4   58.2   Tobias Harris*   +35.6   29.1
+  Player news  n              4   Khaman Maluach PHX       ●·●·   2   Thu 5   44.3   Zach Edey*       +33.7   22.1
+  Trade finder  x             5   Mitchell Robinson BOS      ·●   1   Sat 7   30.3   Zach Edey*       +30.3   30.3
+  Inbox  i                    6   Bobby Portis MIA        ○●··●   2   Wed 4   52.0   Tobias Harris*   +29.4   26.0
+  Standings  s                7   Davion Mitchell MIA     ○●··●   2   Wed 4   51.0   Tobias Harris*   +28.5   25.5
+  Playoff race  y             8   P.J. Washington DAL         ●   1   Sun 8   26.9   Tobias Harris*   +26.9   26.9
+  Roster  o                   9   Ace Bailey UTA              ●   1   Sun 8   26.8   Tobias Harris*   +26.8   26.8
                              10   Jonathan Kuminga MIN        ●   1   Sun 8   26.3   Tobias Harris*   +26.3   26.3
                              11   Brook Lopez LAC            ·●   1   Sat 7   26.2   Zach Edey*       +26.2   26.2
                              12   Tre Jones CHI               ●   1   Sun 8   25.8   Tobias Harris*   +25.8   25.8

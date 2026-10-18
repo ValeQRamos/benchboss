@@ -3,16 +3,16 @@
   Dashboard  d              Player finder  ·  Free agents  ·  80 players  ·  sorted by Proj ▼
   Optimize today  t
   Optimize week  w           1 Free agents   2 On a team   3 Watch list   4 Everyone       / search players
-  Workload  a
-  Best trash  f             Pos  All  PG  SG  SF  PF  C  G  F  [ ]    Stats  Season  L7  L15  L30  Proj  Prev  v
-  Player finder  p
-  Player news  n             ★  Player                     Owner  Rost%     Start%   Avg    L7   L15   L30  Proj ▼
-  Trade finder  x               Jimmy Butler III GSW OUT   FA      45 ▼0.7      13     -     -     -     -    38.8
-  Inbox  i                      Mark Williams PHX OUT      FA      15 ▼0.9     5.6  33.0     -  33.0  33.0    31.0
-  Standings  s                  Mitchell Robinson BOS      FA      20 ▲1.0     8.0  26.6  22.7  26.6  26.6    30.3
-  Playoff race  y               Kyshawn George WSH         FA      32 ▲0.7     8.1  30.4  31.0  30.4  30.4    30.2
-  Roster  o                  ★  Egor Demin BKN             FA      46 ▲1.7      10  28.9  30.0  28.9  28.9    30.0
-                                Daniel Gafford DAL DTD     FA      29 ▼0.2     4.9  28.7  31.3  28.7  28.7    29.3
+  Auto-swap  u
+  Workload  a               Pos  All  PG  SG  SF  PF  C  G  F  [ ]    Stats  Season  L7  L15  L30  Proj  Prev  v
+  Best trash  f
+  Player finder  p           ★  Player                     Owner  Rost%     Start%   Avg    L7   L15   L30  Proj ▼
+  Player news  n                Jimmy Butler III GSW OUT   FA      45 ▼0.7      13     -     -     -     -    38.8
+  Trade finder  x               Mark Williams PHX OUT      FA      15 ▼0.9     5.6  33.0     -  33.0  33.0    31.0
+  Inbox  i                      Mitchell Robinson BOS      FA      20 ▲1.0     8.0  26.6  22.7  26.6  26.6    30.3
+  Standings  s                  Kyshawn George WSH         FA      32 ▲0.7     8.1  30.4  31.0  30.4  30.4    30.2
+  Playoff race  y            ★  Egor Demin BKN             FA      46 ▲1.7      10  28.9  30.0  28.9  28.9    30.0
+  Roster  o                     Daniel Gafford DAL DTD     FA      29 ▼0.2     4.9  28.7  31.3  28.7  28.7    29.3
                                 Peyton Watson CLE          FA      46 ▲1.1      11  25.1  23.5  25.1  25.1    29.3
                                 Jalen Suggs ORL            FA      27 ▲0.3     6.8  32.3  26.5  32.3  32.3    29.1 ▅▅
                                 Draymond Green GSW DTD     FA      32 ▼0.6      10  23.6  24.7  23.6  23.6    28.5
