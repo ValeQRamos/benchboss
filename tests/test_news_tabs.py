@@ -4,6 +4,7 @@ Every download goes through ``news._get_feed``; these tests fake it there (or fa
 ``Session.news`` / ``Session.latest_news``), so nothing reaches ESPN.
 """
 
+import asyncio
 import datetime as dt
 import io
 import json
@@ -11,10 +12,14 @@ import json
 import pytest
 from rich.cells import cell_len
 from rich.console import Console
+from textual.widgets import Input, OptionList, Static
 
 from benchboss import news, text
 from benchboss.cli import main
+from benchboss.config import Config
+from benchboss.demo import demo_session
 from benchboss.espn.models import Player
+from benchboss.ui.app import Benchboss
 from benchboss.ui.screens import news as screen
 from benchboss.ui.theme import DARK, LIGHT
 
@@ -497,3 +502,451 @@ def test_writes_still_need_the_exact_player(session):
 
     with pytest.raises(BenchbossError):
         session.find_player("ben simons")  # add, drop, trade and watch never guess
+
+
+# --- the app's news screen ----------------------------------------------------------------------------
+
+
+async def settle(pilot):
+    for _ in range(3):
+        await pilot.app.workers.wait_for_complete()
+        await pilot.pause()
+
+
+def drive(scenario, size=(140, 44), app=None):
+    """Run ``scenario(pilot, app)`` on the demo app, starting on the news screen."""
+    app = app or Benchboss(Config(), demo=True)
+
+    async def go():
+        async with app.run_test(size=size) as pilot:
+            await settle(pilot)
+            await pilot.press("n")
+            await settle(pilot)
+            await scenario(pilot, app)
+    asyncio.run(go())
+    assert app.return_code in (None, 0)
+    return app
+
+
+def view_of(app) -> screen.NewsView:
+    return app.query_one(screen.NewsView)
+
+
+def shown(app, part: str = "text") -> str:
+    widget = view_of(app).query_one(f"#news-{part}", Static)
+    return " ".join(text_of(widget.content, 200).split())
+
+
+def counting(session, name: str) -> list:
+    """Count the calls to one of the session's news methods (they still answer)."""
+    real, calls = getattr(session, name), []
+
+    def wrapper(*a, **k):
+        calls.append(a)
+        return real(*a, **k)
+
+    setattr(session, name, wrapper)
+    return calls
+
+
+async def type_in(pilot, text: str):
+    for ch in text:
+        await pilot.press("space" if ch == " " else ch)
+
+
+async def search(pilot, query: str):
+    await pilot.press("slash")
+    await type_in(pilot, query)
+    await pilot.press("enter")
+    await settle(pilot)
+
+
+def test_tabs_load_once_and_switch_from_memory():
+    s = demo_session()
+    calls = counting(s, "news")
+    app = Benchboss(Config(), demo=True, session=s)
+
+    async def scenario(pilot, app):
+        base = len(calls)  # the dashboard reads news too
+        assert app.current == "news" and calls[-1][1] == 5
+        assert "Roster · last 5 days · 4 items" in shown(app, "title")
+        assert "Edwards posted" in shown(app) and "Press g" not in shown(app)
+        assert "ANTHROPIC_API_KEY" in shown(app)  # the AI tip under the roster tab
+        await pilot.press("2")
+        await settle(pilot)
+        assert "Watch list · last 5 days · 2 items" in shown(app, "title")
+        assert "Demin is seeing more minutes" in shown(app) and "ANTHROPIC" not in shown(app)
+        await pilot.press("1")
+        await settle(pilot)
+        await pilot.press("2")
+        await settle(pilot)
+        assert len(calls) == base + 1  # each tab read once
+        await pilot.press("ctrl+t")
+        await settle(pilot)
+        assert len(calls) == base + 1 and "Demin is seeing" in shown(app)
+
+    drive(scenario, app=app)
+
+
+def test_the_window_of_days():
+    s = demo_session()
+    calls = counting(s, "news")
+    app = Benchboss(Config(), demo=True, session=s)
+
+    async def scenario(pilot, app):
+        base = len(calls)
+        await pilot.press("right_square_bracket")
+        await settle(pilot)
+        assert "last 7 days" in shown(app, "title") and calls[-1][1] == 7
+        assert len(calls) == base + 1
+        await pilot.press("left_square_bracket")
+        await pilot.press("left_square_bracket")
+        await settle(pilot)
+        assert "last 3 days" in shown(app, "title") and len(calls) == base + 2  # 5 was kept
+        for _ in range(4):
+            await pilot.press("left_square_bracket")
+        await settle(pilot)
+        assert "last 24 hours" in shown(app, "title")
+        view = view_of(app)
+        for want in (3, 5, 7, 14, 30, 1):  # . goes up and wraps (a key a phone reaches)
+            await pilot.press("full_stop")
+            await settle(pilot)
+            assert view.days == want
+        await pilot.press("plus")
+        await settle(pilot)
+        assert view.days == 3
+
+    drive(scenario, app=app)
+
+
+def test_search_a_close_spelling_and_go_back():
+    async def scenario(pilot, app):
+        await search(pilot, "ben simons")
+        view = view_of(app)
+        assert view.mode == "search" and view.player.name == "Ben Simmons"
+        assert "Ben Simmons · latest news · 3 items" in shown(app, "title")
+        assert "/ Ben Simmons" in shown(app, "tabs")
+        body = shown(app)
+        assert body.startswith("Ben Simmons SAC DTD · PG · FA · ")  # the fresh header
+        assert "Oct 16" in body and "older news" not in body
+        assert app.focused is view.query_one("#news-body")
+        await pilot.press("escape")
+        await settle(pilot)
+        assert view.mode == "tab" and "Roster · last 5 days" in shown(app, "title")
+        assert view.query_one(Input).value == ""
+
+    drive(scenario)
+
+
+def test_a_name_for_several_players_opens_a_pick_list():
+    async def scenario(pilot, app):
+        await search(pilot, "jalen")
+        view = view_of(app)
+        picks = view.query_one(OptionList)
+        assert view.mode == "picks" and picks.has_class("open") and app.focused is picks
+        assert picks.option_count == 6 and "6 players match 'jalen'" in shown(app, "title")
+        assert "Jalen Duren DET C · MONS · " in str(picks.get_option_at_index(3).prompt)
+        await pilot.press("j")  # j and k move in the list too
+        await pilot.press("down")
+        await pilot.press("k")
+        await pilot.press("enter")
+        await settle(pilot)
+        assert view.mode == "search" and view.player.name == "Jalen Johnson"
+        assert "No news yet." in shown(app) and not picks.has_class("open")
+        await search(pilot, "jalen")
+        await pilot.press("escape")
+        await settle(pilot)
+        assert view.mode == "tab" and "Roster" in shown(app, "title")
+
+    drive(scenario)
+
+
+def test_backspace_and_tabs_leave_a_search():
+    async def scenario(pilot, app):
+        view = view_of(app)
+        await search(pilot, "ben simmons")
+        await pilot.press("backspace")
+        await settle(pilot)
+        assert view.mode == "tab"
+        await search(pilot, "ben simmons")
+        await pilot.press("2")
+        await settle(pilot)
+        assert view.mode == "tab" and view.tab == "watch"
+        await pilot.press("backspace")  # nothing to leave: nothing happens
+        await pilot.press("escape")
+        await settle(pilot)
+        assert app.current == "news" and view.tab == "watch"
+
+    drive(scenario)
+
+
+def test_no_match_says_so():
+    async def scenario(pilot, app):
+        await search(pilot, "zzzz")
+        assert "No NBA player matches 'zzzz'." in shown(app)
+
+    drive(scenario)
+
+
+def test_more_brings_older_news_ten_at_a_time():
+    s = demo_session()
+    base = s.now
+    many = [news.NewsItem(500 + i, base - dt.timedelta(days=i), f"old item {i}", "", "Demo",
+                          "Rotowire", "", {BEN}) for i in range(25)]
+    asked = []
+
+    def latest(pid, n=10, offset=0):
+        asked.append((pid, n, offset))
+        return many[offset:offset + n]
+
+    s.latest_news = latest
+    app = Benchboss(Config(), demo=True, session=s)
+
+    async def scenario(pilot, app):
+        await search(pilot, "ben simmons")
+        view = view_of(app)
+        assert len(view.shown.sections[0].items) == 10 and "Press . for older news." in shown(app)
+        assert [k.key for k in view.key_items()][0] == "."
+        await pilot.press("full_stop")
+        await settle(pilot)
+        assert len(view.shown.sections[0].items) == 20
+        await pilot.press("plus")
+        await settle(pilot)
+        assert len(view.shown.sections[0].items) == 25 and not view.shown.sections[0].more
+        assert "older news" not in shown(app) and "older" not in shown(app, "hint")
+        await pilot.press("full_stop")
+        await settle(pilot)
+        assert asked == [(BEN, 11, 0), (BEN, 11, 10), (BEN, 11, 20)]
+        assert "old item 24" in shown(app) and "25 items" in shown(app, "title")
+
+    drive(scenario, app=app)
+
+
+def test_typing_in_the_search_box_never_changes_screens():
+    async def scenario(pilot, app):
+        view = view_of(app)
+        await pilot.press("slash")
+        assert app.focused is view.query_one(Input)
+        await type_in(pilot, "dnfp1/")
+        await settle(pilot)
+        assert app.current == "news" and view.query_one(Input).value == "dnfp1/"
+        assert view.tab == "roster" and view.mode == "tab"
+        await pilot.press("escape")  # leaves the box and clears what was typed
+        await settle(pilot)
+        assert app.focused is view.query_one("#news-body") and view.query_one(Input).value == ""
+        await pilot.press("f")
+        await settle(pilot)
+        assert app.current == "trash"
+        await pilot.press("n")
+        await settle(pilot)
+        await pilot.press("p")
+        await settle(pilot)
+        assert app.current == "players"
+
+    drive(scenario)
+
+
+def test_the_screen_comes_back_where_it_was():
+    async def scenario(pilot, app):
+        await pilot.press("2")
+        await pilot.press("right_square_bracket")
+        await settle(pilot)
+        await pilot.press("d")
+        await settle(pilot)
+        await pilot.press("n")
+        await settle(pilot)
+        view = view_of(app)
+        assert (view.tab, view.days, view.mode) == ("watch", 7, "tab")
+        assert "Watch list · last 7 days" in shown(app, "title")
+        await search(pilot, "ben simons")
+        await pilot.press("d")
+        await settle(pilot)
+        await pilot.press("n")
+        await settle(pilot)
+        view = view_of(app)
+        assert view.mode == "search" and view.player.name == "Ben Simmons"
+        assert view.query_one(Input).value == "ben simons" and "3 items" in shown(app, "title")
+        await pilot.press("escape")
+        await settle(pilot)
+        assert view.tab == "watch" and view.days == 7  # the tab it came from
+
+    drive(scenario)
+
+
+def test_refresh_reads_again_and_keeps_the_tab():
+    s = demo_session()
+    calls = counting(s, "news")
+    app = Benchboss(Config(), demo=True, session=s)
+
+    async def scenario(pilot, app):
+        await pilot.press("2")
+        await settle(pilot)
+        base = len(calls)
+        await pilot.press("r")
+        await settle(pilot)
+        assert len(calls) == base + 1 and calls[-1][0] == list(s.watch_list())
+        assert view_of(app).tab == "watch"
+
+    drive(scenario, app=app)
+
+
+def test_a_feed_that_is_down_shows_in_place_and_is_asked_again():
+    from benchboss.errors import NetworkError
+
+    s = demo_session()
+    real = s.news
+    state = {"down": True}
+
+    def flaky(ids, days=5):
+        if state["down"]:
+            raise NetworkError("could not reach ESPN (offline)")
+        return real(ids, days)
+
+    s.news = flaky
+    app = Benchboss(Config(), demo=True, session=s)
+
+    async def scenario(pilot, app):
+        assert "News is not available right now: could not reach ESPN" in shown(app)
+        assert "Roster" in shown(app, "tabs")  # the screen itself is up
+        state["down"] = False
+        await pilot.press("2")
+        await settle(pilot)
+        assert "Demin is seeing" in shown(app)
+        await pilot.press("1")
+        await settle(pilot)
+        assert "Edwards posted" in shown(app)  # asked again, not the error from the cache
+
+    drive(scenario, app=app)
+
+
+@pytest.mark.parametrize("error", ["network", "bug"])
+def test_a_failing_search_never_takes_the_app_down(error):
+    from benchboss.errors import NetworkError
+
+    s = demo_session()
+
+    def broken(*a, **k):
+        raise NetworkError("offline") if error == "network" else RuntimeError("boom")
+
+    s.search_players = broken
+    app = Benchboss(Config(), demo=True, session=s)
+
+    async def scenario(pilot, app):
+        await search(pilot, "ben simmons")
+        assert app.is_running and "Search failed:" in shown(app)
+        assert ("offline" if error == "network" else "RuntimeError: boom") in shown(app)
+        await pilot.press("escape")
+        await settle(pilot)
+        assert "Edwards posted" in shown(app)
+
+    drive(scenario, app=app)
+
+
+def test_late_answers_on_a_screen_that_was_left_do_nothing():
+    async def scenario(pilot, app):
+        view = view_of(app)
+        app.action_show("dash")
+        assert not view._live()
+        late = (lambda: view._tab_loaded(view._gen, "watch", 5, None, "late"),
+                lambda: view._searched(view._gen, "x", None, None, "", None, "late"),
+                lambda: view._player_loaded(view._gen, Player(1, "A B"), "", 0, None, "late"),
+                lambda: view._names_loaded(["A B"]), lambda: view.focus(), view._render_all)
+        for call in late:
+            call()
+        await settle(pilot)
+        for call in late:
+            call()
+        assert app.current == "dash" and app.focused is not None and app.focused.is_attached
+
+    drive(scenario)
+
+
+def test_an_older_answer_does_not_replace_a_newer_screen():
+    async def scenario(pilot, app):
+        view = view_of(app)
+        old = view._gen
+        await pilot.press("2")
+        await settle(pilot)
+        view._searched(old, "ben", screen.Found("ben", []), None, "", None, "")
+        assert view.mode == "tab" and "Watch list" in shown(app, "title")
+
+    drive(scenario)
+
+
+def test_the_search_box_suggests_names():
+    async def scenario(pilot, app):
+        view = view_of(app)
+        assert view.query_one(Input).suggester is None  # nothing read until / is pressed
+        await pilot.press("slash")
+        await settle(pilot)
+        suggester = view.query_one(Input).suggester
+        assert suggester is not None
+        assert await suggester.get_suggestion("ben s") == "Ben Simmons"
+
+    drive(scenario)
+
+
+def test_a_click_on_a_tab_opens_it():
+    async def scenario(pilot, app):
+        view = view_of(app)
+        start, _, tab = next(r for r in view.query_one("#news-tabs").regions if r[2] == "watch")
+        await pilot.click("#news-tabs", offset=(start + 2, 0))
+        await settle(pilot)
+        assert view.tab == "watch"
+
+    drive(scenario)
+
+
+def test_key_items_follow_the_mode():
+    async def scenario(pilot, app):
+        view = view_of(app)
+        keys = [k.key for k in view.key_items()]
+        assert keys == ["1-2", "/", "."]
+        await search(pilot, "jalen")
+        assert [k.key for k in view.key_items()] == ["⏎", "esc", "/"]
+        await pilot.press("enter")
+        await settle(pilot)
+        assert [k.key for k in view.key_items()] == ["esc", "/", "1-2"]
+        from benchboss.ui.layout import KeyItem
+
+        menu_letters = set("dtwafpnxisyougvmrq")
+        for mode_items in (view.key_items(),):
+            assert all(isinstance(k, KeyItem) and k.key not in menu_letters for k in mode_items)
+
+    drive(scenario)
+
+
+def test_the_widget_binds_no_menu_letter():
+    letters = set("dtwafpnxisyougvmrq")
+    keys = {k for b in screen.NewsView.BINDINGS for k in b.key.split(",")}
+    assert not keys & letters
+
+
+@pytest.mark.parametrize("width", [46, 80, 120, 160])
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_the_screen_fits_every_width(width, theme):
+    app = Benchboss(Config(theme=theme), demo=True)
+
+    async def scenario(pilot, app):
+        view = view_of(app)
+
+        def fits():
+            w = view.size.width
+            title = view.query_one("#news-title", Static).content
+            tabs = view.query_one("#news-tabs", Static).content
+            box = view.query_one(Input).styles.width.value
+            assert title.cell_len <= w and "\n" not in title.plain
+            assert tabs.cell_len + box <= w, (tabs.plain, box, w)
+            hint = view.query_one("#news-hint", Static).content
+            assert hint.cell_len <= w
+
+        fits()
+        await pilot.press("2")
+        await settle(pilot)
+        fits()
+        await search(pilot, "ben simmons")
+        fits()
+        await search(pilot, "jalen")
+        fits()
+
+    drive(scenario, size=(width, 40), app=app)

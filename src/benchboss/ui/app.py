@@ -396,8 +396,8 @@ class Benchboss(App):
             items = inbox.toast_spins(self.session)
             toasts = [f"{who}: {item.headline}" for who, item in items[:most]]
             if len(items) > most:
-                toasts.append(f"{len(items) - most} more on your watch list: press n for "
-                              "Player news.")
+                toasts.append(f"{len(items) - most} more on your watch list: press n, then 2 "
+                              "to read them.")
             for text in toasts:
                 self.call_from_thread(self.notify, text, title="Watch list news", timeout=12,
                                       markup=False)
@@ -444,8 +444,11 @@ class Benchboss(App):
                    "Anthropic API)." if news_mod.ai_available() and not self.demo else
                    "Want more? Set ANTHROPIC_API_KEY and press g for an AI briefing, or ask "
                    "Copilot Chat for news on your players (player-news skill).")
-            data = news_screen.load(s, news_screen.DAYS, ("roster", "watch"), tip=tip)
-            return (lambda pal, w: news_screen.draw(data, pal, w)), None
+            # the tab (and window) shown last, the others when asked for; a search shown
+            # last comes back from the widget itself
+            tab, days = news_screen.remembered_tab(self)
+            data = news_screen.load_tab(s, tab, days, tip=tip)
+            return Mount(lambda: news_screen.widget(data, self)), None
         if sid == "trades":
             from benchboss.core import trades as trades_mod
 

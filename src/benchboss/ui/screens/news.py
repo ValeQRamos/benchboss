@@ -1,8 +1,10 @@
 """Player news: RotoWire and ESPN items ("spins") on your roster and on your watch list, and
-the latest news on any NBA player you name.
+the latest news on any NBA player you search for.
 
 Follows the screen protocol but is not in SCREENS: the app builds it in its own "news"
-branch (which adds the AI briefing tip) and ``benchboss news`` prints one section of it.
+branch (which adds the AI briefing tip) and mounts ``NewsView``: two tabs (1 Roster, 2 Watch
+list) with a window of days, and a search (/) for any player's latest items whatever their
+date. ``benchboss news`` prints one section with ``draw``.
 
 Every download goes through ``Session.news`` (a window of days) or ``Session.latest_news``
 (the newest items), which both end in ``news.fetch``.
@@ -11,6 +13,7 @@ Every download goes through ``Session.news`` (a window of days) or ``Session.lat
 from __future__ import annotations
 
 import datetime as dt
+import weakref
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
@@ -19,13 +22,21 @@ from rich.console import Group, RenderableType
 from rich.constrain import Constrain
 from rich.table import Table
 from rich.text import Text
+from textual import work
+from textual.actions import SkipAction
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.widgets import Input, OptionList, Static
+from textual.widgets.option_list import Option
+from textual.worker import get_current_worker
 
 from benchboss.errors import BenchbossError
 from benchboss.espn.models import Player
 from benchboss.news import LATEST, NewsItem
-from benchboss.text import EXACT, INSIDE, confident
-from benchboss.ui.common import player_cell, rostered, title
-from benchboss.ui.theme import Palette
+from benchboss.text import EXACT, INSIDE, confident, surname
+from benchboss.ui.common import fit_title, legend, player_cell, rostered, title
+from benchboss.ui.layout import KeyItem
+from benchboss.ui.theme import DARK, Palette
 
 TITLE = "Player news"
 VIEWS: tuple[tuple[str, str], ...] = ()
@@ -36,7 +47,13 @@ WATCH_ADD = 'benchboss watch add "Player"'
 SEP = "  ·  "
 MEASURE = 96  # the longest line of news text: wider is hard to read
 
+TABS = ("roster", "watch")                       # keys 1 and 2 in the app
+TAB_LABEL = {"roster": "Roster", "watch": "Watch list"}
+TAB_SHORT = {"roster": "Roster", "watch": "Watch"}
+DAY_CHOICES = (1, 3, 5, 7, 14, 30)               # the window [ and ] step through
 PICKS = 8                                        # players a search offers to pick from
+SEARCH_WIDTH = 28                                # the app's search box (less when narrow)
+SEARCH_MIN = 10
 UNAVAILABLE = "News is not available right now"
 
 
@@ -365,3 +382,553 @@ def _ago(age: dt.timedelta) -> str:
     if minutes < 48 * 60:  # like the dashboard's news card
         return f"{minutes // 60}h"
     return f"{minutes // (24 * 60)}d"
+
+
+# --- the app widget -------------------------------------------------------------------------------
+
+# Where the news screen was last in each running app (tab, window, search), so n (or r)
+# comes back to the same place.
+_MEMORY: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+# The text color on the accent pill of the selected tab, per palette (as in the finder)
+_ON_ACCENT = {"dark": "#141518", "light": "#ffffff"}
+
+Region = tuple[int, int, str]  # (start, end, tab) in cells on the tab line
+
+
+def remembered_tab(app) -> tuple[str, int]:
+    """The tab and window of days the news screen showed last in this app."""
+    mem = _MEMORY.get(app) or {}
+    tab = mem.get("tab") if mem.get("tab") in TABS else "roster"
+    days = mem.get("days") if mem.get("days") in DAY_CHOICES else DAYS
+    return tab, days
+
+
+class _Tabs(Static):
+    """The tab line; a click on a tab opens it (a click on the search pill does nothing)."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.regions: list[Region] = []
+
+    def show(self, text: Text, regions: list[Region]) -> None:
+        self.regions = regions
+        self.update(text)
+
+    def on_click(self, event) -> None:
+        offset = event.get_content_offset(self)
+        if offset is None or offset.y != 0:
+            return
+        hit = next((r for r in self.regions if r[0] <= offset.x < r[1]), None)
+        view = next((a for a in self.ancestors if isinstance(a, NewsView)), None)
+        if hit is not None and view is not None and hit[2] in TABS:
+            event.stop()
+            view.action_tab(hit[2])
+            view.focus()
+
+
+class NewsView(Vertical):
+    """The interactive news screen. It binds 1 2 / [ ] + . escape backspace j k space and
+    nothing else, so the app's one-key menu keeps working while the news has the focus.
+
+    Modes: "tab" (a tab's news over a window of days), "picks" (a search that matched
+    several players: pick one) and "search" (one player's latest items)."""
+
+    DEFAULT_CSS = """
+    NewsView { height: 1fr; }
+    NewsView #news-title { height: 1; }
+    NewsView #news-top { height: 1; margin-top: 1; }
+    NewsView #news-tabs { width: 1fr; height: 1; }
+    NewsView #news-search { width: 28; height: 1; border: none; padding: 0 1;
+                            background: $surface; color: $foreground; }
+    NewsView #news-search:focus { border: none; background: $panel; }
+    NewsView #news-picks { height: auto; max-height: 10; margin-top: 1; display: none;
+                           border: none; background: $surface; padding: 0 1; }
+    NewsView #news-picks.open { display: block; }
+    NewsView #news-body { height: 1fr; margin-top: 1; background: $background; }
+    NewsView #news-hint { height: 1; margin-top: 1; }
+    NewsView #news-hint.hidden { display: none; }
+    """
+
+    BINDINGS = [
+        Binding("1", "tab('roster')", "Roster", show=False),
+        Binding("2", "tab('watch')", "Watch list", show=False),
+        Binding("slash", "search", "Search", show=False),
+        Binding("left_square_bracket", "days(-1)", "Fewer days", show=False),
+        Binding("right_square_bracket", "days(1)", "More days", show=False),
+        Binding("plus,full_stop", "more", "More", show=False),
+        Binding("escape", "back", "Back", show=False),
+        Binding("backspace", "leave_search", "Back", show=False),
+        Binding("j", "scroll(1)", "Down", show=False),
+        Binding("k", "scroll(-1)", "Up", show=False),
+        Binding("space", "page", "Page down", show=False),
+    ]
+
+    def __init__(self, data: NewsData, app) -> None:
+        super().__init__()
+        self.session = app.session
+        self._owner_app = app
+        self.tip = data.tip
+        sec = data.sections[0] if data.sections else Section("roster", [])
+        self.tab = sec.key if sec.key in TABS else "roster"
+        self.days = data.days if data.days in DAY_CHOICES else DAYS
+        self.cache: dict[tuple[str, int], NewsData] = {(self.tab, self.days): data}
+        self.mode = "tab"
+        self.query_text = ""
+        self.found: Found | None = None
+        self.player: Player | None = None   # the player searched for
+        self.owner = ""
+        self.shown: NewsData | None = None  # his latest items
+        self.fetching = False
+        self.message = ""                   # a search with no match, or what went wrong
+        self._gen = 0
+        self._names_asked = False
+        mem = _MEMORY.get(app) or {}
+        self._restore = mem.get("player") if mem.get("mode") == "search" else None
+        if self._restore:
+            self.query_text = mem.get("query") or ""
+
+    # --- layout ------------------------------------------------------------------------------------
+
+    def compose(self):
+        yield Static(id="news-title")
+        with Horizontal(id="news-top"):
+            yield _Tabs(id="news-tabs")
+            yield Input(placeholder="/ search any player", id="news-search")
+        yield OptionList(id="news-picks")
+        with VerticalScroll(id="news-body"):
+            yield Static(id="news-text")
+        yield Static(id="news-hint")
+
+    def _live(self) -> bool:
+        """Whether the app still shows this screen (a menu key can take it off while a
+        callback is on its way; its parts may be gone already)."""
+        return self.is_attached and getattr(self._owner_app, "_panel_widget", self) is self
+
+    def on_mount(self) -> None:
+        if not self._live():
+            return
+        self.watch(self.app, "theme", lambda: self._render_all(), init=False)
+        if self._restore:
+            pid, name = self._restore
+            self._restore = None
+            self.query_one("#news-search", Input).value = self.query_text
+            self._open_player(Player(pid, name))
+            return
+        self._remember()
+        self._render_all()
+
+    def focus(self, scroll_visible: bool = True):
+        if self._live():
+            picks = self.query_one("#news-picks", OptionList)
+            target = picks if self.mode == "picks" else self.query_one("#news-body")
+            target.focus(scroll_visible)
+        return self
+
+    def on_resize(self) -> None:
+        if self._live():
+            self._render_all()
+
+    @property
+    def pal(self) -> Palette:
+        return getattr(self._owner_app, "pal", DARK)
+
+    @property
+    def _width(self) -> int:
+        return max(20, self.size.width or 100)
+
+    def _remember(self) -> None:
+        player = (self.player.id, self.player.name) if self.player is not None else None
+        _MEMORY[self._owner_app] = {"tab": self.tab, "days": self.days, "mode": self.mode,
+                                    "query": self.query_text, "player": player}
+
+    # --- drawing -----------------------------------------------------------------------------------
+
+    def _render_all(self) -> None:
+        if not self._live():
+            return
+        self._render_header()
+        self._render_body()
+        self._render_hint()
+
+    def _current(self) -> NewsData | None:
+        if self.mode == "tab":
+            return self.cache.get((self.tab, self.days))
+        return self.shown if self.mode == "search" else None
+
+    def _render_header(self) -> None:
+        pal, width = self.pal, self._width
+        data = self._current()
+        items = len(data.sections[0].items) if data and data.sections else 0
+        count = ("Loading..." if self.fetching else
+                 f"{items} item{'s' * (items != 1)}" if items else
+                 "nothing new" if data is not None and self.mode == "tab" else "")
+        if self.mode == "tab":
+            window = _window(self.days)
+            tries = ((TAB_LABEL[self.tab], window, count), (window, count), (count,))
+        elif self.mode == "picks" and self.found is not None:
+            n = len(self.found.players)
+            tries = ((f"{n} players match '{self.query_text}'",), (f"{n} matches",))
+        else:
+            who = self.player.name if self.player is not None else f"'{self.query_text}'"
+            tries = ((who, "latest news", count), (who, count), (count,))
+        self.query_one("#news-title", Static).update(fit_title(TITLE, pal, width, *tries))
+        tabs, regions, search = self._tabs(pal, width)
+        self.query_one("#news-tabs", _Tabs).show(tabs, regions)
+        self.query_one("#news-search", Input).styles.width = max(SEARCH_MIN, search)
+
+    def _tabs(self, pal: Palette, width: int) -> tuple[Text, list[Region], int]:
+        """ "1 Roster  2 Watch list  / Ben Simmons", the current one a pill; shorter labels
+        when they and the search box do not fit. Returns the line, where each tab is and
+        the width left for the search box."""
+        searching = self.mode != "tab"
+        name = (self.player.name if self.player is not None else self.query_text) or "search"
+        digits = {k: TAB_SHORT[k] if k == self.tab and not searching else "" for k in TABS}
+        tries = ((TAB_LABEL, name, SEARCH_WIDTH), (TAB_SHORT, name, SEARCH_MIN),
+                 (TAB_SHORT, surname(name), SEARCH_MIN), (digits, surname(name), SEARCH_MIN),
+                 (digits, "", SEARCH_MIN))
+        pill = f"bold {_ON_ACCENT.get(pal.name, '#ffffff')} on {pal.accent}"
+        for labels, who, search in tries:
+            out, regions = Text(), []
+            for i, key in enumerate(TABS):
+                start = out.cell_len
+                if key == self.tab and not searching:
+                    out.append(f" {i + 1} {labels[key]} ", style=pill)
+                else:
+                    out.append(f" {i + 1}", style=f"bold {pal.dim}")
+                    out.append(f" {labels[key]} " if labels[key] else " ", style=pal.text)
+                regions.append((start, out.cell_len, key))
+                out.append(" ")
+            if searching:
+                out.append(f" / {who} " if who else " / ", style=pill)
+                out.append(" ")
+            if out.cell_len + search <= width:
+                break
+        return out, regions, min(SEARCH_WIDTH, width - out.cell_len)
+
+    def _render_body(self) -> None:
+        pal = self.pal
+        width = max(20, self._width - 3)  # the scrollbar and a gap before it
+        picks = self.query_one("#news-picks", OptionList)
+        picks.set_class(self.mode == "picks", "open")
+        if self.mode == "picks":
+            self._fill_picks(picks)
+            n = len(self.found.players) if self.found else 0
+            text = Text(f"'{self.query_text}' matches {n} players: pick one with the arrows "
+                        "and enter, or esc to go back.", style=pal.dim)
+        elif self.mode == "search" and self.message and self.shown is None:
+            text = Text(self.message, style=pal.warn if self.message.startswith(UNAVAILABLE)
+                        else pal.dim)
+        elif self.mode == "search":
+            parts: list[RenderableType] = []
+            if self.player is not None:
+                parts += [player_header(self.player, self.owner, pal, width), Text("")]
+            if self.shown is not None:
+                parts.append(body(self.shown, pal, width, headings=False))
+                if self.shown.sections[0].more:
+                    parts += [Text(""), Text("Press . for older news.", style=pal.dim)]
+            elif self.fetching:
+                parts.append(Text("Loading...", style=pal.dim))
+            text = Group(*parts)
+        else:
+            data = self.cache.get((self.tab, self.days))
+            if data is None:
+                text = Text(self.message or "Loading...",
+                            style=pal.warn if self.message else pal.dim)
+            else:
+                shown = NewsData(data.sections, data.days, data.now,
+                                 self.tip if self.tab == "roster" else "")
+                text = body(shown, pal, width, headings=False)
+        self.query_one("#news-text", Static).update(text)
+
+    def _fill_picks(self, picks: OptionList) -> None:
+        if self.found is None:
+            return
+        ids = [str(p.id) for p in self.found.players]
+        if [o.id for o in picks.options] == ids:
+            return
+        picks.clear_options()
+        picks.add_options([Option(candidate(p, self.found.owners.get(p.id, "")), id=str(p.id))
+                           for p in self.found.players])
+        picks.highlighted = 0 if ids else None
+
+    def _render_hint(self) -> None:
+        hint = self.query_one("#news-hint", Static)
+        compact = bool(getattr(self._owner_app, "compact", False))
+        hint.set_class(compact, "hidden")  # the compact layout has its own key bar
+        pal, width = self.pal, self._width
+        if self.mode == "picks":
+            items = [("enter", "pick"), ("esc", "back"), ("/", "search again")]
+        elif self.mode == "search":
+            more = self.shown is not None and self.shown.sections[0].more
+            items = ([(".", "older news")] if more else []) + [
+                ("esc", "back to the tabs"), ("/", "search again"), ("1 2", "tabs")]
+        else:
+            items = [("1 2", "tabs"), ("/", "search any player"), ("[ ]", "days"),
+                     ("j k", "scroll")]
+        out = Text()
+        for i in range(len(items), 0, -1):
+            out = legend(pal, *items[:i])
+            if out.cell_len <= width:
+                break
+        hint.update(out)
+
+    def key_items(self) -> list[KeyItem]:
+        """This screen's keys for the compact key bar (the app adds menu, refresh, quit).
+        The actions are this view's own (run with the view as the namespace)."""
+        if self.mode == "picks":
+            return [KeyItem("⏎", "pick", "", 10), KeyItem("esc", "back", "back", 20),
+                    KeyItem("/", "search", "search", 30)]
+        if self.mode == "search":
+            more = self.shown is not None and self.shown.sections[0].more
+            return ([KeyItem(".", "older", "more", 10)] if more else []) + [
+                KeyItem("esc", "back", "back", 20), KeyItem("/", "search", "search", 30),
+                KeyItem("1-2", "tabs", "", 40)]
+        return [KeyItem("1-2", "tabs", "", 10), KeyItem("/", "search", "search", 20),
+                KeyItem(".", "days", "more", 30)]
+
+    # --- actions -----------------------------------------------------------------------------------
+
+    def action_tab(self, tab: str) -> None:
+        if tab not in TABS or (tab == self.tab and self.mode == "tab"):
+            return
+        self.tab = tab
+        self._to_tabs()
+
+    def _to_tabs(self) -> None:
+        """Show the current tab (from the cache, else fetched), leaving any search."""
+        cached = self.cache.get((self.tab, self.days))
+        if cached is not None and cached.sections[0].error:
+            del self.cache[(self.tab, self.days)]  # the feed was down: ask again
+        self.mode = "tab"
+        self.message = ""
+        self._gen += 1  # a search still on its way is not wanted any more
+        self.fetching = (self.tab, self.days) not in self.cache
+        search = self.query_one("#news-search", Input)
+        if not search.has_focus:
+            search.value = ""
+        self._remember()
+        self._render_all()
+        if self.query_one("#news-picks", OptionList).has_focus:
+            self.query_one("#news-body").focus()
+        if self.fetching:
+            self._fetch_tab(self._gen, self.tab, self.days)
+
+    def action_days(self, step: int) -> None:
+        if self.mode != "tab":
+            return  # a search shows the latest items, whatever their date
+        i = DAY_CHOICES.index(self.days) if self.days in DAY_CHOICES else DAY_CHOICES.index(DAYS)
+        days = DAY_CHOICES[max(0, min(len(DAY_CHOICES) - 1, i + step))]
+        if days != self.days:
+            self.days = days
+            self._to_tabs()
+
+    def action_more(self) -> None:
+        """. or +: older news on the player searched for; on a tab, the next window of days
+        (after the longest it goes back to the shortest)."""
+        if self.mode == "tab":
+            i = DAY_CHOICES.index(self.days) if self.days in DAY_CHOICES else 0
+            self.days = DAY_CHOICES[(i + 1) % len(DAY_CHOICES)]
+            self._to_tabs()
+        elif (self.mode == "search" and self.player is not None and self.shown is not None
+              and self.shown.sections[0].more and not self.fetching):
+            self._gen += 1
+            self.fetching = True
+            self._render_all()
+            self._fetch_player(self._gen, self.player, len(self.shown.sections[0].items))
+
+    def action_search(self) -> None:
+        search = self.query_one("#news-search", Input)
+        search.focus()
+        if not self._names_asked:
+            self._names_asked = True
+            self._fetch_names()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        query = event.value.strip()
+        self.query_one("#news-body").focus()
+        if not query:
+            if self.mode != "tab":
+                self._to_tabs()
+            return
+        self.query_text = query
+        self.mode = "search"
+        self.player, self.owner, self.shown, self.found = None, "", None, None
+        self.message = ""
+        self.fetching = True
+        self._gen += 1
+        self._remember()
+        self._render_all()
+        self._search(self._gen, query)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        if self.found is None or event.option.id is None:
+            return
+        p = next((x for x in self.found.players if str(x.id) == event.option.id), None)
+        if p is not None:
+            self._open_player(p)
+
+    def _open_player(self, p: Player) -> None:
+        self.mode = "search"
+        self.player, self.owner, self.shown = p, "", None
+        self.message = ""
+        self.fetching = True
+        self._gen += 1
+        self._remember()
+        self._render_all()
+        self.query_one("#news-body").focus()
+        self._fetch_player(self._gen, p, 0)
+
+    def action_back(self) -> None:
+        """escape: leave the search box, then the pick list, then the search."""
+        search = self.query_one("#news-search", Input)
+        if search.has_focus:
+            search.value = self.query_text if self.mode != "tab" else ""
+            self.focus()
+            return
+        if self.mode == "picks":
+            self.query_text = ""
+            self._to_tabs()
+            return
+        if self.mode == "search":
+            self._to_tabs()
+            return
+        raise SkipAction()
+
+    def action_leave_search(self) -> None:
+        """backspace (the search box keeps its own): back to the tabs."""
+        if self.mode == "tab":
+            raise SkipAction()
+        self._to_tabs()
+
+    def action_scroll(self, step: int) -> None:
+        picks = self.query_one("#news-picks", OptionList)
+        if picks.has_focus:
+            (picks.action_cursor_down if step > 0 else picks.action_cursor_up)()
+            return
+        scroll = self.query_one("#news-body", VerticalScroll)
+        (scroll.scroll_down if step > 0 else scroll.scroll_up)()
+
+    def action_page(self) -> None:
+        self.query_one("#news-body", VerticalScroll).scroll_page_down()
+
+    # --- fetching ----------------------------------------------------------------------------------
+
+    def _reply(self, method, *args) -> None:
+        """Hand a worker's result to the UI thread, unless the worker was cancelled."""
+        if not get_current_worker().is_cancelled:
+            self._owner_app.call_from_thread(method, *args)
+
+    @work(thread=True, exclusive=True, group="news-view")
+    def _fetch_tab(self, gen: int, tab: str, days: int) -> None:
+        data, err = None, ""
+        try:
+            data = load_tab(self.session, tab, days)
+        except BenchbossError as e:
+            err = str(e)
+        except Exception as e:  # never let a bad payload kill the app
+            err = f"{type(e).__name__}: {e}"
+        self._reply(self._tab_loaded, gen, tab, days, data, err)
+
+    def _tab_loaded(self, gen: int, tab: str, days: int, data: NewsData | None,
+                    err: str) -> None:
+        if data is not None:
+            self.cache[(tab, days)] = data  # kept even when late; _to_tabs retries errors
+        if gen != self._gen or not self._live():
+            return
+        self.fetching = False
+        self.message = err
+        self._render_all()
+
+    @work(thread=True, exclusive=True, group="news-view")
+    def _search(self, gen: int, query: str) -> None:
+        found, player, owner, shown, err = None, None, "", None, ""
+        try:
+            found = find(self.session, query)
+            found.owners = {p.id: owner_of(self.session, p) for p in found.players}
+            if found.best is not None:
+                player = refreshed(self.session, found.best)
+                owner = owner_of(self.session, player)
+                shown = load_latest(self.session, [player], LATEST, catch=True)
+        except BenchbossError as e:
+            err = str(e)
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+        self._reply(self._searched, gen, query, found, player, owner, shown, err)
+
+    def _searched(self, gen: int, query: str, found: Found | None, player: Player | None,
+                  owner: str, shown: NewsData | None, err: str) -> None:
+        if gen != self._gen or not self._live():
+            return
+        self.fetching = False
+        self.found = found
+        if err or found is None:
+            self.message = f"Search failed: {err}" if err else ""
+        elif not found.players:
+            self.message = f"No NBA player matches '{query}'."
+        elif player is None:
+            self.mode = "picks"
+        else:
+            self.player, self.owner, self.shown = player, owner, shown
+        self._remember()
+        self._render_all()
+        self.focus()
+
+    @work(thread=True, exclusive=True, group="news-view")
+    def _fetch_player(self, gen: int, player: Player, offset: int) -> None:
+        owner, shown, err = "", None, ""
+        try:
+            if not offset:
+                player = refreshed(self.session, player)
+                owner = owner_of(self.session, player)
+            shown = load_latest(self.session, [player], LATEST, offset, catch=True)
+        except BenchbossError as e:
+            err = str(e)
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+        self._reply(self._player_loaded, gen, player, owner, offset, shown, err)
+
+    def _player_loaded(self, gen: int, player: Player, owner: str, offset: int,
+                       shown: NewsData | None, err: str) -> None:
+        if gen != self._gen or not self._live():
+            return
+        self.fetching = False
+        if err or shown is None:
+            if offset and self.shown is not None:
+                self.shown.sections[0].error = f"{UNAVAILABLE}: {err}"
+            else:
+                self.message = f"{UNAVAILABLE}: {err}"
+            self._render_all()
+            return
+        if offset and self.shown is not None:  # older items go under the ones on screen
+            sec, new = self.shown.sections[0], shown.sections[0]
+            seen = {i.id for i in sec.items}
+            sec.items += [i for i in new.items if i.id not in seen]
+            sec.more, sec.error = new.more, new.error
+        else:
+            self.player, self.owner, self.shown = player, owner, shown
+        self._remember()
+        self._render_all()
+
+    @work(thread=True, exclusive=True, group="news-names")
+    def _fetch_names(self) -> None:
+        """Every NBA player's name for the search box's suggestions, most rostered first.
+        Quiet when ESPN's list does not answer: the search still works without it."""
+        try:
+            players = sorted(self.session.nba_players(), key=lambda p: -p.owned)
+        except Exception:
+            return
+        self._reply(self._names_loaded, [p.name for p in players])
+
+    def _names_loaded(self, names: list[str]) -> None:
+        if self._live() and names:
+            from textual.suggester import SuggestFromList
+
+            self.query_one("#news-search", Input).suggester = SuggestFromList(
+                names, case_sensitive=False)
+
+
+def widget(data: NewsData, app) -> NewsView:
+    return NewsView(data, app)
