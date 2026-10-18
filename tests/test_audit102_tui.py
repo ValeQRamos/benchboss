@@ -348,6 +348,12 @@ def test_the_player_card_leaves_five_players_on_a_short_window(size):
         await settle(pilot)
         box, t = view.query_one("#finder-detail"), view.query_one(DataTable)
         assert box.has_class("open") and box.region.height >= 3
+        if app.compact:  # 1.0.4: under 30 rows the card covers the table and takes the keys
+            assert not t.display and app.focused is box and box.region.height >= 10
+            await pilot.press("escape")
+            await settle(pilot)
+            assert t.display and app.focused is t and t.scrollable_content_region.height - 1 >= 5
+            return
         assert t.scrollable_content_region.height - 1 >= 5  # rows under the header
         hint = view.query_one("#finder-hint")
         assert hint.region.height == 1 and hint.region.bottom <= view.region.bottom
