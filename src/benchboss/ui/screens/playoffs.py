@@ -3,7 +3,8 @@
 The CLI prints one of two views (``benchboss playoffs --view odds|games``). The app mounts a
 scenario builder instead: the matchups still to play on one side, the odds on the other.
 Pick a winner with the arrow keys and the season is simulated again with that result fixed
-(core.playoffs.race); a +/- column shows what your picks changed.
+(core.playoffs.rerun: the same seasons as the first view, so a team only moves when your
+picks move it); a +/- column shows what your picks changed.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from textual.containers import Container
 from textual.widget import Widget
 from textual.worker import get_current_worker
 
-from benchboss.core.playoffs import Game, Race
+from benchboss.core.playoffs import SIMS, Game, Race
 from benchboss.errors import BenchbossError
 from benchboss.ui.common import legend, meter, table, title
 from benchboss.ui.theme import DARK, Palette
@@ -29,10 +30,11 @@ from benchboss.ui.theme import DARK, Palette
 TITLE = "Playoff race"
 VIEWS: tuple[tuple[str, str], ...] = (("odds", "Odds"), ("games", "Games left"))
 FINAL_WEEKS = 5          # the "last 5 matches" of issue #1: the stretch the games view opens on
-SCENARIO_SIMS = 2000     # simulated seasons per re-run in the scenario builder
 DEBOUNCE = 0.12          # seconds the builder waits for more key presses before simulating
 TIEBREAK = {"H2H_RECORD": "head-to-head record", "TOTAL_POINTS_SCORED": "points for",
             "INTRA_DIVISION_RECORD": "division record", "TOTAL_POINTS_AGAINST": "points against"}
+# after the league's own rule, ties go down this chain (core.playoffs.seed_order)
+TIE_CHAIN = ("H2H_RECORD", "TOTAL_POINTS_SCORED", "INTRA_DIVISION_RECORD", "TOTAL_POINTS_AGAINST")
 CURSOR_BG = {"dark": "#30323a", "light": "#e3e7ec"}
 TIGHT = "tight"          # a key in the fitted columns' options: collapse the padding between columns
 GAMES_MIN = 5            # rows the builder keeps for the games list (its CSS min-height)
@@ -44,17 +46,21 @@ _RACE_BOX = Box("    \n    \n ── \n    \n ╌╌ \n ── \n    \n    \n")
 
 # --- data ---------------------------------------------------------------------------------------
 
-def load(session, picks: dict[int, int] | None = None, sims: int = 5000) -> Race:
+def load(session, picks: dict[int, int] | None = None, sims: int = SIMS) -> Race:
     """The race with ``picks`` fixed. With picks, the same race without them rides along as
-    ``race.baseline`` (same simulated seasons), so the screen can show what they change."""
-    race = session.playoff_race(picks or {}, sims)
-    if picks:
-        race.baseline = session.playoff_race({}, sims)
+    ``race.baseline``: the picks replay its seasons, so the screen shows what they change."""
+    if not picks:
+        return session.playoff_race({}, sims)
+    base = session.playoff_race({}, sims)
+    race = session.playoff_race(picks, sims, base=base)
+    race.baseline = base
     return race
 
 
 def to_json(race: Race) -> dict:
     out = race.to_dict()
+    stretch = final_weeks(race)
+    out["final_stretch_from"] = stretch[0] if stretch else None
     base = race.baseline
     if base is not None:
         for row, o in zip(out["teams"], race.teams, strict=True):
@@ -153,7 +159,7 @@ def _legend_lines(pal: Palette, items: list[tuple[str, str]], width: int) -> Tex
 
 def odds_view(race: Race, pal: Palette, width: int) -> RenderableType:
     parts: list[RenderableType] = [_fit_line(pal, width, *context(race))]
-    note = _note(race)
+    note = _note(race) or early_note(race, width, "--view games")
     if note:
         parts += [Text(""), Text(note, style=pal.dim)]
     cols, tight = fit_columns(race, pal, width)
@@ -170,6 +176,37 @@ def _note(race: Race) -> str:
     if not race.games:
         return "The regular season is over: the playoff field is set."
     return ""
+
+
+def early_note(race: Race, width: int, key: str = "") -> str:
+    """Early in the season (more than FINAL_WEEKS weeks still open) the odds move a lot and
+    a pick barely counts: one line that says so and how to get to the final stretch, ``key``
+    being what takes you there ("e" in the app, "--view games" in the CLI). Empty later in
+    the season, and when another note (_note) is shown."""
+    left = len(race.weeks_left)
+    if left <= FINAL_WEEKS or _note(race):
+        return ""
+    how = {"": "", "e": " (e jumps there)"}.get(key, f" ({key} lists them)")
+    short = f" ({key})" if key else ""
+    text = ""
+    for text in (f"{left} weeks left: odds move a lot this early. Picks matter most in the "
+                 f"last {FINAL_WEEKS} weeks{how}.",
+                 f"{left} weeks left: picks matter most in the last {FINAL_WEEKS} weeks{short}.",
+                 f"{left} weeks left: the last {FINAL_WEEKS} matter most{short}.",
+                 f"{left} weeks left: the last {FINAL_WEEKS} matter most."):
+        if cell_len(text) <= width:
+            break
+    return text
+
+
+def shown_share(p: float) -> int:
+    """The whole percent a share reads as on screen (``_share``): "<1%" counts as 0 and
+    ">99%" as 100, so a +/- is the change you can see in the column next to it."""
+    if p < 0.01:
+        return 0
+    if p > 0.99:
+        return 100
+    return int(f"{p * 100:.0f}")
 
 
 def rows_in_view(race: Race, k: int) -> list[int]:
@@ -228,7 +265,9 @@ def _columns(race: Race, pal: Palette, opt: dict, base: Race | None) -> list[tup
             cells = []
             for o in rows:
                 before = base.odds(o.team.id)
-                d = round((o.playoffs - before.playoffs) * 100) if before else 0
+                # the change you can see: the shares as the column prints them, not the
+                # raw difference (47.4% to 46.6% reads 47% to 47%, so it shows no change)
+                d = shown_share(o.playoffs) - shown_share(before.playoffs) if before else 0
                 cells.append(Text(f"{d:+d}", style=f"bold {pal.good if d > 0 else pal.bad}")
                              if d else Text("·", style=pal.border))
             cols.append(("+/-", right, cells))
@@ -335,7 +374,11 @@ def odds_legend(race: Race, pal: Palette, width: int, cols: list[tuple[str, dict
     if "ESPN" in shown:
         items.append(("ESPN", "ESPN's own odds, for reference"))
     if n and race.seeding_rule in TIEBREAK:
-        items.append(("Ties", f"broken by {TIEBREAK[race.seeding_rule]}"))
+        rule = race.seeding_rule
+        then = next(r for r in TIE_CHAIN if r != rule)
+        long = ("Ties", f"broken by {TIEBREAK[rule]}, then {TIEBREAK[then]}")
+        items.append(long if legend(pal, long).cell_len <= width else
+                     ("Ties", f"broken by {TIEBREAK[rule]}"))
     return _legend_lines(pal, items, width)
 
 
@@ -469,6 +512,9 @@ def games_view(race: Race, pal: Palette, width: int) -> RenderableType:
     size, compact = _layout(race, race.games, width, 2)
     row_width = 2 + 2 * size + (14 if compact else 20)
     parts: list[RenderableType] = [head]
+    early = early_note(race, width)
+    if early:
+        parts += [Text(""), Text(early, style=pal.dim)]
     for week, games in weeks.items():
         if week not in shown:
             continue
@@ -539,9 +585,8 @@ class PlayoffBuilder(Widget, can_focus=True):
 
     def __init__(self, race: Race, session, **kw):
         super().__init__(**kw)
-        self.initial = race          # what the screen loaded, no picks
+        self.initial = race          # what the screen loaded, no picks: what the +/- compares to
         self.race = race             # what is on screen
-        self.base: Race | None = None  # no picks, SCENARIO_SIMS seasons: what the +/- compares to
         self.session = session
         self.games = sorted(race.games, key=lambda g: g.week)
         self.picks: dict[int, int] = {}
@@ -613,6 +658,9 @@ class PlayoffBuilder(Widget, can_focus=True):
         line = _fit_line(pal, width - (len(busy) if self.busy else 0), *context(self.race))
         if self.busy:
             line.append(busy, style=pal.dim)
+        early = "" if self.short else early_note(self.initial, width, "e" if self.games else "")
+        if early:
+            return Text("\n").join([line, Text(early, style=pal.dim)])
         return line
 
     def _height(self, renderable: RenderableType, width: int) -> int:
@@ -624,14 +672,17 @@ class PlayoffBuilder(Widget, can_focus=True):
         with its content) what is left under the title, GAMES_MIN rows of games and the keys."""
         if not self.has_class("-stacked") or not self.size.height:
             return height
-        keys = self._height(self._draw_foot(self.pal, self.size.width, 0), self.size.width)
-        # the title and its margin, the keys and their margin, the odds' top padding
-        return self.size.height - 2 - (keys + 1) - GAMES_MIN - 1
+        width = self.size.width
+        keys = self._height(self._draw_foot(self.pal, width, 0), width)
+        head = self._height(self._draw_head(self.pal, width, 0), width)
+        # the title (and the early-season line) and its margin, the keys and their margin,
+        # the odds' top padding
+        return self.size.height - (head + 1) - (keys + 1) - GAMES_MIN - 1
 
     def _draw_odds(self, pal: Palette, width: int, height: int) -> RenderableType:
         text = _note(self.race)
         note = [Text(text, style=pal.dim)] if text else []
-        base = self.base if self.picks else None
+        base = self.initial if self.picks else None
         room = self._odds_room(height)
         if not self.short:
             cols, tight = fit_columns(self.race, pal, width, base=base)
@@ -822,18 +873,14 @@ class PlayoffBuilder(Widget, can_focus=True):
         self.repaint()
 
     def _simulate(self, picks: dict[int, int], token: int) -> None:
-        """Worker thread: the race with these picks, and once the same race without picks."""
+        """Worker thread: the seasons of the first view again, with these picks fixed."""
         worker = get_current_worker()
         time.sleep(DEBOUNCE)  # a newer key press cancels this run before it starts
         if worker.is_cancelled:
             return
         race, err = None, ""
         try:
-            if self.base is None:
-                self.base = self.session.playoff_race({}, SCENARIO_SIMS)
-            if worker.is_cancelled:
-                return
-            race = self.session.playoff_race(picks, SCENARIO_SIMS)
+            race = self.session.playoff_race(picks, self.initial.sims, base=self.initial)
         except BenchbossError as e:
             err = str(e)
         except Exception as e:  # a bad payload must not kill the app
@@ -847,7 +894,7 @@ class PlayoffBuilder(Widget, can_focus=True):
             return
         self.busy = False
         if race is not None:
-            race.baseline = self.base
+            race.baseline = self.initial
             self.race = race
         self.error = err
         self.repaint()
