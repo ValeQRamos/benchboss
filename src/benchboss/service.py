@@ -479,6 +479,66 @@ class Session:
                                   outcome=Outcome.FAILED, kind=kind)
         return OptimizeResult(plan, status=status, outcome=Outcome.EXECUTED, kind=kind)
 
+    # --- news ------------------------------------------------------------------------------------
+
+    NBA_PLAYERS_AGE = 86400  # seconds a saved copy of every NBA player's name is used
+    _nba_players: list[Player] | None = None  # nba_players, once read
+
+    def latest_news(self, player_id: int, n: int = 10, offset: int = 0):
+        """The newest ``n`` news items on one player whatever their date, skipping the
+        newest ``offset`` (news.latest). ``news`` keeps its window of days."""
+        from benchboss import news
+
+        return news.latest(player_id, n, offset)
+
+    def nba_players(self, max_age: float = NBA_PLAYERS_AGE) -> list[Player]:
+        """Every active NBA player (ESPN's public players_wl list): names, NBA team,
+        positions and % rostered, no stats or injury status. Kept on disk for ``max_age``
+        seconds and in memory for the session."""
+        if self._nba_players is None:
+            raw = self.cache.get("nba-players", max_age)
+            if raw is None:
+                raw = self.client.player_universe()
+                if raw:
+                    self.cache.put("nba-players", raw)
+            season = self.client.season
+            self._nba_players = [parse_player({"player": x}, season) for x in raw
+                                 if isinstance(x, dict) and x.get("id")]
+        return self._nba_players
+
+    def search_players(self, query: str, n: int = 8) -> list[tuple[float, Player]]:
+        """Any NBA player by name, best match first, as (score, player) from text.rank
+        (typos and partial names allowed). For reading only: every write finds its player
+        with ``find_player``, which never guesses.
+
+        Players on a roster in this league come as the league has them (injury, owner).
+        Without ESPN's player list, it searches the league's rosters and ESPN's own name
+        filter instead."""
+        from benchboss.text import rank
+
+        lg = self.league()
+        rostered = {sp.player.id: sp.player for t in lg.teams.values() for sp in t.roster}
+        try:
+            pool = self.nba_players()
+        except BenchbossError:
+            pool = []
+        players = [rostered.get(p.id, p) for p in pool]
+        listed = {p.id for p in players}
+        players += [p for pid, p in rostered.items() if pid not in listed]
+
+        def ranked(candidates):
+            return rank(candidates, query, lambda p: p.name,
+                        lambda p: (p.owned, p.pro_team_id > 0), n)
+
+        found = ranked(players)
+        if not found:  # ESPN's name filter may know someone the list does not
+            hits = self.client.players({"filterName": {"value": query}, "limit": 10,
+                                        "sortPercOwned": {"sortPriority": 1, "sortAsc": False}},
+                                       lg.scoring_period)
+            found = ranked([rostered.get(p.id, p) for p in
+                            (parse_player(x, lg.season) for x in hits)])
+        return found
+
 
 def _slot_id(position: str) -> int:
     pos = position.upper()

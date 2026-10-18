@@ -162,3 +162,137 @@ def test_rank_without_a_weight_keeps_the_given_order_for_ties():
 def test_match_one_for_writes_does_not_guess():
     with pytest.raises(Exception, match="is not in"):
         text.match_one(POOL, "Ben Simons", lambda p: p.name, where="the pool")
+
+
+# --- the player list, search and latest news on the session ------------------------------------------
+
+class ListClient:
+    """Only what Session.nba_players needs from a client: players_wl, counted."""
+    league_id, season, cookies = 12345, 2027, None
+
+    def __init__(self, rows=None, error=None):
+        self.rows = rows if rows is not None else [
+            {"id": 3907387, "fullName": "Ben Simmons", "proTeamId": 23,
+             "ownership": {"percentOwned": 12.0}, "lastNewsDate": 1762256400000},
+            {"id": 3136195, "fullName": "Nikola Jokić", "proTeamId": 7,
+             "ownership": {"percentOwned": 100.0}}]
+        self.error = error
+        self.calls = 0
+
+    def player_universe(self):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.rows
+
+
+def list_session(client):
+    from benchboss.config import Config
+    from benchboss.service import Session
+
+    return Session(Config(league_id=12345, team_id=1, season=2027), client=client)
+
+
+def test_nba_players_are_read_once_and_kept_on_disk(tmp_path):
+    from benchboss import config as config_mod
+
+    client = ListClient()
+    s = list_session(client)
+    players = s.nba_players()
+    assert [p.name for p in players] == ["Ben Simmons", "Nikola Jokić"]
+    assert players[0].owned == 12.0 and players[0].last_news == 1762256400000
+    assert not players[0].injury_known  # the list has no injury status: never "healthy"
+    assert s.nba_players() is players and client.calls == 1
+    saved = config_mod.cache_dir() / "12345-2027" / "nba-players.json"
+    assert saved.exists()
+    again = list_session(client)  # a new session (the next run) reads the file
+    assert [p.id for p in again.nba_players()] == [3907387, 3136195] and client.calls == 1
+    third = list_session(client)
+    third.nba_players(max_age=0)  # too old: asked again
+    assert client.calls == 2
+
+
+def test_an_empty_or_failed_list_is_not_saved():
+    from benchboss import config as config_mod
+    from benchboss.errors import NetworkError
+
+    s = list_session(ListClient(rows=[]))
+    assert s.nba_players() == []
+    assert not (config_mod.cache_dir() / "12345-2027" / "nba-players.json").exists()
+    with pytest.raises(NetworkError):
+        list_session(ListClient(error=NetworkError("offline"))).nba_players()
+
+
+def test_the_player_list_is_public(monkeypatch):
+    from benchboss.espn import client as client_mod
+
+    seen = {}
+
+    def http(url, **kw):
+        seen.update(url=url, **kw)
+        return [{"id": 1, "fullName": "A B"}]
+
+    monkeypatch.setattr(client_mod, "http", http)
+    c = client_mod.Client(12345, 2027, ("s2", "{swid}"))
+    assert c.player_universe() == [{"id": 1, "fullName": "A B"}]
+    assert seen["url"].endswith("/seasons/2027/players") and not seen.get("cookies")
+    assert ("view", "players_wl") in seen["params"]
+    assert '"filterActive"' in seen["headers"]["x-fantasy-filter"]
+    monkeypatch.setattr(client_mod, "http", lambda url, **kw: {"oops": 1})
+    assert c.player_universe() == []
+
+
+def test_session_latest_news_goes_through_the_feed(feed):
+    f = feed([raw_item(n, n * 24, pid=3907387) for n in range(1, 15)])
+    s = list_session(ListClient())
+    got = s.latest_news(3907387, 3, 2)
+    assert [x.id for x in got] == [3, 4, 5] and len(f.calls) == 1
+
+
+def test_search_finds_free_agents_and_league_players(session):
+    found = session.search_players("ben simons")
+    assert found[0][1].name == "Ben Simmons" and text.confident(found)
+    daniels = session.search_players("dyson daniels")[0][1]
+    assert daniels.status == "ONTEAM" and daniels.injury == "DTD"  # as the league has him
+
+
+def test_search_without_the_player_list_uses_rosters_and_espns_name_filter(session, monkeypatch):
+    from benchboss.errors import NetworkError
+
+    def down(*a, **k):
+        raise NetworkError("offline")
+
+    monkeypatch.setattr(session, "nba_players", down)
+    assert session.search_players("dyson")[0][1].name == "Dyson Daniels"  # on a roster
+    assert session.search_players("ben simmons")[0][1].name == "Ben Simmons"  # ESPN's filter
+    assert session.search_players("zzzz") == []
+
+
+def test_search_asks_espn_when_the_list_has_nobody(session, monkeypatch):
+    monkeypatch.setattr(session, "nba_players", lambda *a: [])
+    assert session.search_players("egor")[0][1].name == "Egor Demin"
+
+
+# --- the demo league -------------------------------------------------------------------------------
+
+BEN = 3907387  # Ben Simmons, a free agent in the demo with news for the search
+
+
+def test_demo_player_list(session):
+    players = session.nba_players()
+    assert len(players) == len(session.client.pool()) == 210
+    assert not any(p.stats for p in players)
+    with_news = {p.id for p in players if p.last_news}
+    assert BEN in with_news and len(with_news) == 7
+    assert session.cache.get("nba-players", 10**9) is None  # never written to disk
+
+
+def test_demo_latest_news_has_no_window(session):
+    items = session.latest_news(BEN)
+    assert len(items) == 3 and items[0].headline.startswith("Simmons handed out")
+    assert (session.now - items[-1].published).days >= 19
+    assert [x.id for x in session.latest_news(BEN, 1, 1)] == [items[1].id]
+    assert session.latest_news(BEN, 10, 3) == []
+    assert len(session.news([BEN], 5)) == 1  # a window still cuts
+    roster = [s.player.id for s in session.league().me.roster]
+    assert len(session.news(roster + list(session.watch_list()), 5)) == 6  # the tabs as before
