@@ -5,9 +5,15 @@ for each decision, so apply_plan logs nothing for it (``log=False``), and it fen
 with apply_plan's ``before_send`` hook, after the last fresh read of the roster. ESPN is never
 called: ``LiveDemo`` is the demo league with a fake transaction (see test_monitor.py)."""
 
+import json
+
+import pytest
+
 from benchboss import lineup_log
 from benchboss import monitor as mon
+from benchboss.cli import main
 from benchboss.core.autoswap import auto_options
+from benchboss.demo import DemoClient
 from benchboss.marks import MarkStore
 from benchboss.service import Outcome
 from test_monitor import FakeEspn, LiveDemo, armed, monitor, optimized, player, set_status
@@ -95,3 +101,22 @@ def test_a_dry_run_on_a_real_league_writes_no_log_line():
     set_status(live, "Dyson Daniels", "ACTIVE")
     monitor(live, dry_run=True).run(once=True)
     assert lineup_log.read_local(live) == before
+
+
+# --- add, drop and trade when ESPN's answer has no status -----------------------------------------
+
+def test_a_write_with_no_status_in_the_answer_exits_4_and_says_to_check(monkeypatch, capsys):
+    """actions.send no longer passes raw JSON off as a status (optimizer package): an answer
+    without one is UNKNOWN. add, drop and trade must not call that a success."""
+    monkeypatch.setattr(DemoClient, "transaction", lambda self, body: {"id": "abc"})
+    with pytest.raises(SystemExit) as e:
+        main(["--demo", "--yes", "drop", "Scotty Pippen Jr."])
+    out, err = capsys.readouterr()
+    assert e.value.code == 4 and "ESPN: UNKNOWN" in out
+    assert "check the league on ESPN before trying again" in " ".join(err.split())
+    with pytest.raises(SystemExit) as e:
+        main(["--demo", "--json", "--yes", "drop", "Scotty Pippen Jr."])
+    out, _ = capsys.readouterr()
+    data = json.loads(out)
+    assert e.value.code == 4 and data["sent"] and data["status"] == "UNKNOWN"
+    assert data["error"].startswith("ESPN's answer had no status")

@@ -623,7 +623,9 @@ def _write(c: Ctx, summary: str, send) -> None:
 
     With --json, stdout gets one JSON object (summary, dry_run, sent, status, error) and
     nothing else. ESPN can answer HTTP 200 with a FAILED_* status (roster lock, undroppable
-    player and so on): that exits 4 like any other refused write."""
+    player and so on): that exits 4 like any other refused write. So does an answer with no
+    status (actions.UNKNOWN_STATUS): nobody knows whether it went through, so it must be
+    checked on ESPN before anyone tries again."""
     js = c.args.json
     result = {"summary": summary, "dry_run": bool(c.args.dry_run), "sent": False,
               "status": None, "error": None}
@@ -647,14 +649,17 @@ def _write(c: Ctx, summary: str, send) -> None:
         if js:
             print(json.dumps({**result, "error": str(e)}, indent=2))
         raise
-    failed = status.startswith("FAILED")
+    from benchboss.actions import UNKNOWN_STATUS
+
+    error = (f"ESPN answered {status}" if status.startswith("FAILED") else
+             "ESPN's answer had no status, so it may or may not have gone through: check the "
+             "league on ESPN before trying again" if status == UNKNOWN_STATUS else None)
     if js:
-        print(json.dumps({**result, "sent": True, "status": status,
-                          "error": f"ESPN answered {status}" if failed else None}, indent=2))
+        print(json.dumps({**result, "sent": True, "status": status, "error": error}, indent=2))
     else:
         c.out.print(Text(f"ESPN: {status}"))
-    if failed:
-        raise WriteFailed(f"ESPN answered {status}")
+    if error:
+        raise WriteFailed(error)
 
 
 def cmd_add(c: Ctx):
