@@ -10,7 +10,8 @@ Paths, all under ``config.config_dir()`` (which honors BENCHBOSS_HOME):
 
 Folders are created private (0700) and files are written private (0600) where the system
 has POSIX permissions. A JSON file is replaced atomically: a temp file named after the
-process, then a rename, so a reader never sees half a file. A read-modify-write that two
+process, then a rename, so a reader never sees half a file (a rename Windows blocks while
+another process reads the file is tried again for a moment). A read-modify-write that two
 processes can do at once (the app and the monitor) goes inside ``locked``.
 
 A session that keeps its state in memory (``Session.local_state``, the demo) passes that
@@ -97,8 +98,25 @@ def read_json(path: Path, default: Any = None, *, memory: dict | None = None) ->
         raise BenchbossError(f"{path} is damaged ({e})") from e
 
 
+# On Windows a rename over a file fails while another process has it open (the app reading
+# monitor.json while the monitor saves it): wait a moment and try again before giving up
+REPLACE_WAITS = (0.02, 0.05, 0.1, 0.2, 0.4)
+_sleep = time.sleep
+
+
+def _replace(tmp: Path, path: Path) -> None:
+    for wait in REPLACE_WAITS:
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            _sleep(wait)
+    tmp.replace(path)
+
+
 def write_json(path: Path, data: Any, *, memory: dict | None = None) -> None:
-    """Replace ``path`` with ``data`` as JSON, atomically, readable only by you."""
+    """Replace ``path`` with ``data`` as JSON, atomically, readable only by you. A rename
+    that another process blocks for a moment (Windows) is tried again (REPLACE_WAITS)."""
     if memory is not None:
         with _memory_lock:
             memory[str(path)] = copy.deepcopy(data)
@@ -109,7 +127,7 @@ def write_json(path: Path, data: Any, *, memory: dict | None = None) -> None:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(json.dumps(data, indent=1, ensure_ascii=False, default=str) + "\n")
-        tmp.replace(path)
+        _replace(tmp, path)
     except OSError as e:
         with contextlib.suppress(OSError):
             tmp.unlink()

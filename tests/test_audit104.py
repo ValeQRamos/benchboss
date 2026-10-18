@@ -6,6 +6,7 @@ Nothing reaches ESPN: the monitor runs on ``LiveDemo`` with ``FakeEspn`` (see te
 and the news feed is faked at ``news._get_feed``."""
 
 import datetime as dt
+from pathlib import Path
 
 import pytest
 
@@ -252,3 +253,37 @@ def test_a_short_window_is_still_one_request(monkeypatch):
     news.fetch([7], days=None, limit=10)  # latest mode: the caller pages
     news.fetch([7], days=30, limit=5, offset=5)  # an explicit offset: the caller pages
     assert len(feed.calls) == 2
+
+
+# --- a rename Windows blocks for a moment ----------------------------------------------------------
+
+def test_a_blocked_rename_is_tried_again(tmp_path, monkeypatch):
+    target = tmp_path / "monitor.json"
+    real, tries = Path.replace, []
+
+    def blocked_twice(self, other):
+        tries.append(1)
+        if len(tries) <= 2:
+            raise PermissionError(32, "The process cannot access the file because it is "
+                                      "being used by another process")
+        return real(self, other)
+
+    monkeypatch.setattr(Path, "replace", blocked_twice)
+    monkeypatch.setattr(store, "_sleep", lambda s: None)
+    store.write_json(target, {"ok": 1})
+    assert len(tries) == 3 and store.read_json(target, None) == {"ok": 1}
+
+
+def test_a_rename_that_stays_blocked_still_fails(tmp_path, monkeypatch):
+    target = tmp_path / "monitor.json"
+
+    def blocked(self, other):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(Path, "replace", blocked)
+    waits = []
+    monkeypatch.setattr(store, "_sleep", waits.append)
+    with pytest.raises(BenchbossError, match="could not save"):
+        store.write_json(target, {"ok": 1})
+    assert waits == list(store.REPLACE_WAITS)
+    assert not list(tmp_path.glob("*.tmp"))  # the temp file is cleaned up
