@@ -162,7 +162,8 @@ New screens go in `src/benchboss/ui/screens/`. Each module has `TITLE`, `VIEWS` 
 `draw(data, pal, width, view)` and `to_json(data)`, plus `widget(data, app)` when the screen
 is interactive. Register it in `SCREENS` (`ui/screens/__init__.py`) and `MENU` (`ui/app.py`),
 and give it a CLI command that calls `_screen`. Steps in
-[CONTRIBUTING.md](CONTRIBUTING.md#adding-a-screen).
+[CONTRIBUTING.md](CONTRIBUTING.md#adding-a-screen). Every `draw` must fit 40 columns, and an
+interactive widget defines `key_items()` for the phone key bar (`ui/layout.py`).
 
 Rules:
 
