@@ -51,6 +51,8 @@ case "$cmd" in
 
     if id "$name" >/dev/null 2>&1; then
       [ "$existing" = 1 ] || die "$name is already a Linux user: add --existing to use that account"
+      [ "$(id -u "$name")" -ge 1000 ] || die "$name is a system account: the web app never runs as one"
+      [ -d "/home/$name" ] || die "$name has no /home/$name folder"
     else
       adduser --disabled-password --gecos "" "$name" >/dev/null
     fi
