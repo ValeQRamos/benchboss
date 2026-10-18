@@ -6,16 +6,22 @@ user passes ``--yes``.
 
 from __future__ import annotations
 
-import json
+import re
 from dataclasses import dataclass
 
 from benchboss.errors import BenchbossError, ConfigError
 from benchboss.espn.models import Player, Team, parse_player
 from benchboss.text import match_one, norm
 
+# What send() returns when ESPN's answer has no status it uses (an upper-case word). ESPN has
+# no status by that name, so it never hides a real one.
+UNKNOWN_STATUS = "UNKNOWN"
+
 
 def send(session, kind: str, items: list[dict], period: int, extra: dict | None = None) -> str:
-    """POST one transaction; returns ESPN's status (EXECUTED, PENDING, ...)."""
+    """POST one transaction; returns ESPN's status (EXECUTED, PENDING, FAILED_LINEUPLOCK, ...)
+    or UNKNOWN_STATUS when the answer carries none: then nobody knows whether it went
+    through. Never a piece of the raw answer."""
     lg = session.league()
     if session.client.swid not in lg.me.owner_ids:
         raise ConfigError(f"your ESPN account does not manage {lg.me.name}: run `benchboss setup` "
@@ -25,8 +31,13 @@ def send(session, kind: str, items: list[dict], period: int, extra: dict | None 
             "executionType": "EXECUTE", "items": items}
     body.update(extra or {})
     r = session.client.transaction(body)
-    status = r.get("status") or (r.get("transaction") or {}).get("status")
-    return status or json.dumps(r)[:200]
+    status = None
+    if isinstance(r, dict):
+        inner = r.get("transaction")
+        status = r.get("status") or (inner.get("status") if isinstance(inner, dict) else None)
+    if isinstance(status, str) and re.fullmatch(r"[A-Z_]+", status):
+        return status
+    return UNKNOWN_STATUS
 
 
 @dataclass
