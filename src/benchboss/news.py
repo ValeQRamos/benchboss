@@ -4,6 +4,11 @@ The feed mixes RotoWire blurbs (a one-line ``headline`` plus the analysis ESPN l
 "Spin") with ESPN stories and video. It is public, needs no cookies and accepts many
 players per request (repeat ``playerId``).
 
+Every news download goes through ``fetch`` and, below it, ``_get_feed``: the only line that
+talks to the network. Another way to reach the feed (a different host, headers or a proxy
+for servers where the public API does not answer) replaces ``_get_feed`` and nothing else.
+Tests fake the feed by patching ``_get_feed``.
+
 The AI digest is optional: with ``ANTHROPIC_API_KEY`` set, Claude searches the web for the
 latest on your players and writes a short fantasy-focused briefing.
 """
@@ -48,6 +53,12 @@ def _parse_time(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+def _get_feed(params: list[tuple[str, object]]) -> dict:
+    """One request to the news feed: ``params`` are the query (playerId repeated, days,
+    limit). The seam for another transport; keep its signature and return the feed JSON."""
+    return http(FEED, params=params)
+
+
 def fetch(player_ids: list[int], days: int = 5, limit: int = 200,
           include_media: bool = False) -> list[NewsItem]:
     """Newest first, deduplicated across players."""
@@ -55,7 +66,7 @@ def fetch(player_ids: list[int], days: int = 5, limit: int = 200,
     for i in range(0, len(player_ids), 50):  # URL length caps a request at about 100 ids
         chunk = player_ids[i:i + 50]
         params = [("playerId", pid) for pid in chunk] + [("days", days), ("limit", limit)]
-        for raw in http(FEED, params=params).get("feed", []):
+        for raw in _get_feed(params).get("feed", []):
             kind = raw.get("type", "")
             if kind == "Media" and not include_media:
                 continue

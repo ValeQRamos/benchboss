@@ -168,10 +168,3 @@ class Client:
         headers = {"X-Fantasy-Filter": json.dumps(fantasy_filter)} if fantasy_filter else None
         return http(COMM + self._league_path() + "/communication/" + path, params=p,
                     headers=headers, body=body, cookies=self.cookies)
-
-
-def player_news(player_id: int, limit: int = 10) -> list[dict]:
-    """Public fantasy news feed for one player (Rotowire blurbs and ESPN media). No cookies."""
-    url = f"{SITE}/fantasy/v2/games/fba/news/players"
-    data = http(url, params=[("playerId", player_id), ("limit", limit)])
-    return data.get("feed", [])
