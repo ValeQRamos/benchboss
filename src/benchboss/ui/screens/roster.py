@@ -45,10 +45,9 @@ DROPS: tuple[tuple[str, ...], ...] = (
     ("pts", "reb", "ast"),
     ("base",),
 )
-# Then the names: full with the NBA team, short with the team, short alone. Who plays today
-# matters most on a phone: Today turns into a one-cell dot before the team goes, and goes
-# only after it.
-NAMES = ((False, True), (True, True), (True, False))
+# Then the names go short ("A. Edwards MIN"). Who plays today matters most on a phone: Today
+# turns into a one-cell dot (and the Slot header goes), then the NBA team goes, and Today
+# goes last of all (_layouts).
 
 BOX = box.Box(  # SIMPLE_HEAD, plus a thin dashed rule between starters, bench and IR
     "    \n"
@@ -276,7 +275,7 @@ def _total(widths: list[int]) -> int:
 
 
 def _layouts(sel: str, base: str, hidden: set[str]):
-    """Every layout from the widest to the narrowest (see DROPS and NAMES)."""
+    """Every layout from the widest to the narrowest (see DROPS)."""
     gone = set(hidden)
     yield _Layout(sel, base, set(gone))
     for step in DROPS:
