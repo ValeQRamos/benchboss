@@ -69,7 +69,8 @@ from benchboss.espn.models import Player, RosterSpot
 # (class before, class after) -> flip kind
 FLIP_KINDS = {("risk", "ok"): "cleared", ("out", "ok"): "cleared", ("out", "risk"): "returning",
               ("ok", "out"): "ruled_out", ("risk", "out"): "ruled_out", ("ok", "risk"): "flagged"}
-# a player the monitor started who turns one of these before his tip goes back to the bench
+# a player the monitor started who has one of these before his tip goes back to the bench.
+# The monitor checks it on every read, not on a flip: DTD or Q to DOUBTFUL stays in "risk"
 REVERT_STATUSES = OUT_STATUSES | {"DOUBTFUL"}
 MAX_MOVES = 12  # more moves than this in one automatic plan means a broken read (guard G7)
 

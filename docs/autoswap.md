@@ -138,7 +138,9 @@ demo. On top of the checks above:
 - At most 6 automatic changes a day, at most 2 per player, and 60 seconds between changes
   unless a game starts within 2 minutes.
 - If a player it started is ruled out, suspended or doubtful before his game, it puts him back
-  on the bench and the starter he replaced back in.
+  on the bench and the starter he replaced back in. It checks this on every read until it is
+  done, so a lineup read that is a step behind (or fails) is tried again on the next one. If
+  nobody can take his spot, or his game is less than 3 minutes away, you get an urgent note.
 - If someone else (you in the ESPN app, a script) moved an armed player since the monitor last
   looked, that mark rests for the rest of the day and you get a note.
 

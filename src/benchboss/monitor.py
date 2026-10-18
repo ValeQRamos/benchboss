@@ -59,6 +59,10 @@ How one tick goes:
    FAILED and REFUSED are never retried; a read that fails (or a 401) leaves the flip
    pending.
 7. A notify mark or a watch-list player who turns healthy makes an alert and a note.
+8. A player the monitor started is checked on every read (no flip needed: Q to DOUBTFUL is
+   none). OUT, SUSPENSION or DOUBTFUL before his tip puts him back on the bench with the
+   same checks; a roster read that lags or fails is tried again on the next read. When
+   nothing can take his spot, or his tip is too close, an urgent note says so.
 """
 
 from __future__ import annotations
@@ -86,7 +90,7 @@ from benchboss.errors import (
     EspnError,
     NetworkError,
 )
-from benchboss.espn.constants import IR, LINEUP_LOCK_INDIVIDUAL, SLOT, status_class
+from benchboss.espn.constants import BENCH, IR, LINEUP_LOCK_INDIVIDUAL, SLOT, status_class
 from benchboss.marks import MarkStore
 
 VERSION = 1
@@ -644,10 +648,15 @@ class Monitor:
                                                    "old": f.old, "new": f.new}
             elif pid in auto and not f.cleared:
                 self.state["pending"].pop(str(pid), None)
-            if pid in moved and f.new in core.REVERT_STATUSES and f.tip and not f.started:
-                self._revert(f, edge, period)
             if f.cleared and (pid not in auto or marks.paused):
                 self._healthy(f, edge, today=period)
+        # a player the monitor started is checked on every read, not only on a flip: Q to
+        # DOUBTFUL is no flip, and a roster read that lagged or failed is tried again
+        for pid in sorted(moved):
+            p = by_id.get(pid)
+            if (p is not None and pid in roster and in_season
+                    and core.known_status(p) in core.REVERT_STATUSES):
+                self._revert(p, period)
         for key in list(self.state["pending"]):
             p = by_id.get(int(key))
             if p is None or int(key) not in auto:  # disarmed, lowered to alert only, or gone
@@ -706,17 +715,32 @@ class Monitor:
             return
         self._attempt(p, edge, period, frozenset({pid}), game.start, revert=False)
 
-    def _revert(self, f: core.Flip, edge: int, period: int) -> None:
-        """A player the monitor started turned OUT, SUSPENSION or DOUBTFUL before his tip:
-        the same scoped plan puts him back on the bench (and the starter he replaced back in)."""
-        moved = self.state["moved"].get(str(f.player_id)) or {}
-        movable = {f.player_id} | ({moved["benched"]} if moved.get("benched") else set())
-        p = next((sp.player for sp in self.session.league().me.roster
-                  if sp.player.id == f.player_id), None)
-        if p is None or f.tip is None or f.tip - LOCK_MARGIN <= self._now():
+    def _revert(self, p, period: int) -> None:
+        """A player the monitor started is OUT, SUSPENSION or DOUBTFUL by this read and his
+        game has not started: the same scoped plan puts him back on the bench (and the
+        starter he replaced back in). Nothing is kept pending: while he is still marked as
+        started and his status still calls for it, every read tries again, until the change
+        is settled (one try per status edge) or his tip is too close."""
+        pid = p.id
+        edge = int(self.state["edges"].get(str(pid), 0))
+        key = f"{self.state['day']}:{pid}:{edge}"
+        if key in self.state["acted"] or self.state["held"].get(str(pid)) == self.state["day"]:
             return
-        self._attempt(replace(p, injury_status=f.new), edge, period, frozenset(movable), f.tip,
-                      revert=True)
+        now = self._now()
+        game = self.session.calendar.game(p.pro_team_id, period)
+        if game is None or game.start <= now:
+            return  # his game started: his lineup spot is locked
+        if game.start - LOCK_MARGIN <= now:
+            self.state["acted"][key] = {"at": self._now_iso(), "outcome": "TOO_LATE"}
+            text = (f"{p.name} is {core.tag(p.injury_status)}, but his "
+                    f"{clock(game.start, now.tzinfo)} tip is too close for benchboss to put him "
+                    "back on the bench. Check your lineup in the ESPN app.")
+            self._alert("autoswap", pid, p.name, text, True, f"late:{key}")
+            self._note("Auto-swap", text, "urgent", f"late:{key}")
+            return
+        moved = self.state["moved"].get(str(pid)) or {}
+        movable = {pid} | ({moved["benched"]} if moved.get("benched") else set())
+        self._attempt(p, edge, period, frozenset(movable), game.start, revert=True)
 
     def _forced_trial(self, pid: int, tip: dt.datetime, revert: bool = False) -> str:
         """Why this change stays a trial run in live mode ("" when it may be sent). Putting
@@ -765,14 +789,14 @@ class Monitor:
                 self._worse(3)
             self._record("error", trigger={"player_id": pid, "player": p.name},
                          text=f"could not read the lineup for {p.name}: {r0.error}")
-            return  # stays pending
+            return  # stays pending (a revert is tried again on the next read)
         if r0.outcome in ("WOULD_SEND", "ALREADY_OPTIMAL", "BELOW_MIN_GAIN") and (
                 trigger is None or core.known_status(trigger) is None
                 or (trigger.injury_status not in core.REVERT_STATUSES if revert
                     else status_class(trigger.injury_status) != HEALTHY)):
-            if not revert:
-                self.say(f"{p.name}: the roster read does not show him healthy yet, waiting")
-            return  # two reads must agree before anything happens
+            state = core.tag(p.injury_status) if revert else "healthy"
+            self.say(f"{p.name}: the roster read does not show him {state} yet, waiting")
+            return  # two reads must agree before anything happens; the next read tries again
         before = core.lineup_before(r0.plan)
         if self._human_touched(before, movable, key):
             return
@@ -837,6 +861,12 @@ class Monitor:
         game = cal.game(p.pro_team_id, r.plan.period)
         tip = game.start if game else None
         name = p.name
+        # a revert that changes nothing: is he still in a starting spot?
+        starting = core.lineup_before(r.plan).get(p.id) not in (None, BENCH, IR)
+        if revert and outcome == "ALREADY_OPTIMAL" and not starting:
+            moved = self.state["moved"].get(str(p.id))
+            if moved:
+                moved.update(to=None, benched=None)  # nothing left to guard; the count stays
         if outcome == "WOULD_SEND":
             if revert:
                 text = (f"Trial run: {name} is {core.tag(p.injury_status)} again, benchboss "
@@ -850,9 +880,17 @@ class Monitor:
                     f"ESPN: {status or 'EXECUTED'}" if revert else
                     core.live_text(name, swap, status or "EXECUTED"))
             text += " Tomorrow starts from this lineup: run benchboss optimize tomorrow."
+        elif outcome == "ALREADY_OPTIMAL" and revert and starting:
+            text = (f"{name} is {core.tag(p.injury_status)} and still in your lineup: "
+                    "benchboss found nobody it may move to take his spot, so nothing changed. "
+                    "Check your lineup in the ESPN app.")
         elif outcome == "ALREADY_OPTIMAL":
             text = (f"{name} is healthy and already where he should be: nothing to change."
                     if not revert else f"{name} is already on the bench.")
+        elif outcome == "BELOW_MIN_GAIN" and revert:
+            text = (f"{name} is {core.tag(p.injury_status)}, but putting the starter he "
+                    f"replaced back in adds only {swap.gain:+.1f} (under {MIN_GAIN_AUTO:.1f}): "
+                    f"{name} stays in your lineup.")
         elif outcome == "BELOW_MIN_GAIN":
             text = (f"{name} is healthy, but starting him adds only {swap.gain:+.1f} "
                     f"(under {MIN_GAIN_AUTO:.1f}): nothing changed.")
@@ -868,7 +906,10 @@ class Monitor:
         trigger = self._trigger(p, tip)
         self.state["acted"][key] = {"at": self._now_iso(), "outcome": outcome}
         self.state["pending"].pop(str(p.id), None)
-        urgent = outcome in URGENT_OUTCOMES or outcome == "NOT_SENT"
+        # a player the monitor started who stays in the lineup while out is urgent too
+        stuck = revert and starting and outcome in ("ALREADY_OPTIMAL", "BELOW_MIN_GAIN")
+        urgent = outcome in URGENT_OUTCOMES or outcome == "NOT_SENT" or (
+            stuck and outcome == "ALREADY_OPTIMAL")
         gain = round(swap.gain, 1)
         projected_after = round(r.plan.projected, 1)
         before = r.plan.projected_before or (r.plan.projected - swap.gain)
@@ -878,10 +919,10 @@ class Monitor:
                      projected_before=round(before, 1), projected_after=projected_after,
                      gain=gain, outcome=outcome, status=status or None, error=error or None,
                      guards=guards, intent=intent, edge=edge, text=text)
-        if not revert or outcome not in ("ALREADY_OPTIMAL", "BELOW_MIN_GAIN"):
+        if not revert or stuck or outcome not in ("ALREADY_OPTIMAL", "BELOW_MIN_GAIN"):
             self._alert("autoswap", p.id, name, text, urgent, f"autoswap:{key}")
-            prio = "urgent" if urgent else "info" if outcome in ("ALREADY_OPTIMAL",
-                                                                 "BELOW_MIN_GAIN") else "normal"
+            quiet = outcome in ("ALREADY_OPTIMAL", "BELOW_MIN_GAIN") and not stuck
+            prio = "urgent" if urgent else "info" if quiet else "normal"
             self._note("Auto-swap", text, prio, f"autoswap:{key}")
         if outcome == "NOT_SENT" and (guards or problems):
             self._worse(5)
