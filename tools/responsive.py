@@ -62,7 +62,9 @@ def checks(name: str, text: str) -> list[str]:
     lines = text.splitlines()
     notes = []
     bottom = lines[-1] if lines else ""
-    if name != "menu" and "m menu" not in bottom.lower():
+    # the menu page has "m close"; a laptop's footer shows only the search box's keys while it
+    # has the focus
+    if name not in ("menu", "players-search") and "m menu" not in bottom.lower():
         notes.append("no 'm menu' on the bottom row")
     rows = any(re.search(r"\s\d+\.\d\b", x) for x in lines[3:])
     if name.startswith("players") and name != "players-card" and not rows:
