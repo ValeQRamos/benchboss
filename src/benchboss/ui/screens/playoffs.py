@@ -527,6 +527,8 @@ class PlayoffBuilder(Widget, can_focus=True):
         Binding("down,j", "move(1)", "Next game", show=False),
         Binding("pageup", "week(-1)", "Previous week", show=False),
         Binding("pagedown", "week(1)", "Next week", show=False),
+        Binding("comma", "week(-1)", "Previous week", show=False),  # a phone keyboard's page keys
+        Binding("full_stop", "week(1)", "Next week", show=False),
         Binding("left,h", "pick('home')", "Home wins", show=False),
         Binding("right,l", "pick('away')", "Away wins", show=False),
         Binding("backspace,0", "clear", "Clear pick", show=False),
@@ -851,6 +853,17 @@ class PlayoffBuilder(Widget, can_focus=True):
             self.race = race
         self.error = err
         self.repaint()
+
+    def key_items(self) -> list:
+        """The builder's keys for the app's key bar on a phone (letters, not arrows)."""
+        from benchboss.ui.layout import KeyItem
+
+        if not self.games:
+            return []
+        return [KeyItem("j k", "game", "", 10), KeyItem("h l", "pick", "", 12),
+                KeyItem("0", "clear", "clear", 20), KeyItem(", .", "week", "week(1)", 25),
+                KeyItem("c", "clear all", "clear_all", 40), KeyItem("e", "final weeks", "final", 45),
+                KeyItem("b", "next week", "next_week", 50)]
 
 
 __all__ = ["TITLE", "VIEWS", "PlayoffBuilder", "draw", "load", "to_json", "widget"]
