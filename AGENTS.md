@@ -84,8 +84,9 @@ instant and the same key undoes it.
 ### Exit codes
 
 `0` ok · `1` error · `2` bad usage · `3` cookies missing or expired (ask the user to run
-`benchboss login`) · `4` ESPN rejected the request or part of a write (show the lines) · `10` a write was
-prepared but not confirmed (rerun with `--yes` only after the user approves).
+`benchboss login`) · `4` ESPN rejected the request or part of a write (show the lines) · `5` a
+safety check refused a lineup change and nothing was sent (show the reason; do not retry) ·
+`10` a write was prepared but not confirmed (rerun with `--yes` only after the user approves).
 
 ### Facts that prevent wrong answers
 
