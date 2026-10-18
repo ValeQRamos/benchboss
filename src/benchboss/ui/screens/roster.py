@@ -67,6 +67,7 @@ class RosterData:
     plays_today: set[int] = field(default_factory=set)
     opponents: dict[int, str] = field(default_factory=dict)  # player id -> "LAC" or "@BOS" today
     in_season: bool = True
+    marked: dict[int, str] = field(default_factory=dict)  # player id -> auto-swap mark mode
 
 
 def load(session) -> RosterData:
@@ -78,7 +79,10 @@ def load(session) -> RosterData:
         game = cal.game(s.player.pro_team_id, day)
         if game:
             opponents[s.player.id] = _opponent(game.opponent(s.player.pro_team_id))
-    return RosterData(lg, set(opponents), opponents, in_season)
+    from benchboss.marks import MarkStore  # a local file: never fails the roster
+
+    marked = {pid: m.mode for pid, m in MarkStore(session).load().marks.items()}
+    return RosterData(lg, set(opponents), opponents, in_season, marked)
 
 
 def _opponent(text: str) -> str:
@@ -177,8 +181,11 @@ def _columns(rows: list[_Row], data: RosterData, lay: _Layout, pal: Palette) -> 
     add("slot", "Slot", "who", [Text(r.slot, style=pal.dim) for r in rows], justify="left")
     add("player", "Player", "who",
         [player_cell(r.player, pal, short=lay.short, team=lay.team,
-                     style=pal.dim if r.spot.slot_id == IR else None) if r.player
-         else Text("Empty", style=f"italic {pal.dim}") for r in rows], justify="left")
+                     style=pal.dim if r.spot.slot_id == IR else None).append(*{
+                         "auto": (" ✓", pal.good), "notify": (" !", pal.warn)}.get(
+                         data.marked.get(r.player.id), ("",)))
+         if r.player else Text("Empty", style=f"italic {pal.dim}") for r in rows],
+        justify="left")
     add("pos", "Pos", "who", each(lambda p: Text(p.positions, style=pal.dim)), justify="left")
     add("today", "Today", "who", each(lambda p: _today(p, data, pal)))
 
@@ -424,5 +431,6 @@ def draw(data: RosterData, pal: Palette, width: int = 120, view: int = 0) -> Ren
 
 def to_json(data: RosterData) -> list[dict]:
     return [{"slot": r.slot, "plays_today": r.player.id in data.plays_today,
-             "opponent_today": data.opponents.get(r.player.id), **r.player.to_full_dict()}
+             "opponent_today": data.opponents.get(r.player.id),
+             "autoswap": data.marked.get(r.player.id), **r.player.to_full_dict()}
             for sec in _sections(data.league) for r in sec if r.player]
