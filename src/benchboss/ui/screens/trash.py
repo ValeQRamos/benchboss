@@ -21,6 +21,7 @@ GAME, NO_GAME, TIPPED = "●", "·", "○"   # the games strip: one glyph per da
 BENCHED = TIPPED                         # ○ is any game that adds nothing for you
 WIDE = 110                               # below this the position and ownership columns go
 HINT = 'benchboss add "Player" --drop "Player"'
+HINT_LINES = ('benchboss add "Player"', '  --drop "Player"')  # on a phone, split between arguments
 
 
 @dataclass
@@ -40,7 +41,8 @@ def draw(data: TrashData, pal: Palette, width: int = 120, view: int = 0) -> Rend
         return shown
     lead = "Grab one from a terminal:"
     sep = " " if cell_len(lead) + 1 + cell_len(HINT) <= width else "\n"
-    return Group(shown, Text(f"\n{lead}{sep}{HINT}", style=pal.dim))
+    hint = HINT if cell_len(HINT) <= width else "\n".join(HINT_LINES)
+    return Group(shown, Text(f"\n{lead}{sep}{hint}", style=pal.dim))
 
 
 def to_json(data: TrashData) -> list[dict]:
@@ -326,9 +328,10 @@ def _legend(picks: list[TrashPick], keys: list[str], drops: set[str], pal: Palet
         items.append(("+Pts", "over your weakest starter"))
         added = ("+Pts",)
     if drops:
-        net = tuple(f"{a} minus the drop's points" for a in added) + (f"{added[-1]} minus the drop's",)
+        net = (tuple(f"{a} minus the drop's points" for a in added)
+               + (f"{added[-1]} minus the drop's", "gain minus the drop"))
     else:
-        net = tuple(f"{a}, no drop needed" for a in added)
+        net = (*(f"{a}, no drop needed" for a in added), "no drop needed")
     items.append(("Net", net))
     items.append(("G", "games he plays for you"))
     if "Games" in keys and "Grab" not in keys:
@@ -350,13 +353,15 @@ def _legend(picks: list[TrashPick], keys: list[str], drops: set[str], pal: Palet
             than = "all" if every else "some"
             items.append(("", (f"He scores more per game than {than} of these: one-week streams",
                                f"He scores more per game than {than} of these",
-                               f"He outscores {than} of these per game")))
+                               f"He outscores {than} of these per game",
+                               f"He outscores {than} of these")))
     elif flagged:
         items.append(("", ("Every drop scores more per game: one-week streams",
                            "Drops score more per game: one-week streams",
-                           "Every drop scores more per game") if every else
+                           "Every drop scores more per game", "Drops score more per game")
+                      if every else
                           ("Some drops score more per game: one-week streams",
-                           "Some drops score more per game")))
+                           "Some drops score more per game", "Some drops score more")))
     if any(pk.on_waivers for pk in picks):
         items.append(("(W)", ("on waivers, yours from the grab day", "on waivers")))
     return items
