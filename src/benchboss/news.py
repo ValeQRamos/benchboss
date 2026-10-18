@@ -114,10 +114,16 @@ def latest(player_id: int, n: int = LATEST, offset: int = 0) -> list[NewsItem]:
     ``offset`` (so ``offset=10`` is the second page of ten).
 
     The feed counts video items too, and those are left out, so one request asks for about
-    twice what it keeps."""
+    twice what it keeps; a player whose news is mostly video gets a second, bigger request
+    (up to ``LATEST_LIMIT`` items)."""
     want = offset + n
-    items = fetch([player_id], days=None, limit=min(LATEST_LIMIT, 2 * want + 10))
-    return items[offset:want]
+    limit = min(LATEST_LIMIT, 2 * want + 10)
+    while True:
+        got = fetch([player_id], days=None, limit=limit, include_media=True)
+        items = [x for x in got if x.kind != "Media"]
+        if len(items) >= want or len(got) < limit or limit >= LATEST_LIMIT:
+            return items[offset:want]
+        limit = min(LATEST_LIMIT, 2 * limit)
 
 
 # --- optional AI digest ---------------------------------------------------------------------------

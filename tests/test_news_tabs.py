@@ -120,6 +120,20 @@ def test_latest_pages_by_items_kept_and_skips_video(feed):
     assert dict(f.calls[-1])["limit"] <= news.LATEST_LIMIT
 
 
+def test_latest_asks_again_when_most_of_the_news_is_video(feed):
+    rows = [raw_item(n, n, kind="Rotowire" if n % 5 == 0 else "Media") for n in range(1, 101)]
+    f = feed(rows)  # one item in five is text: the first request keeps only 6 of 30
+    got = news.latest(7, 10)
+    assert [x.id for x in got] == list(range(5, 55, 5))
+    assert [dict(c)["limit"] for c in f.calls] == [30, 60]
+    f.calls.clear()
+    assert len(news.latest(7, 10, offset=15)) == 5  # only 20 in all: stops at the end
+    assert [dict(c)["limit"] for c in f.calls] == [60, 120]
+    f.calls.clear()
+    feed([raw_item(n, n, kind="Media") for n in range(1, 400)])
+    assert news.latest(7, 10) == []  # all video: gives up at LATEST_LIMIT
+
+
 # --- text.rank and text.confident ------------------------------------------------------------------
 
 POOL = [Player(1, "Ben Simmons", 1, owned=12.0), Player(2, "Anfernee Simons", 2, owned=40.0),
