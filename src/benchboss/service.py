@@ -531,12 +531,21 @@ class Session:
                         lambda p: (p.owned, p.pro_team_id > 0), n)
 
         found = ranked(players)
-        if not found:  # ESPN's name filter may know someone the list does not
-            hits = self.client.players({"filterName": {"value": query}, "limit": 10,
-                                        "sortPercOwned": {"sortPriority": 1, "sortAsc": False}},
-                                       lg.scoring_period)
-            found = ranked([rostered.get(p.id, p) for p in
-                            (parse_player(x, lg.season) for x in hits)])
+        # ESPN's name filter may know someone the list does not; without the list it is
+        # the only way to find a free agent, even when a rostered name looks close
+        if not pool or not found:
+            try:
+                hits = self.client.players(
+                    {"filterName": {"value": query}, "limit": 10,
+                     "sortPercOwned": {"sortPriority": 1, "sortAsc": False}},
+                    lg.scoring_period)
+            except BenchbossError:
+                if found:
+                    return found
+                raise
+            extra = [rostered.get(p.id, p) for p in (parse_player(x, lg.season) for x in hits)]
+            known = {p.id for p in players}
+            found = ranked(players + [p for p in extra if p.id not in known])
         return found
 
 

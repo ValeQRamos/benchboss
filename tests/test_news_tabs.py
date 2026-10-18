@@ -299,6 +299,24 @@ def test_search_asks_espn_when_the_list_has_nobody(session, monkeypatch):
     assert session.search_players("egor")[0][1].name == "Egor Demin"
 
 
+def test_without_the_list_a_close_rostered_name_does_not_hide_a_free_agent(session, monkeypatch):
+    from benchboss.errors import NetworkError
+
+    monkeypatch.setattr(session, "nba_players", lambda *a: [])
+    names = [p.name for _, p in session.search_players("jalen")]
+    assert "Jalen Suggs" in names  # a free agent, from ESPN's name filter
+    assert len(names) == len(set(names)) > 1  # rostered players come once
+
+    def down(*a, **k):
+        raise NetworkError("offline")
+
+    monkeypatch.setattr(session.client, "players", down)
+    rostered = [p for _, p in session.search_players("jalen")]
+    assert rostered and all(p.status == "ONTEAM" for p in rostered)  # the rosters still answer
+    with pytest.raises(NetworkError):
+        session.search_players("zzzz")  # nothing anywhere and ESPN down: say so
+
+
 # --- the demo league -------------------------------------------------------------------------------
 
 BEN = 3907387  # Ben Simmons, a free agent in the demo with news for the search
