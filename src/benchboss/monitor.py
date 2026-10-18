@@ -603,7 +603,10 @@ class Monitor:
         moved = {int(k) for k, v in self.state["moved"].items() if v.get("to")}
         tracked = auto | notify_only | watch | moved | set(self._sim_ids)
         if self.simulate and not self._sim_ids:
-            self._resolve_simulate([sp.player for sp in roster.values()])
+            # the names may be watch-list players too: read those once, to find them
+            others = sorted(watch - set(roster))
+            extra = s.player_snapshot(others) if others else []
+            self._resolve_simulate([sp.player for sp in roster.values()] + list(extra))
         auto |= self._sim_auto
         tracked |= auto | set(self._sim_ids)
         if not tracked:
