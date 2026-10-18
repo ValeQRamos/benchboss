@@ -1,0 +1,40 @@
+ ● benchboss  X.Y.Z   Monstars   demo data
+
+  Dashboard  d                 ▄▄█████▄▄
+  Optimize today  t          ▄▀▀█████████▄
+  Optimize week  w          ▄███▀▀████████▄    MONSTARS                                                      3:30 pm
+  Workload  a               ███████████████    Demo Hoops League                                           Wed Nov 4
+  Best trash  f             ▀▀▀▀██████▀▀█▀▀    2-0 · 2nd of 10 · projected 2nd · streak W2
+  Player finder  p           ████▀▀▀█▀██▀█     29% ESPN playoff odds  ━━━─────────
+  Player news  n              ▀█████████▀
+  Trade finder  x                ▀▀▀▀▀
+  Inbox  i
+  Standings  s              ╭─  WEEK 3  ───────────────────────────────────────────────────────────────────────────╮
+  Playoff race  y           │                                                                   Score  Proj.  Left │
+  Roster  o                 │ Monstars                                                          420.7  1,483    29 │
+                            │ Pick and Roll Pros                                                402.5  1,597    33 │
+                            │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+                            │ Up 18.2 now, projected to lose by 114                                                │
+                            ╰───────────────────────────────────────────────────────────  Mon Nov 2 to Sun Nov 8  ─╯
+                            ╭─  ROSTER  ───────────────────────────────────────────────────────────────────────────╮
+                            │ PG ● L. Ball MIN                                                                46.4 │
+                            │ SG ● A. Edwards MIN                                                             47.2 │
+                            │ SF ● B. Miller CHA                                                              37.4 │
+                            │ PF ● T. Harris SAS DTD                                                          30.1 │
+                            │ C  ● J. Duren DET                                                               42.2 │
+                            │ G  ● D. Daniels ATL DTD                                                         35.7 │
+                            │ F  ● A. Dybantsa WSH                                                            32.9 │
+                            │ UT ● A. Sarr WSH                                                                36.6 │
+                            │ UT ● R. Gobert MIN                                                              34.3 │
+                            │ UT ● C. White CHA DTD                                                           32.9 │
+                            │ BE ● P. Siakam IND                                                              41.1 │
+                            │ BE ● Z. Edey MEM                                                                33.2 │
+                            │ BE ● S. Pippen Jr. MEM                                                          30.6 │
+                            ╰────────────────────────────────────────────────────────────────────  10 play today  ─╯
+                            ╭─  INBOX  ────────────────────────────────────────────────────────────────────────────╮
+                            │ ● Trade offer from Tune Squad: you give Scotty Pippen Jr., you get Lauri Markkanen   │
+                            ╰──────────────────────────────────────────────────────────────────────────────────────╯
+                            ╭─  WORKLOAD THIS WEEK  ───────────────────────────────────────────────────────────────╮
+
+ demo data · nothing is sent to ESPN
+ d Dashboard  t Optimize today  w Optimize week  f Best trash  m Menu  r Refresh  ^t Light/Dark  q Quit
