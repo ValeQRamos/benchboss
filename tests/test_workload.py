@@ -1,4 +1,8 @@
-"""The Workload screen: positions, today's slot, bench games and the games-per-day footer."""
+"""The Workload screen: positions, today's slot, bench games and the games-per-day footer.
+
+Since 1.0.4 the starters and the bench share one block (no bench section): most games first
+by default, today's slot order under v / --view lineup. IR and players who left this week
+keep their own blocks."""
 
 import asyncio
 import io
@@ -51,7 +55,10 @@ def with_lineups(session, change):
 
 # --- grouping ----------------------------------------------------------------------------------
 
-def test_rows_are_starters_in_slot_order_then_bench_then_ir(session):
+LINEUP = [k for k, _ in workload.VIEWS].index("lineup")
+
+
+def test_lineup_view_lists_starters_then_bench_in_one_block_then_ir(session):
     spot(session, "Rudy Gobert").slot_id = IR
     data = workload.load(session)
     starters, bench, ir = by_lineup(data.acts)
@@ -60,18 +67,66 @@ def test_rows_are_starters_in_slot_order_then_bench_then_ir(session):
     assert bench and {a.slot_id for a in bench} == {BENCH}
     assert [a.player.name for a in ir] == ["Rudy Gobert"]
 
-    out = text_of(workload.draw(data, DARK, 140))
+    out = text_of(workload.draw(data, DARK, 140, LINEUP))
     names = [a.player.name for a in starters + bench + ir]
     rows = player_lines(out, names)
     assert [next(n for n in names if r.startswith(n)) for r in rows] == names
-    # a blank line between the groups, the slot shown, and IR dimmed
+    # no bench section: the bench follows the starters with no blank line; IR keeps its own
+    # block, the slot shown, and IR dimmed
     lines = out.splitlines()
     first_bench = lines.index(next(r for r in rows if r.startswith(bench[0].player.name)))
-    assert lines[first_bench - 1].strip() == ""
+    assert lines[first_bench - 1].startswith(starters[-1].player.name)
+    first_ir = lines.index(rows[-1])
+    assert lines[first_ir - 1].strip() == ""
     assert " BE " in rows[len(starters)] and " IR " in rows[-1]
-    table = table_in(workload.draw(data, DARK, 140))
+    table = table_in(workload.draw(data, DARK, 140, LINEUP))
     gobert = table.columns[0]._cells[-1]
     assert isinstance(gobert, Text) and gobert.style == DARK.dim
+
+
+def test_default_view_is_most_games_with_ir_and_gone_blocks(session, monkeypatch):
+    from benchboss.espn.models import RosterSpot
+
+    spot(session, "Rudy Gobert").slot_id = IR
+    gone = next(p for p in session.free_agents(40)
+                if session.calendar.plays(p.pro_team_id, session.matchup_periods()[0]))
+    real = type(session).roster_on
+    first = session.matchup_periods()[0]
+
+    def roster_on(self, period):  # he played Monday for you and was dropped after it
+        roster = real(self, period)
+        return roster + [RosterSpot(gone, 0)] if period == first else roster
+
+    monkeypatch.setattr(type(session), "roster_on", roster_on)
+    data = workload.load(session)
+    assert workload.VIEWS[0][0] == "games"
+    out = text_of(workload.draw(data, DARK, 140))
+    active = [a for a in data.acts if not a.on_ir and not a.gone]
+    names = [a.player.name for a in data.acts]
+    rows = player_lines(out, names)
+    shown = [next(n for n in names if r.startswith(n)) for r in rows]
+    games = {a.player.name: a for a in data.acts}
+    head = shown[:len(active)]
+    keys = [(-games[n].games, -games[n].games_left, -games[n].player.proj) for n in head]
+    assert keys == sorted(keys)  # starters and bench mixed, most games first
+    assert {games[n].is_starting for n in head} == {True, False}
+    assert shown[len(active):] == ["Rudy Gobert", gone.name]
+    # three blocks: a blank line before IR and before the player who left, none inside
+    lines = out.splitlines()
+    at = [lines.index(r) for r in rows]
+    blanks = [i for i in range(at[0], at[-1]) if not lines[i].strip()]
+    assert blanks == [at[len(active)] - 1, at[-1] - 1]
+
+
+@pytest.mark.parametrize("width", [60, 140])
+def test_bench_marks_stay_in_the_default_view(session, width):
+    data = workload.load(session)
+    out = text_of(workload.draw(data, DARK, width), width)
+    if width >= 140:
+        harris = player_lines(out, ["Tobias Harris"])[0]
+        assert "(UTA)" in harris  # Monday on your bench, still marked
+    else:
+        assert workload.BENCHED in out and workload.NO_GAME in out
 
 
 def test_positions_and_slot_columns(session):
@@ -106,7 +161,7 @@ def test_a_game_on_your_bench_is_marked_and_not_counted(session):
 
     table = table_in(workload.draw(data, DARK, 140))
     first_day = 3  # Player, Pos, Slot
-    rows = [a.player.name for group in by_lineup(data.acts) for a in group]
+    rows = [a.player.name for a in workload._ordered(data.acts)]
     sun = table.columns[first_day + sunday]._cells[rows.index("LaMelo Ball")]
     opp = ball.schedule[sunday].replace("vs ", "").replace("@ ", "@")
     assert sun.plain.strip() == f"({opp})" and sun.style == DARK.dim
@@ -164,7 +219,7 @@ def test_ir_players_do_not_count_toward_the_footer(session):
 
 def test_most_games_view_sorts_by_games_without_groups(session):
     data = workload.load(session)
-    out = text_of(workload.draw(data, DARK, 140, view=1))
+    out = text_of(workload.draw(data, DARK, 140, view=0))
     names = [a.player.name for a in data.acts]
     rows = player_lines(out, names)
     shown = [next(n for n in names if r.startswith(n)) for r in rows]
@@ -173,14 +228,19 @@ def test_most_games_view_sorts_by_games_without_groups(session):
     assert keys == sorted(keys)
     body = out.split("─" * 10)[1]
     assert "\n\n" not in body.strip("\n")  # no blank lines between groups
-    assert [k for k, _ in workload.VIEWS] == ["lineup", "games"]
+    assert [k for k, _ in workload.VIEWS] == ["games", "lineup"]
 
 
 def test_cli_view_flag(capsys):
     main(["--demo", "activity", "--view", "games"])
     assert "Workload" in capsys.readouterr().out
-    with pytest.raises(SystemExit):
+    # the old key keeps its meaning: today's slot order (starters, then the bench)
+    main(["--demo", "activity", "--view", "lineup"])
+    out = capsys.readouterr().out
+    assert out.index("LaMelo Ball") < out.index("Scotty Pippen Jr.")
+    with pytest.raises(SystemExit) as e:
         main(["--demo", "activity", "--view", "nope"])
+    assert e.value.code == 2
 
 
 def test_app_cycles_the_views():
@@ -194,10 +254,10 @@ def test_app_cycles_the_views():
             await pilot.app.workers.wait_for_complete()
             await pilot.pause()
             assert app.current == "activity"
-            assert "By lineup" in str(app.query_one("#status").content)
+            assert str(app.query_one("#status").content).startswith("Most games · v for By lineup")
             await pilot.press("v")
             await pilot.pause()
-            assert "Most games" in str(app.query_one("#status").content)
+            assert str(app.query_one("#status").content).startswith("By lineup · v for Most games")
             assert app.views["activity"] == 1
 
     asyncio.run(run())

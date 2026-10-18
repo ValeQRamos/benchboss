@@ -3,6 +3,10 @@
 A game only scores when the player is in your lineup that day, so the grid marks the games
 he spends on your bench, and the footer counts how many of your players play each day
 against your starting spots (more games than spots means games lost to the bench).
+
+Starters and bench players share one list: the cells already say who plays and who sits
+each day, and a block split by today's slot would contradict them (a player benched today
+may have started Monday). Only IR and the players who left this week get their own block.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from benchboss.ui.common import legend, player_cell, table, title
 from benchboss.ui.theme import Palette
 
 TITLE = "Workload"
-VIEWS: tuple[tuple[str, str], ...] = (("lineup", "By lineup"), ("games", "Most games"))
+VIEWS: tuple[tuple[str, str], ...] = (("games", "Most games"), ("lineup", "By lineup"))
 
 # A game he spends on your bench is dim and in parentheses, "(LAC)"; with no room for the
 # opponents the cells turn into dots: ● a game in your lineup, ○ on your bench.
@@ -130,9 +134,9 @@ def draw(data: WorkloadData, pal: Palette, width: int = 120, view: int = 0) -> R
     if not data.acts:
         return Group(_title(data, pal), Text(""),
                      Text("No players on your roster yet.", style=pal.dim))
-    grouped = view == 0
+    by_lineup = VIEWS[view % len(VIEWS)][0] == "lineup"
     for lay in _LAYOUTS:
-        t = _table(data, pal, lay, grouped)
+        t = _table(data, pal, lay, by_lineup)
         if _measure(t) <= width:
             break
     else:  # still too wide: the names give way, never the days or the counts
@@ -145,20 +149,25 @@ def draw(data: WorkloadData, pal: Palette, width: int = 120, view: int = 0) -> R
     return Group(*parts)
 
 
-def _groups(acts: list[Activity]) -> list[list[Activity]]:
-    """Starters, bench, IR, then whoever left the roster this week."""
-    return [*activity_mod.by_lineup(acts), [a for a in acts if a.gone]]
+def _groups(acts: list[Activity], by_lineup: bool = False) -> list[list[Activity]]:
+    """The active roster (most games first, or today's slot order with ``by_lineup``:
+    starters, then the bench, in one block), IR, then whoever left the roster this week."""
+    if by_lineup:
+        starters, bench, ir = activity_mod.by_lineup(acts)
+        active = starters + bench
+    else:
+        active = sorted((a for a in acts if not a.on_ir and not a.gone), key=activity_mod.by_games)
+        ir = sorted((a for a in acts if a.on_ir and not a.gone), key=activity_mod.by_games)
+    return [active, ir, [a for a in acts if a.gone]]
 
 
-def _ordered(acts: list[Activity], grouped: bool) -> list[Activity]:
-    if grouped:
-        return [a for group in _groups(acts) for a in group]
-    return sorted(acts, key=lambda a: (a.gone, a.on_ir, *activity_mod.by_games(a)))
+def _ordered(acts: list[Activity], by_lineup: bool = False) -> list[Activity]:
+    return [a for group in _groups(acts, by_lineup) for a in group]
 
 
 # --- the table ------------------------------------------------------------------------------------
 
-def _table(data: WorkloadData, pal: Palette, lay: _Layout, grouped: bool) -> Table:
+def _table(data: WorkloadData, pal: Palette, lay: _Layout, by_lineup: bool) -> Table:
     t = table(pal)
     t.box = _HEAD_FOOT
     t.show_edge = False   # flush left with the title and the legend
@@ -193,10 +202,8 @@ def _table(data: WorkloadData, pal: Palette, lay: _Layout, grouped: bool) -> Tab
     t.add_column("In", footer=Text(str(gin), style=pal.text) if data.lineups_known else "-", **right)
     t.add_column("Left", footer=str(left), **right)
 
-    if grouped:  # starters, bench, IR, gone, with a blank line between them
-        groups = [g for g in _groups(data.acts) if g]
-    else:
-        groups = [_ordered(data.acts, grouped=False)]
+    # the active roster, IR and gone, with a blank line between them
+    groups = [g for g in _groups(data.acts, by_lineup) if g]
     rows = [[_row(a, data, pal, lay) for a in group] for group in groups]
     if not lay.glyphs:
         first = 1 + lay.pos + lay.slot
