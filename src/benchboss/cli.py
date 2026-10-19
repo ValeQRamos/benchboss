@@ -7,13 +7,17 @@ import contextlib
 import datetime as dt
 import getpass
 import json
+import os
+import re
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 from rich.console import Console
 from rich.text import Text
 
-from benchboss import __version__, credentials
+from benchboss import __version__, credentials, web
 from benchboss import config as config_mod
 from benchboss.errors import BenchbossError, ConfigError, NotConfirmed, WriteFailed
 from benchboss.ui import views
@@ -102,6 +106,9 @@ def _not_in_demo(c: Ctx) -> None:
 def cmd_login(c: Ctx):
     _not_in_demo(c)
     a = c.args
+    if a.to:
+        _login_to(c)
+        return
     if a.manual or (not a.chrome and sys.platform != "darwin"):
         c.out.print("Paste your ESPN cookies (they are hidden while you type).\n"
                     "Find them at espn.com: DevTools > Application > Cookies > espn.com")
@@ -114,6 +121,57 @@ def cmd_login(c: Ctx):
     c.out.print(f"[{c.pal.good}]✓[/] Cookies from {source} saved to {where}.")
     if not c.cfg.league_id:
         c.out.print("Next: [bold]benchboss setup[/] to pick your league and team.")
+
+
+_SSH_TARGET = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._@-]*")  # never an option: no leading dash
+# the remote side of `login --to`: the cookies arrive on stdin, never in a command line
+_REMOTE_STORE = ('umask 077; d="${BENCHBOSS_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/benchboss}"; '
+                 'mkdir -p "$d" && cat > "$d/credentials.json" && chmod 600 "$d/credentials.json"')
+
+
+def _login_to(c: Ctx):
+    """Send the cookies to another computer over SSH (a server running benchboss)."""
+    a = c.args
+    if not _SSH_TARGET.fullmatch(a.to):
+        c.usage("--to must look like user@host or host")
+    if a.manual:
+        source = "manual entry"
+        s2, swid = getpass.getpass("espn_s2: "), getpass.getpass("SWID: ")
+    elif a.chrome or (not credentials.get() and sys.platform == "darwin"):
+        source, s2, swid = credentials.from_chrome()
+    elif credentials.get():
+        source = "saved on this computer"
+        s2, swid = credentials.get()
+    else:
+        c.usage("no saved cookies: run `benchboss login` first, or add --manual")
+    s2, swid = s2.strip().strip('"'), credentials.normalize_swid(swid)
+    if not s2 or not swid:
+        raise BenchbossError("both espn_s2 and SWID are required")
+    c.out.print(Text(f"Send your ESPN cookies ({source}) to {a.to}: its benchboss settings "
+                     "folder, credentials.json, permissions 0600, over SSH."))
+    if a.dry_run:
+        c.out.print(Text("Dry run: nothing was sent.", style=c.pal.dim))
+        return
+    if not c.confirm("Send them?"):
+        return
+    argv = ["ssh"]
+    if a.ssh_port:
+        argv += ["-p", str(a.ssh_port)]
+    if a.identity:
+        argv += ["-i", a.identity]
+    argv += [a.to, _REMOTE_STORE]
+    try:
+        r = subprocess.run(argv, input=json.dumps({"espn_s2": s2, "SWID": swid}),
+                           capture_output=True, text=True, timeout=120)
+    except FileNotFoundError:
+        raise BenchbossError("ssh is not installed on this computer") from None
+    except subprocess.TimeoutExpired:
+        raise BenchbossError(f"ssh to {a.to} timed out") from None
+    if r.returncode:
+        raise BenchbossError(f"ssh to {a.to} failed ({r.returncode}): "
+                             f"{(r.stderr or '').strip()[-300:] or 'no message'}")
+    c.out.print(f"[{c.pal.good}]✓[/] Cookies sent to {a.to}. There, run [bold]benchboss setup[/] "
+                "(or open the web app) to pick the league and team.")
 
 
 def cmd_logout(c: Ctx):
@@ -956,6 +1014,177 @@ def _autoswap_add(c: Ctx, s, store_, name: str) -> None:
     c.out.print(Text(f"✓ {done}", style=c.pal.good))
 
 
+def _web_auth(c: Ctx):
+    """The sign in for the web app from the --password-file and --github-* options, or None
+    when none is asked for (then a proxy in front must provide the login)."""
+    from benchboss import weblogin
+
+    a = c.args
+    if a.accounts:
+        return _accounts_auth(c)
+    password = None
+    if a.password_file:
+        path = Path(a.password_file).expanduser()
+        try:
+            mode = path.stat().st_mode
+            password = path.read_text().strip()
+        except OSError as e:
+            raise BenchbossError(f"cannot read {path}: {e.strerror}") from None
+        if mode & 0o077 and os.name != "nt":  # Windows has no file modes to check
+            raise BenchbossError(f"{path} can be read by other users: run chmod 600 on it")
+        if len(password) < 12:
+            raise BenchbossError(f"the password in {path} needs at least 12 characters")
+    client_id = a.github_client_id or os.environ.get("BENCHBOSS_GITHUB_CLIENT_ID", "")
+    secret = os.environ.get("BENCHBOSS_GITHUB_CLIENT_SECRET", "")  # never a command-line argument
+    users = frozenset(u.strip().lower() for u in (a.github_users or "").split(",") if u.strip())
+    github = bool(client_id or secret or users)
+    if github and not (client_id and secret and users and a.url):
+        raise BenchbossError("GitHub sign in needs --github-client-id (or BENCHBOSS_GITHUB_CLIENT_ID), "
+                             "BENCHBOSS_GITHUB_CLIENT_SECRET, --github-users and --url")
+    if not password and not github:
+        return None
+    key = weblogin.load_secret(config_mod.config_dir() / "web-secret")
+    return weblogin.Auth(weblogin.AuthConfig(
+        secret=key, password=password, user=a.login_user, github_client_id=client_id,
+        github_secret=secret, github_users=users, public_url=a.url or "",
+        session_hours=a.session_hours))
+
+
+def _accounts_auth(c: Ctx):
+    """The sign in for `benchboss web --accounts`: the people in the accounts file."""
+    from benchboss import weblogin
+    from benchboss.accounts import Accounts
+
+    a = c.args
+    if a.password_file or a.github_users:
+        raise BenchbossError("--accounts keeps passwords and GitHub names in the accounts file "
+                             "(benchboss users): drop --password-file and --github-users")
+    client_id = a.github_client_id or os.environ.get("BENCHBOSS_GITHUB_CLIENT_ID", "")
+    secret = os.environ.get("BENCHBOSS_GITHUB_CLIENT_SECRET", "")
+    if (client_id or secret) and not (client_id and secret and a.url):
+        raise BenchbossError("GitHub sign in needs --github-client-id (or BENCHBOSS_GITHUB_CLIENT_ID), "
+                             "BENCHBOSS_GITHUB_CLIENT_SECRET and --url")
+    accounts = Accounts(config_mod.config_dir())
+    if not accounts.everyone():
+        c.err.print(Text("no accounts yet: nobody can sign in until you run `benchboss users add NAME`",
+                         style=c.pal.warn))
+    key = weblogin.load_secret(config_mod.config_dir() / "web-secret")
+    return weblogin.Auth(weblogin.AuthConfig(
+        secret=key, github_client_id=client_id, github_secret=secret, public_url=a.url or "",
+        session_hours=a.session_hours, accounts=accounts))
+
+
+def cmd_web(c: Ctx):
+    """Serve the app in a browser. Without --password-file or --github-*, it has no login of
+    its own: keep it on localhost and put a reverse proxy with a login in front of it."""
+    from benchboss import web
+
+    a = c.args
+    if a.host not in web.LOOPBACK and not a.allow_remote:
+        raise BenchbossError(f"{a.host} would let other computers reach the app, and the app "
+                             "has no login: keep --host 127.0.0.1 behind a proxy with a login, "
+                             "or add --allow-remote if you know what you are doing")
+    try:
+        from textual_serve.server import Server
+    except ImportError:
+        raise BenchbossError("benchboss web needs the web extra: install it with "
+                             "`uv tool install --with textual-serve benchboss` or "
+                             "`pip install 'benchboss[web]'`") from None
+    auth = _web_auth(c)
+    if auth:
+        from benchboss import weblogin
+
+        Server = weblogin.login_server(Server, auth, a.max_sessions, a.max_per_user)
+    elif a.max_sessions or a.max_per_user:
+        raise BenchbossError("--max-sessions and --max-per-user need a sign in (--accounts, "
+                             "--password-file or --github-*)")
+    command = web.session_command(demo=a.demo, theme=getattr(a, "theme", None))
+    shown = a.url or f"http://{a.host}:{a.port}"
+    how = ("accounts" if auth and auth.cfg.accounts else
+           "password and GitHub" if auth and auth.cfg.password and auth.cfg.github else
+           "GitHub" if auth and auth.cfg.github else "password" if auth else "no sign in")
+    c.err.print(Text(f"benchboss web: serving {'demo data' if a.demo else 'your league'} at {shown} "
+                     f"({how})", style=c.pal.dim))
+    Server(command, host=a.host, port=a.port, title="benchboss", public_url=a.url).serve()
+
+
+def _password_for(c: Ctx) -> tuple[str, bool]:
+    """(password, made here): from --password-file, or a new random one."""
+    from benchboss.accounts import new_password
+
+    a = c.args
+    if not a.password_file:
+        return new_password(), True
+    path = Path(a.password_file).expanduser()
+    try:
+        return path.read_text().strip(), False
+    except OSError as e:
+        raise BenchbossError(f"cannot read {path}: {e.strerror}") from None
+
+
+def cmd_users(c: Ctx):
+    """The people who sign in to `benchboss web --accounts`. It prints new passwords, so it is
+    for the person running the server, never for an agent."""
+    from benchboss.accounts import Accounts
+
+    a = c.args
+    accounts = Accounts(config_mod.config_dir())
+    name = (a.name or "").strip().lower()
+    if a.action != "list" and not name:
+        c.usage(f"name the person: benchboss users {a.action} NAME")
+
+    def show(data: dict, password: str | None = None) -> None:
+        if a.json:
+            print(json.dumps({**data, **({"password": password} if password else {})}, indent=2))
+            return
+        c.out.print(Text(data["summary"], style=c.pal.good))
+        if password:  # plain print: Rich must not wrap or color a password
+            print(f"  sign in   {name}\n  password  {password}\n  (shown once: "
+                  f"`benchboss users password {name}` makes a new one)")
+
+    if a.action == "list":
+        rows = [{"name": p.name, "github": p.github, "cookies": (p.home / "credentials.json").exists(),
+                 "created": dt.datetime.fromtimestamp(p.created).date().isoformat(),
+                 "home": str(p.home)} for p in accounts.everyone()]
+        if a.json:
+            print(json.dumps(rows, indent=2))
+        elif not rows:
+            c.out.print(Text("no accounts yet: benchboss users add NAME", style=c.pal.dim))
+        else:
+            c.out.print(Text(f"{'NAME':<12}{'GITHUB':<22}{'ESPN':<8}CREATED", style=c.pal.dim))
+            for r in rows:
+                c.out.print(f"{r['name']:<12}{r['github'] or '-':<22}"
+                            f"{'yes' if r['cookies'] else 'not yet':<8}{r['created']}")
+    elif a.action in ("add", "import"):
+        if a.action == "import" and not a.source:
+            c.usage("import needs --from FOLDER (the settings folder to copy)")
+        password, made = _password_for(c)
+        person = accounts.add(name, password, a.github)
+        if a.action == "import":
+            try:
+                accounts.import_home(name, Path(a.source).expanduser())
+            except BenchbossError:
+                accounts.remove(name)
+                raise
+        verb = "Imported" if a.action == "import" else "Added"
+        show({"name": name, "home": str(person.home), "summary": f"{verb} {name}."},
+             password if made else None)
+    elif a.action == "password":
+        password, made = _password_for(c)
+        accounts.set_password(name, password)
+        show({"name": name, "summary": f"New password for {name}; their open sessions end."},
+             password if made else None)
+    elif a.action == "github":
+        accounts.set_github(name, a.github)
+        what = f"{name} signs in with GitHub as {a.github}." if a.github else f"{name} no longer has GitHub sign in."
+        show({"name": name, "github": a.github or None, "summary": what})
+    elif a.action == "remove":
+        if not c.confirm(f"Delete {name} and all their settings and ESPN cookies?"):
+            return
+        accounts.remove(name)
+        show({"name": name, "summary": f"Removed {name} and their files."})
+
+
 # --- parser -------------------------------------------------------------------------------------------
 
 def _count(value: str) -> int:
@@ -1022,13 +1251,58 @@ def build_parser() -> argparse.ArgumentParser:
         return p
 
     add("app", cmd_app, "open the interactive app (same as running benchboss with no command)")
+    p = add("web", cmd_web, "serve the app in a browser (needs the web extra); put a proxy "
+                            "with a login in front of it")
+    p.add_argument("--host", default="127.0.0.1", help="address to listen on (default 127.0.0.1)")
+    p.add_argument("--port", type=int, default=8000, help="port to listen on (default 8000)")
+    p.add_argument("--url", metavar="URL", help="the public address people type, for example "
+                                              "https://bb.example.com (behind a proxy)")
+    p.add_argument("--allow-remote", action="store_true",
+                   help="allow --host to be an address other computers can reach")
+    p.add_argument("--password-file", metavar="FILE",
+                   help="turn on the sign in page with the password in this file (chmod 600, "
+                        "12 characters or more)")
+    p.add_argument("--login-user", default="owner", metavar="NAME",
+                   help="the user name for the password (default owner)")
+    p.add_argument("--github-client-id", metavar="ID",
+                   help="turn on Sign in with GitHub (also needs --github-users, --url and the "
+                        "BENCHBOSS_GITHUB_CLIENT_SECRET environment variable)")
+    p.add_argument("--github-users", metavar="LOGINS",
+                   help="GitHub logins (or numeric ids) allowed in, comma separated")
+    p.add_argument("--session-hours", type=float, default=12, metavar="HOURS",
+                   help="how long a sign in lasts (default 12)")
+    p.add_argument("--accounts", action="store_true",
+                   help="many people, each with their own password and folder of settings "
+                        "(manage them with benchboss users)")
+    p.add_argument("--max-sessions", type=int, default=0, metavar="N",
+                   help="most browser tabs open at once, about 70 MB each (default: no limit)")
+    p.add_argument("--max-per-user", type=int, default=0, metavar="N",
+                   help="most tabs one person may have open (default: no limit)")
+    p = add("users", cmd_users, "the people who sign in to benchboss web --accounts: add, list, "
+                                "password, github, remove, import")
+    p.add_argument("action", choices=["list", "add", "password", "github", "remove", "import"],
+                   help="what to do")
+    p.add_argument("name", nargs="?", help="the person: 2 to 16 lowercase letters and digits")
+    p.add_argument("--password-file", metavar="FILE",
+                   help="add, password, import: use the password in this file instead of making one")
+    p.add_argument("--github", metavar="LOGIN",
+                   help="add, import, github: the GitHub login (or numeric id) that signs in as this person")
+    p.add_argument("--from", dest="source", metavar="FOLDER",
+                   help="import: an existing benchboss settings folder to copy (cookies, league, logs)")
     p = add("dash", cmd_dash, "the dashboard: matchup, roster, workload, trash, standings")
     p.add_argument("--watch", nargs="?", type=int, const=60, metavar="SECONDS",
                    help="keep it open and refresh (default every 60 s)")
     add("setup", cmd_setup, "first-run wizard: cookies, league, team, colors")
-    p = add("login", cmd_login, "save your ESPN cookies (from Chrome on macOS, or pasted)")
+    p = add("login", cmd_login, "save your ESPN cookies (from Chrome on macOS, or pasted), "
+                                "or send them to a server with --to")
     p.add_argument("--chrome", action="store_true", help="import from Google Chrome (macOS)")
     p.add_argument("--manual", action="store_true", help="paste espn_s2 and SWID by hand")
+    p.add_argument("--to", metavar="[USER@]HOST",
+                   help="send the cookies over SSH to a server running benchboss, instead of "
+                        "saving them here")
+    p.add_argument("--identity", metavar="FILE", help="with --to: the SSH key file to use")
+    p.add_argument("--ssh-port", type=int, metavar="PORT", help="with --to: the SSH port")
+    p.add_argument("--dry-run", action="store_true", help="with --to: show what would be sent, send nothing")
     add("logout", cmd_logout, "forget the saved cookies")
     for name in ("status", "doctor"):
         p = add(name, cmd_status, "show config and check the connection to ESPN")
@@ -1174,7 +1448,7 @@ def main(argv: list[str] | None = None) -> None:
     if not args.cmd or args.cmd == "app":
         if args.json:
             ap.error("--json needs a command, for example `benchboss dash --json`")
-        if not (_isatty(sys.stdin) and _isatty(sys.stdout)):
+        if not (_isatty(sys.stdin) and _isatty(sys.stdout)) and not web.in_web_session():
             ap.error("the interactive app needs a terminal; run a command instead, "
                      "for example `benchboss dash` (see `benchboss -h`)")
         args.cmd, args.fn = "app", cmd_app

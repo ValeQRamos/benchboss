@@ -363,5 +363,5 @@ def test_news_days_means_the_last_n_days(monkeypatch):
         return {"id": nid, "type": "Rotowire", "playerId": 7, "published": stamp,
                 "headline": f"{hours} hours ago"}
 
-    monkeypatch.setattr(news, "http", lambda url, params=None: {"feed": [item(1, 30), item(2, 60)]})
+    monkeypatch.setattr(client, "http", lambda url, params=None: {"feed": [item(1, 30), item(2, 60)]})
     assert [x.headline for x in news.fetch([7], days=2)] == ["30 hours ago"]

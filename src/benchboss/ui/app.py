@@ -29,7 +29,7 @@ from textual.widgets import Button, Footer, Input, OptionList, Static
 from textual.widgets.option_list import Option
 from textual.worker import get_current_worker
 
-from benchboss import __version__
+from benchboss import __version__, credentials, web
 from benchboss import config as config_mod
 from benchboss.errors import BenchbossError
 from benchboss.ui import common, dashboard, layout, views
@@ -149,6 +149,7 @@ class Benchboss(App):
         self._last: tuple[str, Draw] | None = None  # (screen, draw) of what is on screen
         self._narrow: bool | None = None
         self._panel_widget: Widget | None = None  # the interactive screen on #panel, if any
+        self._setup_pending = False  # the web setup screen is open: nothing to load yet
         self.views: dict[str, int] = {}  # screen id -> index into its module's VIEWS
         # ui/layout.py: compact on a phone or a short window (or always or never, --layout);
         # short when the window has fewer than COMPACT_HEIGHT rows. Widgets read both.
@@ -184,11 +185,33 @@ class Benchboss(App):
         self.theme = THEMES[self.cfg.theme].name
         self._fit_layout()  # also gives the focus to the menu, or to the screen when it is hidden
         self._top()
-        self.action_show("dash")
+        if self._needs_web_setup():
+            self._open_web_setup()
+        else:
+            self.action_show("dash")
         # not "_auto_refresh": Textual keeps its own attribute by that name on every node
         self.set_interval(60, self._refresh_dashboard)
         self.set_timer(20, self.check_spins)
         self.set_interval(SPIN_CHECK, self.check_spins)
+
+    def _needs_web_setup(self) -> bool:
+        """A browser session has no terminal for `benchboss setup`, so it asks on screen."""
+        return (web.in_web_session() and not self.demo and self._own_session
+                and (credentials.get() is None or not self.cfg.league_id))
+
+    def _open_web_setup(self) -> None:
+        from benchboss.ui.web_setup import SetupScreen
+
+        self._setup_pending = True
+        self._show(Text("Welcome. Connect your ESPN account to begin.", style=self.pal.dim))
+        self.push_screen(SetupScreen(self.cfg), self._after_web_setup)
+
+    def _after_web_setup(self, saved: bool | None) -> None:
+        self._setup_pending = False
+        if saved:
+            self.cfg = config_mod.load()
+            self._session = None
+            self.action_show("dash")
 
     @property
     def pal(self):
@@ -505,7 +528,7 @@ class Benchboss(App):
             self._rerender()
 
     def _refresh_dashboard(self) -> None:
-        if self.current == "dash":
+        if self.current == "dash" and not self._setup_pending:
             self.load("dash")
 
     def on_resize(self) -> None:
@@ -552,6 +575,8 @@ class Benchboss(App):
     # --- watch list spins -------------------------------------------------------------------------
 
     def check_spins(self) -> None:
+        if self._setup_pending:
+            return
         if self._session is not None or self.demo:
             self._check_spins()
 
@@ -770,7 +795,8 @@ def run(cfg: config_mod.Config | None = None, demo: bool = False,
     cfg = cfg or config_mod.load()
     if layout in config_mod.LAYOUTS:
         cfg.layout = layout
-    if not demo and not cfg.league_id and not os.environ.get("BENCHBOSS_LEAGUE_ID"):
+    if (not demo and not cfg.league_id and not os.environ.get("BENCHBOSS_LEAGUE_ID")
+            and not web.in_web_session()):  # a browser session sets up on screen
         raise BenchbossError("no league configured yet: run `benchboss setup` "
                              "(or try `benchboss --demo` to look around)")
     Benchboss(cfg, demo=demo).run()

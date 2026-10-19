@@ -22,7 +22,7 @@
     "/\\s--ai?(\\s|=|$)/": false,
     "/^benchboss dash\\b.*\\s--w(a(t(ch?)?)?)?(\\s|=|$)/": false,
     "/\\s--m(a(r(k(-(r(e(ad?)?)?)?)?)?)?)?(\\s|=|$)/": false,
-    "/^benchboss (login|logout|setup)\\b/": false
+    "/^benchboss (login|logout|setup|web)\\b/": false
   },
   "files.exclude": { "**/__pycache__": true, "**/.pytest_cache": true, "**/.ruff_cache": true }
 }

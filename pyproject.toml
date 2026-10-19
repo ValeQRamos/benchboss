@@ -34,7 +34,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+web = ["textual-serve>=1.1"]
+dev = ["pytest>=8", "ruff>=0.6", "textual-serve>=1.1"]
 
 [project.urls]
 Homepage = "https://github.com/ValeQRamos/benchboss"

@@ -363,18 +363,23 @@ benchboss setup [-h] [--json] [--demo] [--theme {dark,light}]
 
 ### `benchboss login`
 
-Save your ESPN cookies (from Chrome on macOS, or pasted).
+Save your ESPN cookies (from Chrome on macOS, or pasted), or send them to a server with --to.
 
 ```text
 benchboss login [-h] [--json] [--demo] [--theme {dark,light}]
                        [--layout {auto,compact,full}] [-y] [--chrome]
-                       [--manual]
+                       [--manual] [--to [USER@]HOST] [--identity FILE]
+                       [--ssh-port PORT] [--dry-run]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--chrome` | Import from Google Chrome (macOS) |
 | `--manual` | Paste espn_s2 and SWID by hand |
+| `--to` | Send the cookies over SSH to a server running benchboss, instead of saving them here |
+| `--identity` | With --to: the SSH key file to use |
+| `--ssh-port` | With --to: the SSH port |
+| `--dry-run` | With --to: show what would be sent, send nothing |
 
 ### `benchboss logout`
 
@@ -406,3 +411,51 @@ Open the interactive app (same as running benchboss with no command).
 benchboss app [-h] [--json] [--demo] [--theme {dark,light}]
                      [--layout {auto,compact,full}] [-y]
 ```
+
+### `benchboss web`
+
+Serve the app in a browser (needs the web extra); put a proxy with a login in front of it.
+
+```text
+benchboss web [-h] [--json] [--demo] [--theme {dark,light}]
+                     [--layout {auto,compact,full}] [-y] [--host HOST]
+                     [--port PORT] [--url URL] [--allow-remote]
+                     [--password-file FILE] [--login-user NAME]
+                     [--github-client-id ID] [--github-users LOGINS]
+                     [--session-hours HOURS] [--accounts] [--max-sessions N]
+                     [--max-per-user N]
+```
+
+| Option | Meaning |
+|---|---|
+| `--host` | Address to listen on (default 127.0.0.1) |
+| `--port` | Port to listen on (default 8000) |
+| `--url` | The public address people type, for example https://bb.example.com (behind a proxy) |
+| `--allow-remote` | Allow --host to be an address other computers can reach |
+| `--password-file` | Turn on the sign in page with the password in this file (chmod 600, 12 characters or more) |
+| `--login-user` | The user name for the password (default owner) |
+| `--github-client-id` | Turn on Sign in with GitHub (also needs --github-users, --url and the BENCHBOSS_GITHUB_CLIENT_SECRET environment variable) |
+| `--github-users` | GitHub logins (or numeric ids) allowed in, comma separated |
+| `--session-hours` | How long a sign in lasts (default 12) |
+| `--accounts` | Many people, each with their own password and folder of settings (manage them with benchboss users) |
+| `--max-sessions` | Most browser tabs open at once, about 70 MB each (default: no limit) |
+| `--max-per-user` | Most tabs one person may have open (default: no limit) |
+
+### `benchboss users`
+
+The people who sign in to benchboss web --accounts: add, list, password, github, remove, import.
+
+```text
+benchboss users [-h] [--json] [--demo] [--theme {dark,light}]
+                       [--layout {auto,compact,full}] [-y]
+                       [--password-file FILE] [--github LOGIN] [--from FOLDER]
+                       {list,add,password,github,remove,import} [name]
+```
+
+| Option | Meaning |
+|---|---|
+| `action` | What to do |
+| `name` | The person: 2 to 16 lowercase letters and digits |
+| `--password-file` | Add, password, import: use the password in this file instead of making one |
+| `--github` | Add, import, github: the GitHub login (or numeric id) that signs in as this person |
+| `--from` | Import: an existing benchboss settings folder to copy (cookies, league, logs) |

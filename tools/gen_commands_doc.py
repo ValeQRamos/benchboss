@@ -15,7 +15,7 @@ GROUPS = [
                                                  "chat"]),
     ("Auto-swap (arming a player is your yes; the monitor makes the change)",
      ["autoswap", "monitor"]),
-    ("Account", ["setup", "login", "logout", "status", "app"]),
+    ("Account", ["setup", "login", "logout", "status", "app", "web", "users"]),
 ]
 
 

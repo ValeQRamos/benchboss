@@ -7,6 +7,7 @@ players per request (repeat ``playerId``).
 Every news download goes through ``fetch`` and, below it, ``_get_feed``: the only line that
 talks to the network. Another way to reach the feed (a different host, headers or a proxy
 for servers where the public API does not answer) replaces ``_get_feed`` and nothing else.
+The two ESPN hosts that serve the feed are tried inside it (``espn.client.site_get``).
 Tests fake the feed by patching ``_get_feed``.
 
 The AI digest is optional: with ``ANTHROPIC_API_KEY`` set, Claude searches the web for the
@@ -23,10 +24,9 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from benchboss.errors import BenchbossError
-from benchboss.espn.client import _DROPPED, _SSL, SITE, http
+from benchboss.espn.client import _DROPPED, _SSL, NEWS_PATH, site_get
 from benchboss.espn.models import Player
 
-FEED = f"{SITE}/fantasy/v2/games/fba/news/players"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 DEFAULT_MODEL = "claude-sonnet-5-5"
 
@@ -63,7 +63,7 @@ def _get_feed(params: list[tuple[str, object]]) -> dict:
     """One request to the news feed: ``params`` are the query (playerId repeated, days,
     limit, offset). The seam for another transport; keep its signature and return the feed
     JSON."""
-    return http(FEED, params=params)
+    return site_get(NEWS_PATH, params)
 
 
 def _parse_item(raw: dict) -> NewsItem:

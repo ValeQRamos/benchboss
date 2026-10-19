@@ -241,7 +241,8 @@ More in [docs/vscode.md](docs/vscode.md).
 
 benchboss runs fine in an SSH app on a phone. Keep it on a computer that stays on (a Mac
 mini, a home server, a small cloud machine), open a `tmux` session there so it keeps running
-when the phone locks, and connect from the phone.
+when the phone locks, and connect from the phone. To skip the SSH app, the server can serve
+the app as a web page behind a login (see "On a server, and in a browser" below).
 
 <table>
 <tr>
@@ -262,6 +263,15 @@ Under 80 columns or 30 rows the app switches to its compact layout on its own:
 
 `benchboss --layout compact` (or `full`) forces one or the other, and so do
 `BENCHBOSS_LAYOUT` and `"layout"` in `config.json`.
+
+## On a server, and in a browser
+
+Run benchboss on a small always-on Linux server and open it over SSH from your Mac or your
+phone, with `tmux` keeping the session alive, or serve it as a web page with
+`benchboss web` behind a login. Setup, SSH keys, how users and cookies fit together and
+troubleshooting are in [docs/server.md](docs/server.md). Deploying it, updating and rolling
+back, adding people (one address for everyone, each with their own password and ESPN account)
+and automatic deploys from GitHub are in [docs/deploy.md](docs/deploy.md).
 
 ## Commands
 

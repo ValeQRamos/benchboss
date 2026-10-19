@@ -80,6 +80,7 @@ Environment variables override the file. They are handy for scripts, CI and AI a
 | `BENCHBOSS_THEME` | `dark` or `light` |
 | `BENCHBOSS_LAYOUT` | The app's layout: `auto` (compact on a phone or a window under 80 columns or 30 rows), `compact` or `full`. Also `"layout"` in `config.json`, or `--layout` for one run |
 | `BENCHBOSS_HOME` | Use another folder for settings, cache, `seen-news.json`, auto-swap marks, the lineup log and fallback cookies |
+| `BENCHBOSS_NO_KEYRING` | Set to anything to skip the system keychain and keep cookies in `credentials.json` (the web server sets it for each person's app) |
 | `ESPN_S2`, `ESPN_SWID` | Cookies from the environment instead of the keychain |
 | `ANTHROPIC_API_KEY` | Enables the AI briefing in `benchboss news --ai` and the app's news screen |
 | `BENCHBOSS_NTFY_TOPIC` | The ntfy topic for the monitor's phone notes (treat it like a password) |

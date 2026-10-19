@@ -1,0 +1,6 @@
+# /etc/caddy/Caddyfile
+# Caddy gets and renews the HTTPS certificate by itself. One address serves everyone: the
+# sign in is benchboss web's own (accounts, made with `benchboss-users add NAME`).
+bb.example.com {
+    reverse_proxy 127.0.0.1:8000
+}

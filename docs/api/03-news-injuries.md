@@ -8,6 +8,8 @@ All observations were made on 2026-10-15 (NBA preseason, fantasy season 2027) ag
 
 Placeholders: `{leagueId}`, `{season}` (2027), `{playerId}`, `{teamId}` (NBA team id 1..30), `{eventId}`.
 
+**Two hosts, same data.** The `site.api.espn.com/apis/...` paths in this file also answer on `site.web.api.espn.com/apis/...`. Compared live on 2026-10-17: the injury report (1,012,614 bytes) and a 42-item news feed for four players were identical apart from the `timestamp` field. From a DigitalOcean server in New York, `site.api.espn.com` answered `403 Access Denied` (an HTML block page) while `site.web.api.espn.com` answered 200 JSON for the news feed, the injury report and the athlete endpoint (VERIFIED live). benchboss asks `site.web.api.espn.com` first for the news feed and falls back to `site.api.espn.com`. The scoreboard, schedule and live-games paths were not tested on the second host.
+
 ## Quick reference
 
 | Method | URL / view | Purpose | Auth | Status |
