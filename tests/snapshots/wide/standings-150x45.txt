@@ -13,7 +13,7 @@
   Standings  s                6   Splash Mountain      Casey Nguyen   1-1    .500   1.0   2,846.8   2,889.9    -43.1     W1    57% ━━━━━━────
   Playoff race  y             7   Tune Squad           Jordan Lee     1-1    .500   1.0   2,822.7   2,884.4    -61.7     L1    13% ━─────────
   Roster  o                   8   Full Court Press     Jamie Ortiz    1-1    .500   1.0   2,735.6   2,777.0    -41.4     W1    16% ━━────────
-                              9   The Alley Oops       Drew Garza     0-2    .000   2.0   3,017.6   3,250.7   -233.1     L2    29% ━━━───────
+  Settings  e                 9   The Alley Oops       Drew Garza     0-2    .000   2.0   3,017.6   3,250.7   -233.1     L2    29% ━━━───────
                              10   Fast Break Cartel    Chris Moreno   0-2    .000   2.0   2,838.6   3,064.4   -225.8     L2    69% ━━━━━━━───
 
                             PF points for  ·  PA points against  ·  GB games back  ·  Playoffs ESPN's odds  ·  ╌╌ playoff line

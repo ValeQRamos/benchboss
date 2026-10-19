@@ -13,7 +13,7 @@
   Standings  s                6   Splash Mountain      1-1   1.0   2,846.8   2,889.9    -43.1        57%
   Playoff race  y             7   Tune Squad           1-1   1.0   2,822.7   2,884.4    -61.7        13%
   Roster  o                   8   Full Court Press     1-1   1.0   2,735.6   2,777.0    -41.4        16%
-                              9   The Alley Oops       0-2   2.0   3,017.6   3,250.7   -233.1        29%
+  Settings  e                 9   The Alley Oops       0-2   2.0   3,017.6   3,250.7   -233.1        29%
                              10   Fast Break Cartel    0-2   2.0   2,838.6   3,064.4   -225.8        69%
 
                             PF points for  ·  PA points against  ·  GB games back  ·  Playoffs ESPN's odds

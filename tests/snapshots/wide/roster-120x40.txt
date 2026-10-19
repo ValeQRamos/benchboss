@@ -13,7 +13,7 @@
   Standings  s              G     Dyson Daniels ATL DTD  PG/SG   @WSH    ▼38.0  35.7    14.4   6.4  5.4
   Playoff race  y           F     AJ Dybantsa WSH        SF       ATL     28.0  32.9    14.8   5.0  3.0
   Roster  o                 UT    Alex Sarr WSH          PF/C     ATL     28.7  36.6    13.7   6.6  2.7
-                            UT    Rudy Gobert MIN        C       @HOU     33.6  34.3    13.3  10.3  2.9
+  Settings  e               UT    Rudy Gobert MIN        C       @HOU     33.6  34.3    13.3  10.3  2.9
                             UT    Coby White CHA DTD     PG/SG   @BKN     39.8  32.9    23.8   4.2  6.1
                             ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
                             BE    Pascal Siakam IND      PF      @MEM     39.3  41.1    24.0   7.6  4.0

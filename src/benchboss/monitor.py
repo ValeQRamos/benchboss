@@ -350,13 +350,16 @@ class Monitor:
                  emit: Callable[[dict], None] | None = None,
                  say: Callable[[str], None] | None = None,
                  clock: Callable[[], float] = time.time,
-                 sleep: Callable[[float], object] | None = None, host: str | None = None):
+                 sleep: Callable[[float], object] | None = None, host: str | None = None,
+                 alerts: Iterable[str] | None = None):
         if live and simulate and not dry_run:  # a pretend status must never reach ESPN
             raise BenchbossError("--simulate works in trial mode or with --dry-run, never live")
         self.factory = session_factory
         self.live = live and not dry_run
         self.dry_run = dry_run
         self.backends = list(backends)
+        # the note categories to send (notify.CATEGORIES); the inbox and the log keep everything
+        self.alerts = set(notify.CATEGORY_KEYS if alerts is None else alerts)
         self.simulate = {k: v.upper() for k, v in (simulate or {}).items()}
         self.emit = emit or (lambda rec: None)
         self.say = say or (lambda text: None)
@@ -417,7 +420,7 @@ class Monitor:
         if refused:
             self.say(f"live mode refused: {refused}. Running in trial mode.")
             self._note("Auto-swap stays in trial", f"Live mode refused: {refused}.", "urgent",
-                       "refused")
+                       "refused", "problems")
         self._save()
 
     def close(self, code: int = 0) -> None:
@@ -515,19 +518,22 @@ class Monitor:
             if "state-save" not in self.state["notified"]:
                 self.state["notified"]["state-save"] = self._now_iso()
                 self.say(str(e))
-                notify.send(notify.Note("benchboss monitor", f"benchboss cannot save its state "
-                                        f"({e}); auto-swap sends nothing until it can.",
-                                        "urgent"), self.backends)
+                if "problems" in self.alerts:
+                    notify.send(notify.Note("benchboss monitor", f"benchboss cannot save its state "
+                                            f"({e}); auto-swap sends nothing until it can.",
+                                            "urgent"), self.backends)
             return False
         return True
 
-    def _note(self, title: str, body: str, priority: str = "normal", key: str = "") -> None:
-        """Send one notification (once per key per day); never in a dry run."""
+    def _note(self, title: str, body: str, priority: str = "normal", key: str = "",
+              category: str = "lineup") -> None:
+        """Send one notification (once per key per day); never in a dry run, and not when its
+        category (notify.CATEGORIES) is switched off."""
         if key and key in self.state["notified"]:
             return
         if key:
             self.state["notified"][key] = self._now_iso()
-        if self.dry_run:
+        if self.dry_run or category not in self.alerts:
             return
         secrets = self._secrets()
         note = notify.Note(store.redact(title, secrets), store.redact(body, secrets),
@@ -605,7 +611,8 @@ class Monitor:
         marks = MarkStore(s).load()
         if marks.error:
             self._note("Auto-swap is off", f"{marks.error}. No player is armed until it is "
-                       "fixed or cleared (benchboss autoswap clear).", "urgent", "marks-damaged")
+                       "fixed or cleared (benchboss autoswap clear).", "urgent", "marks-damaged",
+                       "problems")
             self.say(marks.error)
         roster = {sp.player.id: sp for sp in lg.me.roster}
         auto = {pid for pid in marks.auto_ids() if pid in roster and roster[pid].slot_id != IR}
@@ -656,7 +663,8 @@ class Monitor:
             elif pid in auto and not f.cleared:
                 self.state["pending"].pop(str(pid), None)
             if f.cleared and (pid not in auto or marks.paused):
-                self._healthy(f, edge, today=period)
+                armed = pid in auto or pid in notify_only
+                self._healthy(f, edge, today=period, category="armed" if armed else "watchlist")
         # a player the monitor started is checked on every read, not only on a flip: Q to
         # DOUBTFUL is no flip, and a roster read that lagged or failed is tried again
         for pid in sorted(moved):
@@ -682,13 +690,13 @@ class Monitor:
 
     # --- healthy alerts ------------------------------------------------------------------------
 
-    def _healthy(self, f: core.Flip, edge: int, today: int) -> None:
+    def _healthy(self, f: core.Flip, edge: int, today: int, category: str = "watchlist") -> None:
         tz = self._now().tzinfo
         text = core.healthy_text(f, tz)
         urgent = f.tip is not None and not f.started
         key = f"healthy:{self.state['day']}:{f.player_id}:{edge}"
         self._alert("healthy", f.player_id, f.name, text, urgent, key)
-        self._note("Healthy", text, "urgent" if urgent else "normal", key)
+        self._note("Healthy", text, "urgent" if urgent else "normal", key, category)
 
     # --- starting a player who turned healthy ----------------------------------------------------
 
@@ -1180,7 +1188,7 @@ class Monitor:
 
     def _quiet_note(self, e: Exception) -> None:
         """A note before the state exists (no league yet): once per process."""
-        if self._start_noted or self.dry_run:
+        if self._start_noted or self.dry_run or "problems" not in self.alerts:
             return
         self._start_noted = True
         text = ("benchboss cannot read your league: run benchboss login" if isinstance(e, AuthError)
@@ -1203,7 +1211,7 @@ class Monitor:
             self.state["heartbeat"].update(auth_wait=True, last_error=str(e))
             self._record("error", text=f"cookies rejected: {e}")
             self._note("benchboss monitor", "benchboss cannot read your league: run "
-                       "benchboss login", "urgent", "auth")
+                       "benchboss login", "urgent", "auth", "problems")
             self._save()
             with contextlib.suppress(AuthError, ConfigError, BenchbossError):
                 fresh = self.factory()  # `benchboss login` in another terminal fixes it
@@ -1220,10 +1228,12 @@ class Monitor:
             soon = [t for t in self.tips if t > now]
             if blocked:
                 self._note("benchboss monitor", "ESPN is blocking this machine's reads; "
-                           "benchboss slows down and keeps trying.", "urgent", "blocked")
+                           "benchboss slows down and keeps trying.", "urgent", "blocked",
+                           "problems")
             elif soon and min(soon) - now < AUTH_CONFIRM:
                 self._note("benchboss monitor", f"ESPN cannot be reached ({e}); an armed "
-                           "player's game is near. benchboss keeps trying.", "urgent", "network")
+                           "player's game is near. benchboss keeps trying.", "urgent", "network",
+                           "problems")
             self._save()
             wait = BACKOFF[min(self._errors, len(BACKOFF)) - 1]
             if soon:

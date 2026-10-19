@@ -13,7 +13,7 @@
   Standings  s              │                                      Score  Proj.  Left │ │ ● Trade offer from Tune Squad: you give Scotty Pippen  │
   Playoff race  y           │ Monstars                             420.7  1,483    29 │ │ Jr., you get Lauri Markkanen                           │
   Roster  o                 │ Pick and Roll Pros                   402.5  1,597    33 │ ╰────────────────────────────────────────────────────────╯
-                            │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ ╭─  WORKLOAD THIS WEEK  ─────────────────────────────────╮
+  Settings  e               │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ ╭─  WORKLOAD THIS WEEK  ─────────────────────────────────╮
                             │ Up 18.2 now, projected to lose by 114                   │ │ Most games                                             │
                             ╰──────────────────────────────  Mon Nov 2 to Sun Nov 8  ─╯ │ A. Edwards MIN                        4 games (3 left) │
                             ╭─  ROSTER  ──────────────────────────────────────────────╮ │ L. Ball MIN                           4 games (3 left) │

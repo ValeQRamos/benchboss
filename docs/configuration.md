@@ -32,7 +32,7 @@ change. It also caches the NBA schedule for a day. Demo mode (`--demo`) writes n
   "theme": "dark",
   "league_name": "My League",
   "team_name": "My Team",
-  "notify": {"backends": ["mac", "ntfy"]}
+  "notify": {"backends": ["mac", "ntfy"], "alerts": ["lineup", "watchlist"]}
 }
 ```
 
@@ -46,6 +46,11 @@ change. It also caches the NBA schedule for a day. Demo mode (`--demo`) writes n
 - `notify.backends` is where `benchboss monitor` sends its notes when you give no `--notify`:
   any of `mac`, `ntfy`, `cmd` and `log`. Without it: `mac` on a Mac, `log` elsewhere. Never put
   a secret here; see [Notifications](autoswap.md#notifications).
+- `notify.alerts` is what `benchboss monitor` notifies you about, in every backend: any of
+  `lineup` (auto-swap starts or benches a player), `watchlist` (a watch-list player turns
+  healthy), `armed` (a player you armed for alerts turns healthy) and `problems` (cookies
+  expired, ESPN unreachable, live mode refused). Without it, all four are on. The Inbox and the
+  log always keep everything. Press `e` in the app to change it.
 
 ## seen-news.json
 

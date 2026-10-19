@@ -13,7 +13,7 @@
   Standings  s              3. Fast Break Cartel  (Chris Moreno)
   Playoff race  y              give Brandon Miller SF 37.4   get Damian Lillard PG 38.6   fairness 97%
   Roster  o                    "Hey Chris! You could use help at SF and you are deep at PG. I need a PG. Brandon Miller for Damian Lillard is
-                               close in value and helps both of us. Interested?"
+  Settings  e                  close in value and helps both of us. Interested?"
                             4. Fast Break Cartel  (Chris Moreno)
                                give AJ Dybantsa SF 32.9   get Damian Lillard PG 38.6   fairness 85%
                                "Hey Chris! You could use help at SF and you are deep at PG. I need a PG. AJ Dybantsa for Damian Lillard is close

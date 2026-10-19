@@ -35,18 +35,22 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shlex
 import stat
+import string
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
 from dataclasses import dataclass
+from secrets import choice
 from typing import TextIO
 
 from benchboss import store
 from benchboss.errors import BenchbossError
+from benchboss.espn.client import _SSL
 
 BACKENDS = ("mac", "ntfy", "cmd", "log")
 PRIORITIES = ("urgent", "normal", "info")
@@ -58,6 +62,18 @@ ENV_NTFY_SERVER = "BENCHBOSS_NTFY_SERVER"
 ENV_CMD = "BENCHBOSS_NOTIFY_CMD"
 SECRET_VARS = (ENV_NTFY_TOPIC, ENV_NTFY_TOKEN, ENV_NTFY_SERVER, ENV_CMD)
 TIMEOUT = 15  # seconds per backend
+# What the monitor can notify about: (key, label, what it says). ``notify.alerts`` in
+# config.json lists the keys switched on; without it every category is on.
+CATEGORIES = (
+    ("lineup", "Lineup changes", "auto-swap starts or benches a player"),
+    ("watchlist", "Watch list", "a player on your ESPN watch list turns healthy"),
+    ("armed", "Armed players", "a player you armed for alerts turns healthy"),
+    ("problems", "Problems", "cookies expired, ESPN unreachable, live mode refused"),
+)
+CATEGORY_KEYS = tuple(k for k, _, _ in CATEGORIES)
+TOPIC_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+SERVER_RE = re.compile(r"https?://[^\s/]+(/\S*)?")
+VALUE_RE = re.compile(r"[^\s\"'#]+")  # a value notify.env can hold on one line
 
 
 class NotifyError(BenchbossError):
@@ -82,6 +98,14 @@ class Backend:
 
     def _clean(self, text: str) -> str:
         return store.redact(text, self.hidden)
+
+
+def categories(saved: dict) -> set[str]:
+    """The categories switched on in the ``notify`` setting: all when it has no ``alerts``."""
+    names = saved.get("alerts")
+    if not isinstance(names, list):
+        return set(CATEGORY_KEYS)
+    return {str(n).strip().lower() for n in names} & set(CATEGORY_KEYS)
 
 
 def default_backends() -> tuple[str, ...]:
@@ -119,6 +143,44 @@ def _env_file() -> dict[str, str]:
         if key in SECRET_VARS and value:
             out[key] = value
     return out
+
+
+def new_topic() -> str:
+    """A long random ntfy topic: on the public server the name is the only password."""
+    alphabet = string.ascii_lowercase + string.digits
+    return "benchboss-" + "".join(choice(alphabet) for _ in range(16))
+
+
+def check_ntfy(topic: str, token: str = "", server: str = "") -> tuple[str, str, str]:
+    """The ntfy settings trimmed, or NotifyError when ntfy or notify.env cannot hold them."""
+    topic, token, server = topic.strip(), token.strip(), server.strip()
+    if not TOPIC_RE.fullmatch(topic):
+        raise NotifyError("the topic is 1 to 64 letters, digits, - or _")
+    if token and not VALUE_RE.fullmatch(token):
+        raise NotifyError("the token cannot hold spaces or quotes")
+    if server and not (SERVER_RE.fullmatch(server) and VALUE_RE.fullmatch(server)):
+        raise NotifyError("the server must be a web address like https://ntfy.sh")
+    return topic, token, server
+
+
+def save_ntfy(topic: str, token: str = "", server: str = "") -> None:
+    """Write the ntfy settings to notify.env (0600), keeping every other line. An empty token
+    or server removes that line. Raises NotifyError for a value ntfy or the file cannot hold."""
+    topic, token, server = check_ntfy(topic, token, server)
+    new = {ENV_NTFY_TOPIC: topic, ENV_NTFY_TOKEN: token, ENV_NTFY_SERVER: server}
+    path = store.notify_env_path()
+    with store.locked(path):
+        try:
+            old = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        except OSError as e:
+            raise NotifyError(f"could not read {path} ({e.strerror})") from None
+        keep = [ln for ln in old
+                if ln.split("=", 1)[0].strip().removeprefix("export ").strip() not in new]
+        keep += [f"{k}={v}" for k, v in new.items() if v]
+        try:
+            store.write_private_text(path, "\n".join(keep) + "\n")
+        except BenchbossError as e:
+            raise NotifyError(str(e)) from None
 
 
 def secrets(env: dict[str, str] | None = None) -> dict[str, str]:
@@ -226,7 +288,7 @@ class NtfyBackend(Backend):
         data = json.dumps(self.payload(note), ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(self.server + "/", data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            with urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL) as r:
                 status = r.status
         except urllib.error.HTTPError as e:
             raise NotifyError(f"the ntfy server answered {e.code}") from None
@@ -298,6 +360,7 @@ class LogBackend(Backend):
         return "log: written"
 
 
-__all__ = ["BACKENDS", "Backend", "CommandBackend", "LogBackend", "MacBackend", "NTFY_SERVER",
+__all__ = ["BACKENDS", "Backend", "CATEGORIES", "CATEGORY_KEYS", "CommandBackend", "LogBackend",
+           "MacBackend", "NTFY_SERVER",
            "Note", "NotifyError", "NtfyBackend", "PRIORITIES", "backends", "default_backends",
-           "secrets", "send"]
+           "categories", "check_ntfy", "new_topic", "save_ntfy", "secrets", "send"]

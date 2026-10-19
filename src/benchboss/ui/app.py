@@ -63,6 +63,7 @@ MENU = [
     ("standings", "Standings", "s"),
     ("playoffs", "Playoff race", "y"),
     ("roster", "Roster", "o"),
+    ("settings", "Settings", "e"),
 ]
 PLANS = ("today", "week")  # the screens that can send moves to ESPN
 MENU_WIDTH = 26  # the width of #menu in the CSS below
@@ -671,6 +672,11 @@ class Benchboss(App):
             return (lambda pal, w: Group(
                 common.fit_title("Inbox", pal, w, (about, note), (note,)),  # the count stays longest
                 Text(""), views.alerts(items, pal))), None
+        if sid == "settings":
+            from benchboss.ui.screens import settings
+
+            data = settings.load(s)
+            return Mount(lambda: settings.widget(data, self)), None
         raise BenchbossError(f"unknown screen {sid}")
 
     def _build_plan(self, s, sid: str) -> tuple[Draw, dict | None]:

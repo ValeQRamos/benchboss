@@ -169,7 +169,7 @@ Inside the app every screen has a single key:
 | `u` | Auto-swap | `r` | Refresh |
 | `v` | Next view of this screen (roster split, standings table, workload order) | `ctrl+t` | Light or dark |
 | `m` | Show or hide the menu (it hides itself below 110 columns; on a phone it opens as a page) | `q` | Quit |
-| `g` | AI news briefing (needs `ANTHROPIC_API_KEY`) | | |
+| `g` | AI news briefing (needs `ANTHROPIC_API_KEY`) | `e` | Settings (ntfy alerts) |
 
 The Player finder has its own keys. Letters it does not use (`d`, `s`, `o`...) still jump
 to the other screens, except while you type in the search box.

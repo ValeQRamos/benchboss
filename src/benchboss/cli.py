@@ -864,7 +864,7 @@ def cmd_monitor(c: Ctx):
             c.out.print(Text(text, style=c.pal.dim))
 
     m = mon.Monitor(factory, live=a.live, dry_run=a.dry_run, backends=backends,
-                    simulate=simulate, emit=emit, say=say)
+                    simulate=simulate, emit=emit, say=say, alerts=notify.categories(c.cfg.notify))
     if not a.json and not a.once:
         mode = "live" if a.live else "trial (nothing is sent to ESPN)"
         c.out.print(Text(f"benchboss monitor: {mode}; notifications: "

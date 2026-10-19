@@ -13,7 +13,7 @@
   Standings  s              │                       Score  Proj.  Left │ │ Most games                              │
   Playoff race  y           │ Monstars              420.7  1,483    29 │ │ A. Edwards MIN         4 games (3 left) │
   Roster  o                 │ Pick and Roll Pros    402.5  1,597    33 │ │ L. Ball MIN            4 games (3 left) │
-                            │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ │ A. Sarr WSH            4 games (3 left) │
+  Settings  e               │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ │ A. Sarr WSH            4 games (3 left) │
                             │ Up 18.2 now, projected to lose by 114    │ │ Fewest games                            │
                             ╰───────────────  Mon Nov 2 to Sun Nov 8  ─╯ │ S. Pippen Jr. MEM      3 games (2 left) │
                             ╭─  ROSTER  ───────────────────────────────╮ │ C. White CHA           3 games (2 left) │

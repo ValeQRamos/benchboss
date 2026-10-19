@@ -13,7 +13,7 @@
   Standings  s                        Coby White     DTD: 32.9 × 75% = 24.7, below Scotty Pippen Jr. 30.6
   Playoff race  y                     Tobias Harris  DTD: 30.1 × 75% = 22.6, below AJ Dybantsa 32.9
   Roster  o
-                            6 moves on 1 day. Press Apply to send them to ESPN.
+  Settings  e               6 moves on 1 day. Press Apply to send them to ESPN.
 
 
 

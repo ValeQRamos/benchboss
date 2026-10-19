@@ -14,7 +14,7 @@ What every screen does:
   for the key bar. The app adds the global ones (m menu, d dashboard, r refresh, q quit).
 - Every action has a key that a phone keyboard reaches: letters, digits, or the first
   symbols page (- / : ; ( ) . , ? ! ' "). Esc, arrows and PgUp/PgDn keep working too.
-- A widget never binds a menu letter (d t w a f p n x i s y o u) or g v m r q.
+- A widget never binds a menu letter (d t w a f p n x i s y o u e) or g v m r q.
 - A tap (KeyItem.action) never sends anything to ESPN; at most it moves the focus to Apply.
 - The wide layouts in WIDE_GUARDS do not change: the tests compare them before and after.
 """

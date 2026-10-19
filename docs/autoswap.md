@@ -178,6 +178,12 @@ BENCHBOSS_NTFY_TOPIC=benchboss-k3x9q2mfw8pz4r7t
 On the public ntfy server anyone who knows a topic can read it, so pick a long random one and
 subscribe to it in the ntfy app. Names with accents (Jokić, Dončić) arrive intact.
 
+You can set ntfy up without editing files: press `e` in the app for Settings, then the Alerts
+tab. Press New for a random topic, Save, and Test. It writes `notify.env` (private) and adds
+`ntfy` to the backends in `config.json`. Under "Notify me about" you switch the kinds of notes
+on and off (lineup changes, watch list, armed players, problems); that is saved at once. Restart
+`benchboss monitor` afterwards, since it reads these when it starts.
+
 The command backend runs your command without a shell. The title and text are in the
 `BENCHBOSS_TITLE` and `BENCHBOSS_TEXT` environment variables (and `BENCHBOSS_PRIORITY`:
 urgent, normal or info), and the text also comes on standard input. For example, a small

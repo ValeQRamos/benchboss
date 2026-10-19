@@ -73,7 +73,7 @@ are the interactive ones. The protocol is in `ui/screens/__init__.py`. In short:
      Keys it does not bind fall through to the app's menu keys. Give it `key_items()` for
      the phone key bar (see "Phones and small windows").
 2. Add it to `SCREENS` in `ui/screens/__init__.py` and give it a `MENU` entry in `ui/app.py`
-   with a free key (taken: `d t w a f p n x i s y o u`, plus `g v m r q`). A widget never
+   with a free key (taken: `d t w a f p n x i s y o u e`, plus `g v m r q`). A widget never
    binds one of those letters.
 3. Add a command in `cli.py` that calls `_screen(c, yours)`, with `--view` when there are
    views, add it to `GROUPS` in `tools/gen_commands_doc.py`, and regenerate

@@ -134,6 +134,21 @@ def write_json(path: Path, data: Any, *, memory: dict | None = None) -> None:
         raise BenchbossError(f"could not save {path} ({e})") from e
 
 
+def write_private_text(path: Path, text: str) -> None:
+    """Replace ``path`` with ``text``, atomically, readable only by you."""
+    private_dir(path.parent)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        _replace(tmp, path)
+    except OSError as e:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise BenchbossError(f"could not save {path} ({e})") from e
+
+
 def append_jsonl(path: Path, record: dict, *, memory: dict | None = None) -> None:
     """Add one JSON line to ``path`` (one write call, so lines from two processes never mix)."""
     line = json.dumps(record, ensure_ascii=False, default=str)
@@ -238,4 +253,4 @@ def session_secrets(session) -> tuple[str, ...]:
 
 __all__ = ["append_jsonl", "league_dir", "lease_path", "locked", "logs_dir", "marks_path",
            "monitor_path", "notify_env_path", "private_dir", "read_json", "read_jsonl",
-           "redact", "session_secrets", "write_json"]
+           "redact", "session_secrets", "write_json", "write_private_text"]

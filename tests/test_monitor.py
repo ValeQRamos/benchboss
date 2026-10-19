@@ -179,6 +179,33 @@ def test_first_sight_is_silent_then_a_watch_list_player_who_turns_healthy_alerts
     assert alerts[0].to_dict()["at"]
 
 
+def test_a_category_that_is_off_sends_no_note_but_the_inbox_keeps_the_alert(live):
+    notes, turner = Notes(), 3133628  # Myles Turner, DAY_TO_DAY on the demo watch list
+    monitor(live, notes=notes, alerts={"lineup", "armed", "problems"}).run(once=True)
+    for x in live.client.pool():
+        if x["id"] == turner:
+            x["player"]["injuryStatus"] = "ACTIVE"
+    monitor(live, notes=notes, alerts={"lineup", "armed", "problems"}).run(once=True)
+    assert notes.notes == []
+    assert [a.player for a in inbox.monitor_alerts(live)] == ["Myles Turner"]
+
+
+@pytest.mark.parametrize("alerts,sent", [({"armed"}, 1), ({"watchlist", "lineup"}, 0)])
+def test_an_armed_player_who_turns_healthy_is_the_armed_category(live, alerts, sent):
+    armed(live, "Dyson Daniels", "notify")
+    set_status(live, "Dyson Daniels", "ACTIVE")
+    notes = Notes()
+    monitor(live, notes=notes, alerts=alerts).run(once=True)
+    assert [n.title for n in notes.notes] == ["Healthy"] * sent
+
+
+@pytest.mark.parametrize("alerts,sent", [({"watchlist", "armed", "problems"}, 0), ({"lineup"}, 1)])
+def test_lineup_notes_follow_the_lineup_category(session, alerts, sent):
+    notes = Notes()
+    monitor(session, notes=notes, alerts=alerts, simulate={"Dyson Daniels": "ACTIVE"}).run(once=True)
+    assert len(notes.notes) == sent
+
+
 def test_a_notify_only_mark_alerts_and_never_plans(live, monkeypatch):
     armed(live, "Dyson Daniels", "notify")
     calls = []

@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.5] - 2026-10-19
+
+Setting up phone alerts no longer needs a text editor, and you choose which alerts you get.
+
+### Added
+
+- A Settings screen (`e` in the app) with an Alerts tab. It sets up [ntfy](https://ntfy.sh)
+  pushes (topic, server and token; New makes a random topic, Copy puts it on the clipboard,
+  Test sends a note, Off turns ntfy off) and writes the private `notify.env` and
+  `notify.backends` in `config.json`. Nothing is saved or sent in the demo.
+- Choose what `benchboss monitor` notifies you about, in every backend: lineup changes,
+  watch-list players turning healthy, armed players turning healthy, and problems (cookies
+  expired, ESPN unreachable, live mode refused). The boxes under "Notify me about" save at once
+  to `notify.alerts` in `config.json`. Without it all four stay on, as before. The Inbox and
+  the log still show everything. Restart the monitor to pick up a change.
+
+### Fixed
+
+- ntfy pushes failed with "certificate verify failed" on a python.org build of Python on
+  macOS, which ships without root certificates. They now use the same certificates as the ESPN
+  and news requests.
+
 ## [1.0.4] - 2026-10-18
 
 Most of this release comes from the requests that showed up the night 1.0.3 went out: start a

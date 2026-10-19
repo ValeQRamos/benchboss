@@ -127,6 +127,11 @@ def save_theme(theme: str) -> Path | None:
     variables for one run never end up in config.json. A file that is not a JSON object is
     left alone (returns None) for the user or ``benchboss setup`` to fix.
     """
+    return save_field("theme", theme)
+
+
+def save_field(name: str, value) -> Path | None:
+    """Store one field and leave every other saved setting as it is on disk (see save_theme)."""
     path = config_dir() / "config.json"
     raw: dict = {}
     if path.exists():
@@ -136,7 +141,7 @@ def save_theme(theme: str) -> Path | None:
             return None
         if not isinstance(raw, dict):
             return None
-    raw["theme"] = theme
+    raw[name] = value
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _tmp(path)
     tmp.write_text(json.dumps(raw, indent=2) + "\n")

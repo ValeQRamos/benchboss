@@ -61,7 +61,7 @@ def test_ntfy_posts_json_so_accents_travel(monkeypatch):
         def __exit__(self, *a):
             return False
 
-    def urlopen(req, timeout):
+    def urlopen(req, timeout, context=None):
         sent.append((req, timeout))
         return Answer()
 
@@ -82,7 +82,7 @@ def test_ntfy_posts_json_so_accents_travel(monkeypatch):
 
 
 def test_ntfy_errors_never_show_the_topic_or_the_token(monkeypatch):
-    def refuse(req, timeout):
+    def refuse(req, timeout, context=None):
         raise urllib.error.HTTPError(req.full_url, 401, "no", {}, io.BytesIO(b""))
 
     monkeypatch.setattr(notify.urllib.request, "urlopen", refuse)
@@ -92,7 +92,7 @@ def test_ntfy_errors_never_show_the_topic_or_the_token(monkeypatch):
     (receipt,) = notify.send(NOTE, [b])
     assert receipt == "ntfy: failed (the ntfy server answered 401)"
 
-    def timeout(req, timeout):
+    def timeout(req, timeout, context=None):
         raise TimeoutError
 
     monkeypatch.setattr(notify.urllib.request, "urlopen", timeout)
