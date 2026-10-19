@@ -35,6 +35,8 @@ are in [AGENTS.md](../AGENTS.md); these rules are the non-negotiable part.
   the user asks for the AI briefing.
 - Never ask for, print or pass ESPN cookies. If `benchboss` exits with code 3, ask the user to
   run `benchboss login` themselves.
+- Never run `benchboss users` or `benchboss-users`: they make and print web sign in passwords.
+  The person running the server does it.
 - For "latest news" requests, start with `benchboss news --json --days 5` (or
   `benchboss news --json "Player"` for one player, any date), then use web search for anything
   newer or missing, and say which source each item came from. A name that fits several players

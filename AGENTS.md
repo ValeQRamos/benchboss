@@ -57,6 +57,8 @@ Do not run `benchboss` with no command, `benchboss app`, `benchboss web` or
 --dry-run --json` is the one form of it you run on your own. Run `benchboss news --ai` only
 when the user asks for the AI briefing: it calls the Anthropic API with their key and costs
 money.
+Never run `benchboss users` (or `benchboss-users`): it makes and prints sign in passwords for the
+web app, so the person running the server does it themselves.
 Run `benchboss alerts --mark-read` only when the user asks (they say they read the news). It
 writes nothing to ESPN, but the watch-list items it lists then never come back in `alerts` or
 in the app's toasts.

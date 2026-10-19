@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
 import hashlib
 import hmac
 import html
@@ -17,6 +18,7 @@ import json
 import logging
 import os
 import secrets
+import shlex
 import time
 import urllib.parse
 from collections.abc import Awaitable, Callable
@@ -26,6 +28,7 @@ from pathlib import Path
 from aiohttp import ClientError, ClientSession, ClientTimeout, web
 
 from benchboss import __version__
+from benchboss.accounts import Accounts
 from benchboss.ui import logo
 from benchboss.ui.app import THEMES
 from benchboss.ui.theme import DARK, LIGHT
@@ -66,9 +69,16 @@ class AuthConfig:
     github_users: frozenset[str] = field(default_factory=frozenset)  # lowercase logins or ids
     public_url: str = ""               # where people type the address; needed for GitHub
     session_hours: float = 12
+    accounts: Accounts | None = None   # many people, each with their own password and folder
+
+    @property
+    def has_password(self) -> bool:
+        return bool(self.password) or self.accounts is not None
 
     @property
     def github(self) -> bool:
+        if self.accounts is not None:  # who may come in is the accounts' GitHub names
+            return bool(self.github_client_id and self.github_secret)
         return bool(self.github_client_id and self.github_secret and self.github_users)
 
 
@@ -176,7 +186,16 @@ class Auth:
         return await handler(request)
 
     def session(self, request: web.Request) -> dict | None:
-        return _verify(self.cfg.secret, request.cookies.get(COOKIE, ""), self.now())
+        data = _verify(self.cfg.secret, request.cookies.get(COOKIE, ""), self.now())
+        accounts = self.cfg.accounts
+        if data and accounts is not None:  # removing a person or changing their password ends this
+            try:
+                issued = float(data.get("iat", 0))
+            except (TypeError, ValueError):
+                return None
+            if not accounts.session_ok(str(data.get("u", "")), issued):
+                return None
+        return data
 
     def _same_origin(self, request: web.Request) -> bool:
         """Is this form or websocket from our own page? Browsers say so in Sec-Fetch-Site; the
@@ -201,7 +220,7 @@ class Auth:
     # --- pages ---------------------------------------------------------------------------------
 
     def _page(self, error: str = "", status: int = 200, headers: dict | None = None) -> web.Response:
-        text = render_page(password=bool(self.cfg.password), github=self.cfg.github, error=error,
+        text = render_page(password=self.cfg.has_password, github=self.cfg.github, error=error,
                            hours=self.cfg.session_hours)
         return web.Response(text=text, status=status, content_type="text/html",
                             headers={**PAGE_HEADERS, **(headers or {})})
@@ -212,7 +231,8 @@ class Auth:
 
     def _start(self, user: str, via: str) -> web.Response:
         hours = self.cfg.session_hours
-        token = _sign(self.cfg.secret, {"u": user, "via": via, "exp": self.now() + hours * 3600})
+        now = self.now()
+        token = _sign(self.cfg.secret, {"u": user, "via": via, "iat": now, "exp": now + hours * 3600})
         resp = self._redirect("/")
         resp.set_cookie(COOKIE, token, max_age=int(hours * 3600), httponly=True,
                         secure=self._secure, samesite="Lax", path="/")
@@ -240,8 +260,18 @@ class Auth:
             self._fails.pop(ip, None)
         return int(WRONG_WINDOW - (now - recent[0])) + 1 if len(recent) >= WRONG_LIMIT else 0
 
+    async def _who(self, user: str, password: str) -> str | None:
+        """The name to sign in as when the user name and password are right, else None."""
+        accounts = self.cfg.accounts
+        if accounts is not None:  # hashing takes a while: keep the server answering others meanwhile
+            return await asyncio.get_running_loop().run_in_executor(
+                None, accounts.check, user.strip().lower(), password)
+        user_ok = _same(user, self.cfg.user)
+        pass_ok = _same(password, self.cfg.password or "")
+        return self.cfg.user if user_ok and pass_ok else None
+
     async def login_submit(self, request: web.Request) -> web.Response:
-        if not self.cfg.password:
+        if not self.cfg.has_password:
             raise web.HTTPNotFound()
         if not self._same_origin(request):
             return self._page("That form came from another site.", status=403)
@@ -251,14 +281,13 @@ class Auth:
             return self._page(f"Too many tries. Wait {wait // 60 + 1} minutes.", status=429,
                               headers={"Retry-After": str(wait)})
         form = await request.post()
-        user_ok = _same(str(form.get("username", "")), self.cfg.user)
-        pass_ok = _same(str(form.get("password", "")), self.cfg.password)
-        if not (user_ok and pass_ok):
+        name = await self._who(str(form.get("username", "")), str(form.get("password", "")))
+        if name is None:
             self._fails.setdefault(ip, []).append(self.now())
             await asyncio.sleep(self.fail_delay)
             return self._page("Wrong username or password.", status=401)
         self._fails.pop(ip, None)
-        return self._start(self.cfg.user, "password")
+        return self._start(name, "password")
 
     # --- GitHub --------------------------------------------------------------------------------
 
@@ -286,21 +315,76 @@ class Auth:
                                              code, self._callback)
         except (LoginError, ClientError, asyncio.TimeoutError, KeyError, ValueError):
             return self._page("GitHub did not answer. Try again.", status=502)
-        if login.lower() not in self.cfg.github_users and str(uid) not in self.cfg.github_users:
+        accounts = self.cfg.accounts
+        if accounts is not None:
+            name = accounts.by_github(login, uid)
+        elif login.lower() in self.cfg.github_users or str(uid) in self.cfg.github_users:
+            name = login
+        else:
+            name = None
+        if name is None:
             return self._page(f"{login} is not allowed here.", status=403)
-        resp = self._start(login, "github")
+        resp = self._start(name, "github")
         resp.del_cookie(STATE_COOKIE, path="/login/github")
         return resp
 
 
-def login_server(server_class, auth: Auth):
-    """A textual-serve Server with the sign in in front of everything it serves."""
+# the person whose websocket is being opened, read where textual-serve builds the app's command
+_USER: contextvars.ContextVar[str | None] = contextvars.ContextVar("bb_web_user", default=None)
+# what each person's app must not inherit from the server: its own sign in secret, and ESPN
+# cookies that would otherwise be everyone's
+NOT_INHERITED = ("BENCHBOSS_GITHUB_CLIENT_SECRET", "ESPN_S2", "ESPN_SWID")
+
+
+def login_server(server_class, auth: Auth, max_sessions: int = 0, per_user: int = 0):
+    """A textual-serve Server with the sign in in front of everything it serves. With accounts,
+    each person's app starts with their own folder as BENCHBOSS_HOME. ``max_sessions`` and
+    ``per_user`` (0: no limit) cap the open tabs, which cost about 70 MB each."""
+    accounts = auth.cfg.accounts
 
     class LoginServer(server_class):
+        _base = ""
+
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self._open: dict[str | None, int] = {}
+
+        @property
+        def command(self) -> str:
+            name = _USER.get()
+            if accounts is None or name is None:
+                return self._base
+            scrub = " ".join(f"-u {s}" for s in NOT_INHERITED)
+            home = shlex.quote(str(accounts.home(name)))
+            return f"env {scrub} BENCHBOSS_NO_KEYRING=1 BENCHBOSS_HOME={home} {self._base}"
+
+        @command.setter
+        def command(self, value: str) -> None:
+            self._base = value
+
         async def _make_app(self):
             app = await super()._make_app()
             auth.install(app)
             return app
+
+        async def handle_websocket(self, request):
+            session = auth.session(request)
+            name = str(session["u"]) if session and accounts is not None else None
+            full = max_sessions and sum(self._open.values()) >= max_sessions
+            busy = per_user and name is not None and self._open.get(name, 0) >= per_user
+            if full or busy:
+                log.warning("refused a session for %s: %s open", name, sum(self._open.values()))
+                return web.Response(status=503, headers={"Retry-After": "30"},
+                                    text="Too many open sessions. Close a tab and try again.\n")
+            token = _USER.set(name)
+            self._open[name] = self._open.get(name, 0) + 1
+            try:
+                return await super().handle_websocket(request)
+            finally:
+                self._open[name] -= 1
+                if not self._open[name]:
+                    del self._open[name]
+                _USER.reset(token)
 
     return LoginServer
 

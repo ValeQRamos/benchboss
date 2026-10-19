@@ -233,7 +233,7 @@ def test_name_search_matches_the_start_of_a_name(session):
 
 # --- edges-10: the agent docs list every league command and the watch list write ------------------
 
-ACCOUNT = {"app", "web", "setup", "login", "logout", "status", "doctor"}
+ACCOUNT = {"app", "web", "users", "setup", "login", "logout", "status", "doctor"}
 
 
 def test_agent_docs_list_every_league_command():

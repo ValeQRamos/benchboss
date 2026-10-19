@@ -1,0 +1,27 @@
+[Unit]
+Description=benchboss web app for everyone (listens on localhost; Caddy adds HTTPS)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# One service for all people. Each person's app starts with their own folder under
+# /var/lib/benchboss/users as BENCHBOSS_HOME, so cookies and settings stay apart.
+User=benchboss
+WorkingDirectory=/var/lib/benchboss
+Environment=BENCHBOSS_HOME=/var/lib/benchboss
+# BB_PORT, BB_URL, optional BB_ARGS (extra options) and the GitHub sign in's id and secret.
+# Written by setup-server.sh and `benchboss-users oauth`; readable only by root.
+EnvironmentFile=/etc/benchboss/web.env
+ExecStart=/opt/benchboss/current/bin/benchboss web --accounts --host 127.0.0.1 --port ${BB_PORT} --url ${BB_URL} $BB_ARGS
+Restart=on-failure
+RestartSec=5
+# Every open browser tab runs its own app process (about 70 MB) inside this limit, so a small
+# server keeps SSH and Caddy alive. BB_ARGS caps the tabs; tune both to the server's memory.
+MemoryHigh=380M
+MemoryMax=420M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

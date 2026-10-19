@@ -3,7 +3,7 @@
 Lookup order:
   1. Environment variables ESPN_S2 and ESPN_SWID (CI, containers, AI agents).
   2. The OS keychain through ``keyring`` (macOS Keychain, Windows Credential Locker,
-     Secret Service on Linux).
+     Secret Service on Linux), unless BENCHBOSS_NO_KEYRING is set.
   3. A fallback file ``credentials.json`` with 0600 permissions in the config folder, used
      only when no keychain backend is available.
 
@@ -43,6 +43,8 @@ def _file() -> Path:
 
 
 def _keyring():
+    if os.environ.get("BENCHBOSS_NO_KEYRING"):  # a server with many people: one keychain is shared
+        return None
     try:
         import keyring
 

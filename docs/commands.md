@@ -422,7 +422,8 @@ benchboss web [-h] [--json] [--demo] [--theme {dark,light}]
                      [--port PORT] [--url URL] [--allow-remote]
                      [--password-file FILE] [--login-user NAME]
                      [--github-client-id ID] [--github-users LOGINS]
-                     [--session-hours HOURS]
+                     [--session-hours HOURS] [--accounts] [--max-sessions N]
+                     [--max-per-user N]
 ```
 
 | Option | Meaning |
@@ -436,3 +437,25 @@ benchboss web [-h] [--json] [--demo] [--theme {dark,light}]
 | `--github-client-id` | Turn on Sign in with GitHub (also needs --github-users, --url and the BENCHBOSS_GITHUB_CLIENT_SECRET environment variable) |
 | `--github-users` | GitHub logins (or numeric ids) allowed in, comma separated |
 | `--session-hours` | How long a sign in lasts (default 12) |
+| `--accounts` | Many people, each with their own password and folder of settings (manage them with benchboss users) |
+| `--max-sessions` | Most browser tabs open at once, about 70 MB each (default: no limit) |
+| `--max-per-user` | Most tabs one person may have open (default: no limit) |
+
+### `benchboss users`
+
+The people who sign in to benchboss web --accounts: add, list, password, github, remove, import.
+
+```text
+benchboss users [-h] [--json] [--demo] [--theme {dark,light}]
+                       [--layout {auto,compact,full}] [-y]
+                       [--password-file FILE] [--github LOGIN] [--from FOLDER]
+                       {list,add,password,github,remove,import} [name]
+```
+
+| Option | Meaning |
+|---|---|
+| `action` | What to do |
+| `name` | The person: 2 to 16 lowercase letters and digits |
+| `--password-file` | Add, password, import: use the password in this file instead of making one |
+| `--github` | Add, import, github: the GitHub login (or numeric id) that signs in as this person |
+| `--from` | Import: an existing benchboss settings folder to copy (cookies, league, logs) |

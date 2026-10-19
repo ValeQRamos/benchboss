@@ -270,7 +270,8 @@ Run benchboss on a small always-on Linux server and open it over SSH from your M
 phone, with `tmux` keeping the session alive, or serve it as a web page with
 `benchboss web` behind a login. Setup, SSH keys, how users and cookies fit together and
 troubleshooting are in [docs/server.md](docs/server.md). Deploying it, updating and rolling
-back, adding people and automatic deploys from GitHub are in [docs/deploy.md](docs/deploy.md).
+back, adding people (one address for everyone, each with their own password and ESPN account)
+and automatic deploys from GitHub are in [docs/deploy.md](docs/deploy.md).
 
 ## Commands
 

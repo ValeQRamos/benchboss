@@ -35,8 +35,11 @@ switch_to() {
   mv -Tf "$ROOT/current.new" "$ROOT/current"
 }
 
-instances() {
-  systemctl list-units 'benchboss-web@*.service' --state=active --plain --no-legend | awk '{print $1}'
+instances() {  # the web services that should be running: the one for everyone, and any older per-person ones
+  {
+    systemctl list-units 'benchboss-web@*.service' --state=active --plain --no-legend | awk '{print $1}'
+    if systemctl is-enabled --quiet benchboss-web.service 2>/dev/null; then echo benchboss-web.service; fi
+  } || true
 }
 
 restart_all() {
@@ -45,8 +48,12 @@ restart_all() {
 }
 
 port_of() {  # the unit's port, read with sudo because the settings file is private
-  local name=${1#benchboss-web@}
-  sudo sed -n 's/^BB_PORT=//p' "/etc/benchboss/${name%.service}.env"
+  local name
+  case $1 in
+    benchboss-web.service) name=web ;;
+    *) name=${1#benchboss-web@}; name=${name%.service} ;;
+  esac
+  sudo sed -n 's/^BB_PORT=//p' "/etc/benchboss/$name.env"
 }
 
 healthy() {  # every instance answers its sign in page within 40 seconds
@@ -73,7 +80,7 @@ case "${1:-}" in
     [ -n "$prev" ] || die "no release older than $cur to go back to"
     say "rolling back $cur -> $prev"
     switch_to "$prev"; restart_all
-    healthy || die "the previous release does not answer either: see journalctl -u 'benchboss-web@*'"
+    healthy || die "the previous release does not answer either: see journalctl -u 'benchboss-web*'"
     say "now on $prev"
     exit 0 ;;
 esac

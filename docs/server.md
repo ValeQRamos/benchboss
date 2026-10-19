@@ -227,76 +227,104 @@ open from any browser, including a phone.
 ```mermaid
 flowchart LR
     B[Browser] -->|HTTPS| C[Caddy]
-    C -->|127.0.0.1:PORT| W[benchboss web: sign in page, then the app]
+    C -->|127.0.0.1:8000| W[benchboss web: sign in page, then each person's app]
 ```
 
 `benchboss web` has its own sign in page, in the style of the app, with a password and
 optionally GitHub. It sits in front of everything the web app serves, including the
 websocket, so the app never starts for someone who is not signed in. A reverse proxy (Caddy)
-only adds HTTPS. Without `--password-file` or the `--github-*` options there is **no login at
-all**: anyone who reaches the page acts as the ESPN account on the server and can press Apply.
-In that case put a proxy with a login in front. Either way `benchboss web` listens on
-`127.0.0.1` only (it refuses any other `--host` unless you add `--allow-remote`). Each web app
-serves one ESPN account: to serve several people, run one app per person (see
-[deploy.md](deploy.md#adding-people)).
+only adds HTTPS. Without `--accounts`, `--password-file` or the `--github-*` options there is
+**no login at all**: anyone who reaches the page acts as the ESPN account on the server and can
+press Apply. In that case put a proxy with a login in front. Either way `benchboss web` listens
+on `127.0.0.1` only (it refuses any other `--host` unless you add `--allow-remote`).
+
+There are two ways to run it:
+
+- **One person** (`--password-file`, and optionally `--github-*`): one name, `owner`, and one
+  ESPN account, the one on the machine.
+- **Several people** (`--accounts`, what the server setup uses): a list of people in a small
+  database, each with their own password and their own folder of settings and cookies. One
+  address and one service for everyone. Manage them with `benchboss users` (on a server,
+  `sudo benchboss-users`, see [deploy.md](deploy.md#adding-people)).
 
 ### Install and run
 
-On a server, do not run `benchboss web` by hand. `deploy/deploy.sh` installs releases, and
-`benchboss-users add` starts one web app per person as the service `benchboss-web@NAME` (the
-template is [deploy/benchboss-web@.service](../deploy/benchboss-web@.service)). The steps are
-in [deploy.md](deploy.md#first-deploy). To try it by hand on your own computer:
+On a server, do not run `benchboss web` by hand. `deploy/deploy.sh` installs releases and the
+service `benchboss-web` (the unit is
+[deploy/benchboss-web.service](../deploy/benchboss-web.service)), which runs
+`benchboss web --accounts`. The steps are in [deploy.md](deploy.md#first-deploy). To try it by
+hand on your own computer:
 
 ```bash
 pip install 'benchboss[web]'
 benchboss --demo web          # the fictional league: nothing is sent to ESPN
 ```
 
-Options you can set on a service live in `/etc/benchboss/NAME.env` (root only):
-`BB_PORT`, `BB_URL` and `BB_ARGS` (extra `benchboss web` options).
+Options you can set on the service live in `/etc/benchboss/web.env` (root only): `BB_PORT`,
+`BB_URL` and `BB_ARGS` (extra `benchboss web` options, such as `--max-sessions 5`
+`--max-per-user 2`).
+
+### Several people (accounts)
+
+With `--accounts`, each person has an account (name, password hash, optional GitHub login) in
+`accounts.db` and a private folder `users/NAME` next to it, both under the service's
+`BENCHBOSS_HOME`. When someone opens the page, their app starts with their own folder as
+`BENCHBOSS_HOME`, so their cookies, league, auto-swap marks and logs are theirs alone. The
+server's own secrets, any `ESPN_S2` and `ESPN_SWID` in its environment, and the system keychain
+are kept out of that process.
+
+Be clear about the limit of this design: every person's app runs as the same Linux user and is
+separated by folders and file permissions, not by the operating system. It protects people from
+each other's mistakes and from a stolen sign in, not from a bug that lets someone run code on
+the server. Run it for people you know.
 
 ### Sign in with a password
 
-`benchboss-users add` makes a random password for the person and stores it in
-`/home/NAME/.bb-web-password`. The user name is `owner`.
+In accounts mode, `benchboss users add NAME` makes a random password and prints it once. The
+sign in page takes that name and password. With `--password-file` the user name is `owner` and
+the file holds the password:
 
 ```bash
-sudo cat /home/NAME/.bb-web-password     # read it
-sudo benchboss-users password NAME       # make a new one
+benchboss users password NAME     # accounts: make a new one (their open sign ins end)
 ```
 
-The service passes that file to `benchboss web --password-file`. By hand, the file must not be
-readable by other users and the password needs 12 characters or more. What the sign in does:
+By hand, a `--password-file` must not be readable by other users and the password needs 12
+characters or more. What the sign in does:
 
 - A signed session cookie (`HttpOnly`, `SameSite=Lax`, `Secure` when `--url` is `https`) that
-  lasts 12 hours (`--session-hours`). Open `/logout` to end it.
+  lasts 12 hours (`--session-hours`). Open `/logout` to end it. With accounts it also ends when
+  the person is removed or their password changes.
 - Five wrong passwords from one address lock it out for ten minutes, and every wrong try
   waits half a second. The page tells you nothing about which half was wrong.
+- Passwords are stored as scrypt hashes, never as text.
 - Forms and websockets from another site are refused.
+- `--max-sessions` and `--max-per-user` cap the open tabs (about 70 MB each).
 - The signing key is `web-secret` in the config folder, made on first use with `0600`
   permissions. Delete it and restart to sign everyone out.
 
 ### Sign in with GitHub
 
-GitHub sign in lets only the GitHub users you list in. It needs an OAuth app that you register
-once under GitHub, Settings, Developer settings, OAuth Apps, New OAuth App:
+GitHub sign in lets in only GitHub users that you linked to a person (accounts mode) or listed
+with `--github-users` (one person). It needs an OAuth app that you register once under GitHub,
+Settings, Developer settings, OAuth Apps, New OAuth App:
 
 - Homepage URL: your public address, for example `https://bb.example.com`.
 - Authorization callback URL: `https://bb.example.com/login/github/callback`.
 
 Copy the client id, generate a client secret and keep it out of the command line (anyone on
-the server can read command lines). `benchboss-users` asks for the secret with hidden input and
-stores it in the person's settings file (`/etc/benchboss/NAME.env`, root only):
+the server can read command lines). On the server, `benchboss-users` asks for the secret with
+hidden input and stores it in `/etc/benchboss/web.env` (root only), then you link people:
 
 ```bash
-sudo benchboss-users github NAME --client-id YOUR_CLIENT_ID --users yourlogin
+sudo benchboss-users oauth --client-id YOUR_CLIENT_ID
+sudo benchboss-users github NAME yourlogin
 ```
 
-`--users` is a comma separated list of GitHub logins or numeric ids. By hand, the secret goes in
-the `BENCHBOSS_GITHUB_CLIENT_SECRET` environment variable (never an argument) and the rest in
-`--github-client-id` and `--github-users`.
+The login is a GitHub login or a numeric id. By hand, the secret goes in the
+`BENCHBOSS_GITHUB_CLIENT_SECRET` environment variable (never an argument), the id in
+`--github-client-id`, and with one person the allowed logins in `--github-users`.
 
-The page then shows a Sign in with GitHub button. A GitHub account that is not on the list sees
+The page then shows a Sign in with GitHub button. A GitHub account that nobody linked sees
 "is not allowed here" and gets no session. `--url` is required, since GitHub sends the browser
 back to that address.
 
@@ -311,8 +339,7 @@ sudo apt-get install -y caddy
 ```
 
 Copy [deploy/Caddyfile.example](../deploy/Caddyfile.example) to `/etc/caddy/Caddyfile`, set
-your name (or paste the block `benchboss-users add` printed, one per person), then open ports
-80 and 443 and reload:
+your name (one block for everyone), then open ports 80 and 443 and reload:
 
 ```bash
 sudo ufw allow 80/tcp && sudo ufw allow 443/tcp

@@ -1,16 +1,17 @@
 #!/bin/bash
 # Run from your own computer, inside a clone of the repo.
 #
-#   deploy/deploy.sh bootstrap USER@HOST     first time on a new server: tools, folders, swap
-#   deploy/deploy.sh update USER@HOST [REF]  deploy a version (default: the commit you are on)
-#   deploy/deploy.sh rollback USER@HOST      go back to the previous version
+#   deploy/deploy.sh bootstrap USER@HOST [URL]  first time on a new server: tools, folders, swap, the service
+#   deploy/deploy.sh update USER@HOST [REF]     deploy a version (default: the commit you are on)
+#   deploy/deploy.sh rollback USER@HOST         go back to the previous version
 #   deploy/deploy.sh status USER@HOST
 #
+# URL is the address people will type, for example https://bb.1-2-3-4.sslip.io.
 # SSH_OPTS adds ssh options, for example SSH_OPTS="-i ~/.ssh/benchboss_ssh".
 set -euo pipefail
 
 cmd=${1:-}; host=${2:-}; ref=${3:-}
-{ [ -n "$cmd" ] && [ -n "$host" ]; } || { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+{ [ -n "$cmd" ] && [ -n "$host" ]; } || { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 # shellcheck disable=SC2206
 ssh_opts=(${SSH_OPTS:-})
 here=$(cd "$(dirname "$0")" && pwd)
@@ -22,8 +23,9 @@ case "$cmd" in
     user=${host%@*}
     echo "==> copying the setup files to $host"
     ssh "${ssh_opts[@]}" "$host" 'rm -rf /tmp/benchboss-setup && mkdir /tmp/benchboss-setup'
-    scp "${ssh_opts[@]}" -q "$here"/setup-server.sh "$here"/update.sh "$here"/users.sh "$here"/benchboss-web@.service "$host:/tmp/benchboss-setup/"
-    ssh -t "${ssh_opts[@]}" "$host" "sudo bash /tmp/benchboss-setup/setup-server.sh $user && rm -rf /tmp/benchboss-setup"
+    scp "${ssh_opts[@]}" -q "$here"/setup-server.sh "$here"/update.sh "$here"/users.sh "$here"/benchboss-web.service "$host:/tmp/benchboss-setup/"
+    arg=$(printf '%q' "$ref")
+    ssh -t "${ssh_opts[@]}" "$host" "sudo bash /tmp/benchboss-setup/setup-server.sh $user $arg && rm -rf /tmp/benchboss-setup"
     ;;
   update)
     if [ -z "$ref" ]; then

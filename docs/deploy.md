@@ -15,20 +15,25 @@ flowchart LR
     GH[GitHub: main] -->|CI passes| A[Deploy job]
     A -->|SSH, restricted key| U[update.sh on the server]
     U --> R["/opt/benchboss/releases/ID/"]
-    R -->|current symlink| S1[benchboss-web@alice]
-    R -->|current symlink| S2[benchboss-web@bob]
-    S1 --> C[Caddy: HTTPS]
-    S2 --> C
+    R -->|current symlink| S[benchboss-web: one service, sign in page]
+    S -->|BENCHBOSS_HOME per person| A1[alice's app]
+    S --> A2[bob's app]
+    S --> C[Caddy: HTTPS]
 ```
 
 | Piece | What it is |
 |---|---|
 | `/opt/benchboss/releases/<id>/` | One Python environment per version. Each deploy builds a new one. Four are kept. |
 | `/opt/benchboss/current` | A symlink to the live release. Switching versions, and going back, is changing this link. |
-| `/opt/benchboss/update.sh` | Builds a release, switches, health-checks every web instance and **rolls back by itself** if one does not answer. |
-| `benchboss-web@NAME` | One web app per person. `NAME` is a Linux user with their own ESPN account, settings and sign in password. |
-| `/etc/benchboss/NAME.env` | That person's port, public address and optional GitHub options. Readable only by root. |
+| `/opt/benchboss/update.sh` | Builds a release, switches, health-checks the web service and **rolls back by itself** if it does not answer. |
+| `benchboss-web` | The one web service for everyone. It runs as the `benchboss` system user and shows the sign in page. |
+| `/var/lib/benchboss/` | `accounts.db` (names, password hashes, GitHub logins) and `users/NAME/`, one private folder per person with their ESPN cookies, settings and logs. |
+| `/etc/benchboss/web.env` | The port, the public address and the GitHub sign in's id and secret. Readable only by root. |
 | `benchboss-users` | Adds, lists and removes people. |
+
+Each browser tab starts its own app process, with that person's folder as `BENCHBOSS_HOME`.
+The server's own secrets and any `ESPN_S2` or `ESPN_SWID` in its environment are removed from
+that process, and the system keychain is not used, so two people never share a login.
 
 ## First deploy
 
@@ -47,11 +52,13 @@ ssh -i ~/.ssh/benchboss_ssh bb@SERVER_IP 'echo ok'
 
 ```bash
 export SSH_OPTS="-i $HOME/.ssh/benchboss_ssh"
-deploy/deploy.sh bootstrap bb@SERVER_IP
+deploy/deploy.sh bootstrap bb@SERVER_IP https://SERVER-IP-WITH-DASHES.sslip.io
 ```
 
-This installs `uv`, the release folder, the `benchboss-users` tool and the service template,
-and adds a 1 GB swap file on small servers. It is safe to run again.
+The last argument is the address people will type. This installs `uv`, the release folder, the
+`benchboss-users` tool and the `benchboss-web` service, creates the `benchboss` system user,
+writes `/etc/benchboss/web.env`, and adds a 1 GB swap file on small servers. It is safe to run
+again.
 
 **3. Deploy a version.**
 
@@ -60,7 +67,8 @@ deploy/deploy.sh update bb@SERVER_IP
 ```
 
 With no version it deploys the commit you are on. If that commit is on GitHub the server
-downloads it from there; if not, your local copy is sent instead. Check it:
+downloads it from there; if not, your local copy is sent instead. This also starts the web
+service. Check it:
 
 ```bash
 deploy/deploy.sh status bb@SERVER_IP
@@ -70,30 +78,32 @@ ssh -i ~/.ssh/benchboss_ssh bb@SERVER_IP 'benchboss --version'
 **4. Add the first person** (yourself). On the server:
 
 ```bash
-sudo benchboss-users add bb --existing --url https://SERVER-IP-WITH-DASHES.sslip.io
+sudo benchboss-users add bb
 ```
 
-`--existing` uses your current Linux user. For a new person, leave it off (see
-[Adding people](#adding-people)). The command starts the web app and prints the Caddy block to
-add. Their sign in password is in `/home/NAME/.bb-web-password`.
+It prints a password **once**. Copy it into your password manager. To choose the password
+yourself, put it in a file readable only by you and add `--password-file FILE`.
 
 **5. Put HTTPS in front.**
 
 ```bash
 sudo apt-get install -y caddy
 sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
-sudo nano /etc/caddy/Caddyfile      # paste the block that step 4 printed
+sudo nano /etc/caddy/Caddyfile      # the address, then reverse_proxy 127.0.0.1:8000
 sudo systemctl reload caddy
 ```
 
-**6. Give the server your ESPN cookies.** From your computer:
+The block is the same for everyone, see [Caddyfile.example](../deploy/Caddyfile.example):
 
-```bash
-benchboss login --to bb@SERVER_IP --identity ~/.ssh/benchboss_ssh
+```
+SERVER-IP-WITH-DASHES.sslip.io {
+    reverse_proxy 127.0.0.1:8000
+}
 ```
 
-Or skip this: the first time you sign in on the web page, a setup screen asks for the two
-cookies (`espn_s2` and `SWID`).
+**6. Give the server your ESPN cookies.** Skip this: the first time you sign in on the web
+page, a setup screen asks for the two cookies (`espn_s2` and `SWID`), then your league and
+team. They are saved in your own folder on the server.
 
 **7. Check it from outside.** From your computer, not the server:
 
@@ -103,8 +113,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://YOUR-NAME/ws              # 401
 curl -s -m 5 -o /dev/null -w '%{http_code}\n' http://SERVER_IP:8000/       # 000: the raw port is closed
 ```
 
-Then open `https://YOUR-NAME` in a browser and sign in as `owner` with the password from
-`sudo cat /home/NAME/.bb-web-password`.
+Then open `https://YOUR-NAME` in a browser and sign in with the name and password from step 4.
 
 ## Updating and rolling back
 
@@ -120,12 +129,12 @@ What an update does:
 
 1. Downloads the source and builds it into a new folder. Nothing live changes yet. If the build
    or `benchboss --version` fails, the update stops here.
-2. Points `current` at the new release and restarts every running web app.
-3. Asks each app's sign in page for an answer for up to 40 seconds.
-4. If any app does not answer, it points `current` back, restarts, and moves the broken release
+2. Points `current` at the new release and restarts the web service.
+3. Asks the sign in page for an answer for up to 40 seconds.
+4. If it does not answer, it points `current` back, restarts, and moves the broken release
    to `/opt/benchboss/failed/` for you to look at. The update exits with an error.
 
-Expect the apps to be unreachable for a few seconds during a restart, and for about 40 extra
+Expect the app to be unreachable for a few seconds during a restart, and for about 40 extra
 seconds when a release fails and is rolled back. Browser sessions in progress end, and people
 sign in again only if their 12 hours ran out.
 
@@ -133,70 +142,97 @@ To see why a release failed:
 
 ```bash
 ls /opt/benchboss/failed/
-sudo journalctl -u 'benchboss-web@*' --since '10 minutes ago' --no-pager | tail -40
+sudo journalctl -u benchboss-web --since '10 minutes ago' --no-pager | tail -40
 ```
 
 ## Adding people
 
-One person is one Linux user with their own ESPN account. Their settings, cookies and sign in
-password live in their own home folder and other users cannot read them. All run the same
-installed version.
+One person is one row in the accounts file and one private folder under
+`/var/lib/benchboss/users/`. They all use the same address and the same installed version.
+There is nothing to add to Caddy, no port and no extra service.
 
 ```bash
-sudo benchboss-users add alice --url https://alice.SERVER-IP-WITH-DASHES.sslip.io
+sudo benchboss-users add alice
 ```
 
-(With sslip.io any label in front of the dashed IP works, so every person gets a name of their
-own on one server. With your own domain, add a DNS record per person.)
+It prints a random password **once**. Then:
 
-It creates the user, a random password, picks a free port, starts the app and prints the Caddy
-block. Then:
-
-1. Add the block to `/etc/caddy/Caddyfile` and run `sudo systemctl reload caddy`.
-2. Give the person three things: the address, the user name `owner` and the password from
-   `sudo cat /home/alice/.bb-web-password`. Send the password over a private channel, not a
-   shared chat.
-3. They sign in. Because they have no cookies yet, a setup screen asks for their `espn_s2` and
+1. Give the person three things: the address, the name `alice` and the password. Send the
+   password over a private channel, not a shared chat. (The name is lowercase letters and
+   digits, 2 to 16, starting with a letter.)
+2. They sign in. Because they have no cookies yet, a setup screen asks for their `espn_s2` and
    `SWID`, then their league and team.
 
 Other things you can do:
 
 ```bash
-sudo benchboss-users list                      # everyone, their port, state and address
-sudo benchboss-users password alice            # a new password (old sessions end when they expire)
-sudo benchboss-users remove alice --yes        # stop the app and delete the user and ALL their data
+sudo benchboss-users list                      # everyone, their GitHub login and whether they have cookies
+sudo benchboss-users password alice            # a new password; their open sign ins end at once
+sudo benchboss-users remove alice --yes        # delete the account and ALL their data
+sudo benchboss-users add bob --password-file FILE   # choose the password yourself
 ```
 
-After `remove`, delete their block from the Caddyfile and reload Caddy.
+Removing a person or changing their password signs them out on their next click, even if their
+12 hours have not passed.
 
-**Sign in with GitHub for a person.** Register an OAuth app on GitHub (Settings, Developer
-settings, OAuth Apps, New) with the person's address as homepage and
-`https://THEIR-ADDRESS/login/github/callback` as callback URL. GitHub allows one callback per
-OAuth app, so each address needs its own app. Then:
+**Sign in with GitHub.** One GitHub OAuth app serves everyone. Register it on GitHub (Settings,
+Developer settings, OAuth Apps, New) with the server's address as homepage and
+`https://YOUR-ADDRESS/login/github/callback` as callback URL. Then:
 
 ```bash
-sudo benchboss-users github alice --client-id THE_CLIENT_ID --users alicelogin
+sudo benchboss-users oauth --client-id THE_CLIENT_ID     # asks for the secret, hidden
+sudo benchboss-users github alice alicelogin             # alicelogin signs in as alice
+sudo benchboss-users github alice                        # unlink
 ```
 
-It asks for the client secret with hidden input. Only the GitHub users you list can sign in,
-and each one acts as that person's ESPN account, so list only people who should.
+Only a GitHub login you linked to someone can sign in, and it acts as that person's ESPN
+account, so link only people who should have it.
 
-**Terminal access for a person** (optional, not needed for the web page): add their SSH public
-key to their account. They get a shell as themselves, without `sudo`.
+**Moving an older install in** (one Linux user per person, from before this layout). See
+[Moving from one app per person](#moving-from-one-app-per-person).
 
-```bash
-sudo -u alice install -d -m 700 /home/alice/.ssh
-echo 'ssh-ed25519 AAAA...their-key... alice-laptop' | sudo -u alice tee -a /home/alice/.ssh/authorized_keys
-```
+**Terminal access for a person** (optional, not needed for the web page): that is an SSH login
+on the server, separate from the web accounts. Add their SSH public key to a Linux user of
+their own, without `sudo`.
 
 **Your own devices** (a new phone or laptop for the admin user `bb`): add its public key to
 `/home/bb/.ssh/authorized_keys`. To remove a device, delete its line.
 
-**How many people fit.** Every open browser tab runs its own app process of about 70 MB, and
-each person's apps are capped at 350 MB. A 512 MB server is comfortable for one or two people;
-use 1 GB or more for more. If memory runs out the capped app is restarted and the server stays
-reachable, so look at `free -m` and `sudo systemctl status 'benchboss-web@*'` before blaming
-the network.
+**How many people fit.** Accounts are cheap: a row each. What costs memory is open browser tabs.
+Every open tab runs its own app process of about 70 MB, and the whole service is capped at
+420 MB. The default `BB_ARGS` in `/etc/benchboss/web.env` lets 5 tabs be open at once and 2 per
+person (`--max-sessions 5 --max-per-user 2`); a tab over the limit is refused with a short
+message and works again when another closes. A 512 MB server suits a few friends who are not
+all online at once. For more, use a 1 GB server and raise the numbers, then
+`sudo systemctl restart benchboss-web`. Look at `free -m` and
+`sudo systemctl status benchboss-web` before blaming the network.
+
+### Moving from one app per person
+
+Before this layout each person was a Linux user running `benchboss-web@NAME` on their own port
+with their own Caddy block. To move over, once, on the server (after `deploy/deploy.sh
+bootstrap` and `update` with the new version):
+
+```bash
+for n in bb vale; do                       # the names of the existing Linux users
+  sudo systemctl disable --now benchboss-web@$n
+  sudo benchboss-users import $n \
+    --from /home/$n/.config/benchboss --password-file /home/$n/.bb-web-password
+done
+sudo systemctl enable --now benchboss-web
+sudo nano /etc/caddy/Caddyfile      # one block, reverse_proxy 127.0.0.1:8000; remove the others
+sudo systemctl reload caddy
+```
+
+`import` copies their cookies, league settings, auto-swap marks and logs, and keeps their
+existing sign in password (the old user name `owner` is replaced by their own name). Check that
+it works, then remove the old files:
+
+```bash
+sudo rm /etc/benchboss/bb.env /etc/benchboss/vale.env
+sudo rm /etc/systemd/system/benchboss-web@.service && sudo systemctl daemon-reload
+rm /home/bb/.bb-web-password           # and the same for each person
+```
 
 ## Automatic deploys from GitHub
 
@@ -295,9 +331,10 @@ workflow can send the source itself with `git archive`, like `deploy.sh --local`
 | `update: uv is not installed` | The server was not bootstrapped. Run `deploy/deploy.sh bootstrap`. |
 | `update: that does not look like benchboss` | The download was empty or the ref does not exist on GitHub. A branch or commit that is only on your computer needs `--local`. |
 | Update ends with `failed its check` | The new version did not start. Look in `/opt/benchboss/failed/` and the journal (above). The site stayed on the old version. |
-| Caddy shows 502 | The web app behind it is down or restarting: `sudo systemctl status benchboss-web@NAME` and `sudo journalctl -u benchboss-web@NAME -n 50`. |
-| The server stops answering SSH and the page | Out of memory. Power cycle from the provider's panel, then check `free -m`. Add swap (bootstrap does) or use a bigger server. |
-| `benchboss-users add` says a port belongs to another user | Leave `--port` out and one is chosen. |
+| Caddy shows 502 | The web app behind it is down or restarting: `sudo systemctl status benchboss-web` and `sudo journalctl -u benchboss-web -n 50`. |
+| The server stops answering SSH and the page | Out of memory. Power cycle from the provider's panel, then check `free -m`. Add swap (bootstrap does) or use a bigger server, and lower `--max-sessions` in `/etc/benchboss/web.env`. |
+| A tab does not open and the browser says the connection closed | The server is at its tab limit (`--max-sessions`, `--max-per-user`). Close another tab, or raise the limits if the server has the memory. |
+| `no accounts yet` in the journal, and nobody can sign in | Run `sudo benchboss-users add NAME`. |
 | Deploy job: `Permission denied (publickey)` | The key secret is incomplete (include the `BEGIN` and `END` lines) or the `authorized_keys` line has a typo. Test it by hand as in step 2. |
 | Deploy job: `Host key verification failed` | `DEPLOY_KNOWN_HOSTS` does not match the server (for example after rebuilding it). Redo step 3. |
 | Deploy job never starts after a merge | The Deploy file is not on `main` yet, or CI failed, or the environment waits for your approval. |

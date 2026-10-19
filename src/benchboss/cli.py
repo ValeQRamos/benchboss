@@ -1020,6 +1020,8 @@ def _web_auth(c: Ctx):
     from benchboss import weblogin
 
     a = c.args
+    if a.accounts:
+        return _accounts_auth(c)
     password = None
     if a.password_file:
         path = Path(a.password_file).expanduser()
@@ -1048,6 +1050,30 @@ def _web_auth(c: Ctx):
         session_hours=a.session_hours))
 
 
+def _accounts_auth(c: Ctx):
+    """The sign in for `benchboss web --accounts`: the people in the accounts file."""
+    from benchboss import weblogin
+    from benchboss.accounts import Accounts
+
+    a = c.args
+    if a.password_file or a.github_users:
+        raise BenchbossError("--accounts keeps passwords and GitHub names in the accounts file "
+                             "(benchboss users): drop --password-file and --github-users")
+    client_id = a.github_client_id or os.environ.get("BENCHBOSS_GITHUB_CLIENT_ID", "")
+    secret = os.environ.get("BENCHBOSS_GITHUB_CLIENT_SECRET", "")
+    if (client_id or secret) and not (client_id and secret and a.url):
+        raise BenchbossError("GitHub sign in needs --github-client-id (or BENCHBOSS_GITHUB_CLIENT_ID), "
+                             "BENCHBOSS_GITHUB_CLIENT_SECRET and --url")
+    accounts = Accounts(config_mod.config_dir())
+    if not accounts.everyone():
+        c.err.print(Text("no accounts yet: nobody can sign in until you run `benchboss users add NAME`",
+                         style=c.pal.warn))
+    key = weblogin.load_secret(config_mod.config_dir() / "web-secret")
+    return weblogin.Auth(weblogin.AuthConfig(
+        secret=key, github_client_id=client_id, github_secret=secret, public_url=a.url or "",
+        session_hours=a.session_hours, accounts=accounts))
+
+
 def cmd_web(c: Ctx):
     """Serve the app in a browser. Without --password-file or --github-*, it has no login of
     its own: keep it on localhost and put a reverse proxy with a login in front of it."""
@@ -1068,14 +1094,95 @@ def cmd_web(c: Ctx):
     if auth:
         from benchboss import weblogin
 
-        Server = weblogin.login_server(Server, auth)
+        Server = weblogin.login_server(Server, auth, a.max_sessions, a.max_per_user)
+    elif a.max_sessions or a.max_per_user:
+        raise BenchbossError("--max-sessions and --max-per-user need a sign in (--accounts, "
+                             "--password-file or --github-*)")
     command = web.session_command(demo=a.demo, theme=getattr(a, "theme", None))
     shown = a.url or f"http://{a.host}:{a.port}"
-    how = "password and GitHub" if auth and auth.cfg.password and auth.cfg.github else (
-        "GitHub" if auth and auth.cfg.github else "password" if auth else "no sign in")
+    how = ("accounts" if auth and auth.cfg.accounts else
+           "password and GitHub" if auth and auth.cfg.password and auth.cfg.github else
+           "GitHub" if auth and auth.cfg.github else "password" if auth else "no sign in")
     c.err.print(Text(f"benchboss web: serving {'demo data' if a.demo else 'your league'} at {shown} "
                      f"({how})", style=c.pal.dim))
     Server(command, host=a.host, port=a.port, title="benchboss", public_url=a.url).serve()
+
+
+def _password_for(c: Ctx) -> tuple[str, bool]:
+    """(password, made here): from --password-file, or a new random one."""
+    from benchboss.accounts import new_password
+
+    a = c.args
+    if not a.password_file:
+        return new_password(), True
+    path = Path(a.password_file).expanduser()
+    try:
+        return path.read_text().strip(), False
+    except OSError as e:
+        raise BenchbossError(f"cannot read {path}: {e.strerror}") from None
+
+
+def cmd_users(c: Ctx):
+    """The people who sign in to `benchboss web --accounts`. It prints new passwords, so it is
+    for the person running the server, never for an agent."""
+    from benchboss.accounts import Accounts
+
+    a = c.args
+    accounts = Accounts(config_mod.config_dir())
+    name = (a.name or "").strip().lower()
+    if a.action != "list" and not name:
+        c.usage(f"name the person: benchboss users {a.action} NAME")
+
+    def show(data: dict, password: str | None = None) -> None:
+        if a.json:
+            print(json.dumps({**data, **({"password": password} if password else {})}, indent=2))
+            return
+        c.out.print(Text(data["summary"], style=c.pal.good))
+        if password:  # plain print: Rich must not wrap or color a password
+            print(f"  sign in   {name}\n  password  {password}\n  (shown once: "
+                  f"`benchboss users password {name}` makes a new one)")
+
+    if a.action == "list":
+        rows = [{"name": p.name, "github": p.github, "cookies": (p.home / "credentials.json").exists(),
+                 "created": dt.datetime.fromtimestamp(p.created).date().isoformat(),
+                 "home": str(p.home)} for p in accounts.everyone()]
+        if a.json:
+            print(json.dumps(rows, indent=2))
+        elif not rows:
+            c.out.print(Text("no accounts yet: benchboss users add NAME", style=c.pal.dim))
+        else:
+            c.out.print(Text(f"{'NAME':<12}{'GITHUB':<22}{'ESPN':<8}CREATED", style=c.pal.dim))
+            for r in rows:
+                c.out.print(f"{r['name']:<12}{r['github'] or '-':<22}"
+                            f"{'yes' if r['cookies'] else 'not yet':<8}{r['created']}")
+    elif a.action in ("add", "import"):
+        if a.action == "import" and not a.source:
+            c.usage("import needs --from FOLDER (the settings folder to copy)")
+        password, made = _password_for(c)
+        person = accounts.add(name, password, a.github)
+        if a.action == "import":
+            try:
+                accounts.import_home(name, Path(a.source).expanduser())
+            except BenchbossError:
+                accounts.remove(name)
+                raise
+        verb = "Imported" if a.action == "import" else "Added"
+        show({"name": name, "home": str(person.home), "summary": f"{verb} {name}."},
+             password if made else None)
+    elif a.action == "password":
+        password, made = _password_for(c)
+        accounts.set_password(name, password)
+        show({"name": name, "summary": f"New password for {name}; their open sessions end."},
+             password if made else None)
+    elif a.action == "github":
+        accounts.set_github(name, a.github)
+        what = f"{name} signs in with GitHub as {a.github}." if a.github else f"{name} no longer has GitHub sign in."
+        show({"name": name, "github": a.github or None, "summary": what})
+    elif a.action == "remove":
+        if not c.confirm(f"Delete {name} and all their settings and ESPN cookies?"):
+            return
+        accounts.remove(name)
+        show({"name": name, "summary": f"Removed {name} and their files."})
 
 
 # --- parser -------------------------------------------------------------------------------------------
@@ -1164,6 +1271,24 @@ def build_parser() -> argparse.ArgumentParser:
                    help="GitHub logins (or numeric ids) allowed in, comma separated")
     p.add_argument("--session-hours", type=float, default=12, metavar="HOURS",
                    help="how long a sign in lasts (default 12)")
+    p.add_argument("--accounts", action="store_true",
+                   help="many people, each with their own password and folder of settings "
+                        "(manage them with benchboss users)")
+    p.add_argument("--max-sessions", type=int, default=0, metavar="N",
+                   help="most browser tabs open at once, about 70 MB each (default: no limit)")
+    p.add_argument("--max-per-user", type=int, default=0, metavar="N",
+                   help="most tabs one person may have open (default: no limit)")
+    p = add("users", cmd_users, "the people who sign in to benchboss web --accounts: add, list, "
+                                "password, github, remove, import")
+    p.add_argument("action", choices=["list", "add", "password", "github", "remove", "import"],
+                   help="what to do")
+    p.add_argument("name", nargs="?", help="the person: 2 to 16 lowercase letters and digits")
+    p.add_argument("--password-file", metavar="FILE",
+                   help="add, password, import: use the password in this file instead of making one")
+    p.add_argument("--github", metavar="LOGIN",
+                   help="add, import, github: the GitHub login (or numeric id) that signs in as this person")
+    p.add_argument("--from", dest="source", metavar="FOLDER",
+                   help="import: an existing benchboss settings folder to copy (cookies, league, logs)")
     p = add("dash", cmd_dash, "the dashboard: matchup, roster, workload, trash, standings")
     p.add_argument("--watch", nargs="?", type=int, const=60, metavar="SECONDS",
                    help="keep it open and refresh (default every 60 s)")
