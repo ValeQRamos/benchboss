@@ -238,8 +238,9 @@ rm /home/bb/.bb-web-password           # and the same for each person
 
 The repository has two workflows:
 
-- **CI** ([ci.yml](../.github/workflows/ci.yml)) runs lint and tests on every push to `main`
-  and on pull requests, on Linux, macOS and Windows.
+- **CI** ([ci.yml](../.github/workflows/ci.yml)) runs lint and a CLI smoke test on every push
+  to `main` and on pull requests. The test suite is switched off for now; the file says how to
+  turn it back on.
 - **Deploy** ([deploy.yml](../.github/workflows/deploy.yml)) runs when CI **passes on a push to
   `main`**, and installs that exact commit on the server. It also has a manual button.
 
