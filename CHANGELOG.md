@@ -4,9 +4,9 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [1.0.5] - 2026-10-19
+## [1.0.6] - 2026-11-07
 
-Setting up phone alerts no longer needs a text editor, and you choose which alerts you get.
+A radar for free agents who just had a big night or got more minutes, and a longer web sign in.
 
 ### Added
 
@@ -19,6 +19,24 @@ Setting up phone alerts no longer needs a text editor, and you choose which aler
   (default 2, at most 7) sets how many days of box scores to read.
 - `tools/probe_stat_lag.py` measures how long after the final buzzer the public box score and
   ESPN's fantasy split count a game.
+
+### Changed
+
+- The Player finder is now called Players in the app's menu and on its screen. Its key is
+  still `p`.
+
+### Fixed
+
+- A sign in to `benchboss web` now lasts 24 hours instead of 12 (`--session-hours` still
+  changes it), so going back and forth on a phone through the day does not send you to the
+  sign in page.
+
+## [1.0.5] - 2026-10-19
+
+Setting up phone alerts no longer needs a text editor, and you choose which alerts you get.
+
+### Added
+
 - A Settings screen (`S` in the app) with an Alerts tab. It sets up [ntfy](https://ntfy.sh)
   pushes (topic, server and token; New makes a random topic, Copy puts it on the clipboard,
   Test sends a note, Off turns ntfy off) and writes the private `notify.env` and
@@ -31,9 +49,6 @@ Setting up phone alerts no longer needs a text editor, and you choose which aler
 
 ### Fixed
 
-- A sign in to `benchboss web` now lasts 24 hours instead of 12 (`--session-hours` still
-  changes it), so going back and forth on a phone through the day does not send you to the
-  sign in page.
 - ntfy pushes failed with "certificate verify failed" on a python.org build of Python on
   macOS, which ships without root certificates. They now use the same certificates as the ESPN
   and news requests.
