@@ -421,6 +421,12 @@ def cmd_trash(c: Ctx):
            [p.to_dict(s.calendar) for p in picks])
 
 
+def cmd_radar(c: Ctx):
+    from benchboss.ui.screens import radar
+
+    _screen(c, radar, n=c.args.n, days=c.args.days)
+
+
 def cmd_trades(c: Ctx):
     from benchboss.core import trades as trades_mod
 
@@ -1270,7 +1276,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--github-users", metavar="LOGINS",
                    help="GitHub logins (or numeric ids) allowed in, comma separated")
     p.add_argument("--session-hours", type=float, default=24, metavar="HOURS",
-                   help="how long a sign in lasts (default 12)")
+                   help="how long a sign in lasts (default 24)")
     p.add_argument("--accounts", action="store_true",
                    help="many people, each with their own password and folder of settings "
                         "(manage them with benchboss users)")
@@ -1347,6 +1353,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("trash", cmd_trash, "most valuable free agents for this week (points added, best day to grab)")
     p.add_argument("pos", nargs="?", help="PG SG SF PF C G F")
     p.add_argument("-n", type=_count, default=10, help="how many (default 10)")
+    p = add("radar", cmd_radar, "free agents who just played their way up: big nights, more "
+                                "minutes, new starters, rising ownership")
+    p.add_argument("-n", type=_count, default=15, help="how many (default 15)")
+    p.add_argument("--days", type=_count, default=2,
+                   help="fantasy days of box scores to read, today included (default 2, "
+                        "at most 7)")
     p = add("fa", cmd_fa, "free agents by %% rostered")
     p.add_argument("pos", nargs="?", help="PG SG SF PF C G F")
     p.add_argument("-n", type=_count, default=25, help="how many (default 25)")

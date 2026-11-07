@@ -1,4 +1,4 @@
-"""The Settings screen (key e) and the ntfy settings it writes: notify.env stays private and
+"""The Settings screen (key S) and the ntfy settings it writes: notify.env stays private and
 keeps its other lines, config.json keeps its other fields, the demo saves and sends nothing."""
 
 import asyncio
@@ -8,7 +8,7 @@ import stat
 import sys
 
 import pytest
-from textual.widgets import Button, Checkbox, Input, TabbedContent
+from textual.widgets import Button, Checkbox, Input, TabbedContent, Tabs
 
 from benchboss import config as config_mod
 from benchboss import notify, store
@@ -32,7 +32,7 @@ def drive(scenario, size=(140, 44)):
     async def go():
         async with app.run_test(size=size) as pilot:
             await settle(pilot)
-            await pilot.press("e")
+            await pilot.press("S")
             await settle(pilot)
             await scenario(pilot, app, app.query_one(screen.SettingsView))
 
@@ -41,8 +41,8 @@ def drive(scenario, size=(140, 44)):
     return app
 
 
-def test_e_is_the_menu_key_and_the_widget_binds_no_menu_letter():
-    assert ("settings", "Settings", "e") in MENU
+def test_S_is_the_menu_key_and_the_widget_binds_no_menu_letter():
+    assert ("settings", "Settings", "S") in MENU
     keys = [k for _, _, k in MENU]
     assert len(keys) == len(set(keys))
     letters = set(keys) | set("gvmrq")
@@ -105,7 +105,7 @@ def test_the_demo_saves_and_sends_nothing(monkeypatch):
     monkeypatch.setattr(notify, "send", refuse)
 
     async def scenario(pilot, app, view):
-        assert view.data.demo and app.focused is view.query_one("#st-topic", Input)
+        assert view.data.demo and app.focused is view.query_one(Tabs)
         view.query_one("#st-topic", Input).value = TOPIC
         for button in ("#st-save", "#st-test", "#st-off"):
             view.query_one(button, Button).press()
@@ -123,6 +123,7 @@ def test_save_writes_the_file_and_turns_ntfy_on():
     async def scenario(pilot, app, view):
         view.data.demo = False
         view.query_one("#st-topic", Input).value = TOPIC
+        view.query_one("#st-topic", Input).focus()
         await pilot.press("enter")
         await settle(pilot)
         assert view.message[1] == "good", view.message

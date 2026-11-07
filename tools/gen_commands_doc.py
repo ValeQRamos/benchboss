@@ -10,7 +10,7 @@ from benchboss.cli import build_parser
 OUT = Path(__file__).resolve().parents[1] / "docs" / "commands.md"
 GROUPS = [
     ("Look", ["dash", "matchup", "roster", "activity", "standings", "playoffs"]),
-    ("Find", ["trash", "players", "fa", "trending", "news", "trades", "alerts"]),
+    ("Find", ["trash", "radar", "players", "fa", "trending", "news", "trades", "alerts"]),
     ("Act (writes to ESPN, always asks first)", ["optimize", "add", "drop", "trade", "watch",
                                                  "chat"]),
     ("Auto-swap (arming a player is your yes; the monitor makes the change)",

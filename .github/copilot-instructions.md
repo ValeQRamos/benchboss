@@ -5,7 +5,7 @@ are in [AGENTS.md](../AGENTS.md); these rules are the non-negotiable part.
 
 - When the user asks about their fantasy team, run the `benchboss` CLI in the terminal with
   `--json` and answer from its output. Do not edit source files for those requests.
-- Reads are safe: `dash`, `matchup`, `roster`, `activity`, `trash`, `players`, `watch` (or
+- Reads are safe: `dash`, `matchup`, `roster`, `activity`, `trash`, `radar`, `players`, `watch` (or
   `watch list`), `fa`, `trending`, `news` (`news --watch` for the watch list, `news "Player"`
   for any NBA player's latest items), `trades`, `alerts`,
   `standings`, `playoffs` (`--pick "Winner>Loser"` only changes the simulation), `chat`

@@ -6,15 +6,15 @@
   Auto-swap  u              ███████████████    Demo Hoops League                                           Wed Nov 4
   Workload  a               ▀▀▀▀██████▀▀█▀▀    2-0 · 2nd of 10 · projected 2nd · streak W2
   Best trash  f              ████▀▀▀█▀██▀█     29% ESPN playoff odds  ━━━─────────
-  Player finder  p            ▀█████████▀
-  Player news  n                 ▀▀▀▀▀
-  Trade finder  x
-  Inbox  i                  ╭─  WEEK 3  ───────────────────────────────╮ ╭─  WORKLOAD THIS WEEK  ──────────────────╮
-  Standings  s              │                       Score  Proj.  Left │ │ Most games                              │
-  Playoff race  y           │ Monstars              420.7  1,483    29 │ │ A. Edwards MIN         4 games (3 left) │
-  Roster  o                 │ Pick and Roll Pros    402.5  1,597    33 │ │ L. Ball MIN            4 games (3 left) │
-  Settings  e               │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ │ A. Sarr WSH            4 games (3 left) │
-                            │ Up 18.2 now, projected to lose by 114    │ │ Fewest games                            │
+  Trash radar  F              ▀█████████▀
+  Players  p                     ▀▀▀▀▀
+  Player news  n
+  Trade finder  x           ╭─  WEEK 3  ───────────────────────────────╮ ╭─  WORKLOAD THIS WEEK  ──────────────────╮
+  Inbox  i                  │                       Score  Proj.  Left │ │ Most games                              │
+  Standings  s              │ Monstars              420.7  1,483    29 │ │ A. Edwards MIN         4 games (3 left) │
+  Playoff race  y           │ Pick and Roll Pros    402.5  1,597    33 │ │ L. Ball MIN            4 games (3 left) │
+  Roster  o                 │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ │ A. Sarr WSH            4 games (3 left) │
+  Settings  S               │ Up 18.2 now, projected to lose by 114    │ │ Fewest games                            │
                             ╰───────────────  Mon Nov 2 to Sun Nov 8  ─╯ │ S. Pippen Jr. MEM      3 games (2 left) │
                             ╭─  ROSTER  ───────────────────────────────╮ │ C. White CHA           3 games (2 left) │
                             │ PG ● L. Ball MIN                    46.4 │ │ Z. Edey MEM            3 games (2 left) │

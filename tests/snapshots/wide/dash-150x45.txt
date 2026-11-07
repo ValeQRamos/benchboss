@@ -6,15 +6,15 @@
   Auto-swap  u              ███████████████    Demo Hoops League                                                                         Wed Nov 4
   Workload  a               ▀▀▀▀██████▀▀█▀▀    2-0  ·  2nd of 10  ·  projected 2nd  ·  streak W2
   Best trash  f              ████▀▀▀█▀██▀█     29% ESPN playoff odds  ━━━─────────
-  Player finder  p            ▀█████████▀
-  Player news  n                 ▀▀▀▀▀
-  Trade finder  x
-  Inbox  i                  ╭─  WEEK 3  ──────────────────────────────────────────────╮ ╭─  INBOX  ──────────────────────────────────────────────╮
-  Standings  s              │                                      Score  Proj.  Left │ │ ● Trade offer from Tune Squad: you give Scotty Pippen  │
-  Playoff race  y           │ Monstars                             420.7  1,483    29 │ │ Jr., you get Lauri Markkanen                           │
-  Roster  o                 │ Pick and Roll Pros                   402.5  1,597    33 │ ╰────────────────────────────────────────────────────────╯
-  Settings  e               │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ ╭─  WORKLOAD THIS WEEK  ─────────────────────────────────╮
-                            │ Up 18.2 now, projected to lose by 114                   │ │ Most games                                             │
+  Trash radar  F              ▀█████████▀
+  Players  p                     ▀▀▀▀▀
+  Player news  n
+  Trade finder  x           ╭─  WEEK 3  ──────────────────────────────────────────────╮ ╭─  INBOX  ──────────────────────────────────────────────╮
+  Inbox  i                  │                                      Score  Proj.  Left │ │ ● Trade offer from Tune Squad: you give Scotty Pippen  │
+  Standings  s              │ Monstars                             420.7  1,483    29 │ │ Jr., you get Lauri Markkanen                           │
+  Playoff race  y           │ Pick and Roll Pros                   402.5  1,597    33 │ ╰────────────────────────────────────────────────────────╯
+  Roster  o                 │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │ ╭─  WORKLOAD THIS WEEK  ─────────────────────────────────╮
+  Settings  S               │ Up 18.2 now, projected to lose by 114                   │ │ Most games                                             │
                             ╰──────────────────────────────  Mon Nov 2 to Sun Nov 8  ─╯ │ A. Edwards MIN                        4 games (3 left) │
                             ╭─  ROSTER  ──────────────────────────────────────────────╮ │ L. Ball MIN                           4 games (3 left) │
                             │ PG ● L. Ball MIN                                   46.4 │ │ A. Sarr WSH                           4 games (3 left) │

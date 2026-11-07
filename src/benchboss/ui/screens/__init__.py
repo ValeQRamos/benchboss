@@ -12,7 +12,7 @@ Every screen module exposes:
 An interactive screen also exposes ``widget(data, app) -> textual.widget.Widget``. The app
 mounts that widget in place of the static drawing (the CLI still uses ``draw``). The widget
 gets the keyboard focus; keys it does not bind fall through to the app, so the one-key menu
-(d t w a f p n x i s y o) keeps working unless an input box has the focus. A widget that
+(d t w a f p n x i s y o u F S) keeps working unless an input box has the focus. A widget that
 cycles VIEWS itself and skips some may define ``next_view() -> int`` (the index v goes to),
 so the app's status line names the right one.
 
@@ -23,11 +23,20 @@ Rules for every screen: ``load`` may raise BenchbossError (the app shows the mes
 
 from __future__ import annotations
 
-from benchboss.ui.screens import autoswap, finder, playoffs, roster, standings, trash, workload
+from benchboss.ui.screens import (
+    autoswap,
+    finder,
+    playoffs,
+    radar,
+    roster,
+    standings,
+    trash,
+    workload,
+)
 
 # app screen id -> module (the dashboard, optimize, news, trades and inbox screens live in app.py)
 SCREENS = {"roster": roster, "standings": standings, "activity": workload, "trash": trash,
-           "players": finder, "playoffs": playoffs, "autoswap": autoswap}
+           "players": finder, "playoffs": playoffs, "autoswap": autoswap, "radar": radar}
 
 
 def view_index(module, key: str | None) -> int:

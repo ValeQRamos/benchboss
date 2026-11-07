@@ -1,5 +1,5 @@
-"""Settings (key e). One tab for now, Alerts: what the monitor notifies you about, and the ntfy
-push to your phone.
+"""Settings (key S, a capital: the playoff builder binds e). One tab for now, Alerts: what the
+monitor notifies you about, and the ntfy push to your phone.
 
 App only, so it has no ``draw`` or ``to_json``: it edits settings and reads nothing from ESPN.
 The topic, the server and the token go to ``notify.env`` (private, 0600) and "ntfy" joins
@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from rich.text import Text
 from textual import work
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Button, Checkbox, Input, Static, TabbedContent, TabPane
+from textual.widgets import Button, Checkbox, Input, Static, TabbedContent, TabPane, Tabs
 
 from benchboss import config as config_mod
 from benchboss import notify
@@ -177,11 +177,13 @@ class SettingsView(VerticalScroll):
             self._render_all()
 
     def focus(self, scroll_visible: bool = True):
+        """The tab bar, not a box: a box takes every letter, so the menu keys would stop. One
+        tab reaches the topic."""
         if self._live():
-            topic = next(iter(self.query("#st-topic")), None)
-            if topic is not None:
-                topic.focus(scroll_visible)
-            else:  # the tab's boxes are mounted a moment after the view
+            tabs = next(iter(self.query(Tabs)), None)
+            if tabs is not None:
+                tabs.focus(scroll_visible)
+            else:  # the tabs are mounted a moment after the view
                 self.call_after_refresh(self.focus)
         return self
 

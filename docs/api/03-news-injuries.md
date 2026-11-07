@@ -463,9 +463,17 @@ GET https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{teamId}/
 - `season=2027&seasontype=2`: regular season, 80 events for MIN from 2026-10-21T23:30Z to 2027-04-12T00:30Z.
 - Keys: `events[]`, `requestedSeason`, `season`, `status`, `team{id, abbreviation, displayName, recordSummary: "3-2", standingSummary}`, `timestamp`. Event: `id`, `date`, `name`, `shortName`, `seasonType`, `timeValid`, `competitions[0]{competitors[]{homeAway, team}, status, broadcasts[], venue, ...}`.
 
-### How the app should use it
+### Box scores (game summary)
 
-The fantasy view `proTeamSchedules_wl` already gives game days per scoring period. Use the scoreboard for live state, tip times, TV and scores; it joins directly on event id and team id (section 10).
+```
+GET https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401909287
+```
+
+Public, no cookies. VERIFIED (live, 2026-11-07, a finished game): `boxscore.players[]` has one entry per team, `statistics[0].labels` is `[MIN, PTS, FG, 3PT, FT, REB, AST, TO, STL, BLK, OREB, DREB, PF, +/-]` and `athletes[]` has one row per player with `athlete.id`, `starter`, `didNotPlay` (with a `reason`), and `stats[]` as strings aligned to the labels (`FG`, `3PT` and `FT` are `"made-attempted"`). The athlete `id` is the fantasy player id (`5142718` is AJ Dybantsa in both). The same response has `injuries`, `leaders`, `plays` and `winprobability`. benchboss reads it (`boxscores.py`) for the free agent radar: the scoreboard (`status.type.completed`) says which games ended, then one summary per game gives every player's minutes, starter flag and box score, minutes after the final buzzer.
+
+The fantasy season split of a player who played that night already counted the game at 08:32 CST the next morning (games played and minutes per game matched his game log exactly). How soon after the final it updates is not measured yet: `tools/probe_stat_lag.py` records it.
+
+### How the app should use it Use the scoreboard for live state, tip times, TV and scores; it joins directly on event id and team id (section 10).
 
 ---
 

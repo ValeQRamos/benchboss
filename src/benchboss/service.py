@@ -699,6 +699,34 @@ class Session:
             found = ranked(players + [p for p in extra if p.id not in known])
         return found
 
+    def box_lines(self, days: int = 2):
+        """The box score lines (boxscores.Line) of the games that ended today and on the ``days``
+        - 1 fantasy days before, from ESPN's public feed."""
+        from benchboss import boxscores
+
+        lines = []
+        for back in range(days):
+            lines += boxscores.day_lines(self.today - dt.timedelta(days=back))
+        return lines
+
+    def players_with_splits(self, ids: Iterable[int], keys: Iterable[str] = ("season", "l7")
+                            ) -> list[Player]:
+        """Players by id with only these stat splits (constants.SPLITS keys), 40 to a request:
+        ESPN sends about 60 KB for every player that has all six."""
+        ids = list(dict.fromkeys(int(i) for i in ids))
+        lg = self.league()
+        known = dict(zip(SPLITS, split_ids(lg.season), strict=True))
+        wanted = [known[k] for k in keys]
+        out: list[Player] = []
+        for i in range(0, len(ids), 40):
+            chunk = ids[i:i + 40]
+            flt = {"filterIds": {"value": chunk}, "limit": len(chunk),
+                   "sortPercOwned": {"sortPriority": 1, "sortAsc": False},
+                   "filterStatsForTopScoringPeriodIds": {"value": 1, "additionalValue": wanted}}
+            out += [parse_player(x, lg.season)
+                    for x in self.client.players(flt, lg.scoring_period)]
+        return out
+
     # --- monitor -------------------------------------------------------------------------------
 
     def player_snapshot(self, ids: Iterable[int]) -> list[Player]:

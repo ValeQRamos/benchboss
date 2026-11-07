@@ -15,9 +15,25 @@ from functools import cached_property
 from importlib import resources
 
 from benchboss import config as config_mod
+from benchboss.boxscores import Line
 from benchboss.core.calendar import SeasonCalendar
 from benchboss.errors import BenchbossError
-from benchboss.espn.constants import SLOT_ID
+from benchboss.espn.constants import (
+    AST,
+    BLK,
+    FGA,
+    FGM,
+    FTA,
+    FTM,
+    MIN,
+    PRO_TEAM,
+    PTS,
+    REB,
+    SLOT_ID,
+    STL,
+    TO,
+    TPM,
+)
 from benchboss.espn.models import parse_player
 from benchboss.news import NewsItem
 from benchboss.service import Session
@@ -234,6 +250,20 @@ _SEARCH_NEWS = {
     ],
 }
 
+# last night's box scores for a few demo free agents, for the radar: (index in the dataset's
+# free_agents, minutes, started, the box score)
+_BOX = [
+    (1, 33, False, {PTS: 26, REB: 7, AST: 9, STL: 2, BLK: 0, TO: 3, FGM: 9, FGA: 17, FTM: 6,
+                    FTA: 7, TPM: 2}),
+    (2, 36, True, {PTS: 22, REB: 8, AST: 4, STL: 2, BLK: 1, TO: 2, FGM: 8, FGA: 15, FTM: 4,
+                   FTA: 5, TPM: 2}),
+    (4, 29, True, {PTS: 14, REB: 5, AST: 3, STL: 1, BLK: 0, TO: 1, FGM: 5, FGA: 11, FTM: 2,
+                   FTA: 2, TPM: 2}),
+    (6, 38, False, {PTS: 17, REB: 6, AST: 5, STL: 1, BLK: 0, TO: 2, FGM: 6, FGA: 13, FTM: 4,
+                    FTA: 4, TPM: 1}),
+]
+
+
 class DemoSession(Session):
     def __init__(self, cfg: config_mod.Config | None = None):
         data = load()
@@ -329,6 +359,17 @@ class DemoSession(Session):
     def latest_news(self, player_id, n=10, offset=0):
         """The canned items on one player whatever their date, newest first."""
         return [x for x in self._news_items() if player_id in x.player_ids][offset:offset + n]
+
+    def box_lines(self, days: int = 2):
+        """Canned box scores from last night: nothing is read from ESPN's public feed."""
+        day = self.today - dt.timedelta(days=1)
+        out = []
+        for i, minutes, started, box in _BOX:
+            x = self.data["free_agents"][i]
+            p = x["player"]
+            out.append(Line(x["id"], p["fullName"], PRO_TEAM[p["proTeamId"]], f"demo-{x['id']}",
+                            day, started, {MIN: float(minutes), **{k: float(v) for k, v in box.items()}}))
+        return out
 
     def nba_players(self, max_age=None):
         """The demo's players_wl list, with lastNewsDate from the canned news. Kept in

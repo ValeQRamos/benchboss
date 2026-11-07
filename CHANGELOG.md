@@ -10,7 +10,16 @@ Setting up phone alerts no longer needs a text editor, and you choose which aler
 
 ### Added
 
-- A Settings screen (`e` in the app) with an Alerts tab. It sets up [ntfy](https://ntfy.sh)
+- Trash radar (`F` in the app, `benchboss radar`). It finds free agents who just played
+  their way onto your list. Box scores of the games that ended, read from ESPN's public
+  feed within minutes of the final buzzer, flag a big night (fantasy points far above his
+  average, with real minutes), a jump in minutes and a start from the bench. ESPN's stat
+  splits, which catch up by the next morning, add a week of more minutes, a week of better
+  form and a rise in % rostered. Each pick says why, and `--json` has the same. `--days`
+  (default 2, at most 7) sets how many days of box scores to read.
+- `tools/probe_stat_lag.py` measures how long after the final buzzer the public box score and
+  ESPN's fantasy split count a game.
+- A Settings screen (`S` in the app) with an Alerts tab. It sets up [ntfy](https://ntfy.sh)
   pushes (topic, server and token; New makes a random topic, Copy puts it on the clipboard,
   Test sends a note, Off turns ntfy off) and writes the private `notify.env` and
   `notify.backends` in `config.json`. Nothing is saved or sent in the demo.

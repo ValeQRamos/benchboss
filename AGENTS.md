@@ -30,6 +30,7 @@ Every read command supports `--json` and prints stable keys, ISO dates and names
 | Roster, injuries, who plays today, every stat split | `benchboss roster --json` |
 | Games per player this week, and which are on the bench | `benchboss activity --json` |
 | Best free agents for this week | `benchboss trash --json [-n 10] [POS]` |
+| Free agents who just had a big night, got more minutes or started (box scores of finished games plus the stat splits) | `benchboss radar --json [-n 15] [--days 2]` |
 | Find players by any split (free agents, rostered, watch list, all) | `benchboss players --json [--from fa\|rostered\|watch\|all] [--pos C] [--sort l7] [-n 20] [NAME]` |
 | The user's ESPN watch list | `benchboss watch --json` |
 | Free agents by ownership / rising | `benchboss fa --json [POS]`, `benchboss trending --json` |

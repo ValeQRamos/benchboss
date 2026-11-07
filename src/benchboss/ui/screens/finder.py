@@ -1,4 +1,4 @@
-"""Player finder: every player in one table with every stat split, and your ESPN watch list.
+"""Players: every player in one table with every stat split, and your ESPN watch list.
 
 The CLI prints ``draw`` (``benchboss players``, ``benchboss watch``). The app mounts
 ``FinderView`` instead: pool tabs (1 2 3 4), a position filter ([ ] or ( )), the stat split
@@ -45,7 +45,7 @@ from benchboss.ui.common import (
 from benchboss.ui.layout import KeyItem
 from benchboss.ui.theme import DARK, Palette
 
-TITLE = "Player finder"
+TITLE = "Players"
 SPLIT_KEYS = tuple(SPLITS)                       # season l7 l15 l30 proj last
 VIEWS: tuple[tuple[str, str], ...] = tuple((k, SPLIT_LABEL[k]) for k in SPLIT_KEYS)
 SOURCES = {"fa": "Free agents", "rostered": "On a team", "watch": "Watch list", "all": "Everyone"}
@@ -296,7 +296,7 @@ def draw(data: FinderData, pal: Palette, width: int = 120, view: int = 0) -> Ren
 
 def fit_title(pal: Palette, width: int, source: str, position: str | None, query: str | None,
               sort_label: str, count: str = "", status: str = "") -> Text:
-    """ "Player finder · Free agents · C · "jok" · sorted by Proj", shortened to fit."""
+    """ "Players · Free agents · C · "jok" · sorted by Proj", shortened to fit."""
     q = f'"{query}"' if query else ""
     base = [source, position or "", q]
     tries = ([*base, count, f"sorted by {sort_label}", status],

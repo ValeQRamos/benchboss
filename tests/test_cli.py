@@ -11,7 +11,7 @@ def run(capsys, *args):
 
 
 @pytest.mark.parametrize("cmd", ["dash", "roster", "standings", "matchup", "activity", "trash",
-                                 "trades", "alerts", "news", "fa", "trending"])
+                                 "trades", "alerts", "news", "fa", "trending", "radar"])
 def test_read_commands_emit_json(capsys, cmd):
     data = json.loads(run(capsys, "--demo", "--json", cmd))
     assert data is not None

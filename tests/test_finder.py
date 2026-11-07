@@ -428,7 +428,7 @@ def fa_data():
 def test_draw_fits_the_width(fa_data, width, pal):
     out = text_of(finder.draw(fa_data, pal, width, view_index(finder, "proj")), width)
     lines = out.splitlines()
-    assert lines[0].startswith("Player finder")
+    assert lines[0].startswith("Players")
     assert max(len(line) for line in lines) <= width
     assert "Proj" in out
     if width >= 80:

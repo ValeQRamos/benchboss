@@ -104,6 +104,21 @@ benchboss trash [-h] [--json] [--demo] [--theme {dark,light}]
 | `pos` | PG SG SF PF C G F |
 | `-n` | How many (default 10) |
 
+### `benchboss radar`
+
+Free agents who just played their way up: big nights, more minutes, new starters, rising ownership.
+
+```text
+benchboss radar [-h] [--json] [--demo] [--theme {dark,light}]
+                       [--layout {auto,compact,full}] [-y] [-n N]
+                       [--days DAYS]
+```
+
+| Option | Meaning |
+|---|---|
+| `-n` | How many (default 15) |
+| `--days` | Fantasy days of box scores to read, today included (default 2, at most 7) |
+
 ### `benchboss players`
 
 Player finder: free agents, rostered players or your watch list with every stat split.

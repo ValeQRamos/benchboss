@@ -165,16 +165,17 @@ Inside the app every screen has a single key:
 | `w` | Optimize week | `i` | Inbox |
 | `a` | Workload | `s` | Standings |
 | `f` | Best trash | `y` | Playoff race |
-| `p` | Player finder | `o` | Roster |
+| `F` | Trash radar | `S` | Settings (ntfy alerts) |
+| `p` | Players | `o` | Roster |
 | `u` | Auto-swap | `r` | Refresh |
 | `v` | Next view of this screen (roster split, standings table, workload order) | `ctrl+t` | Light or dark |
 | `m` | Show or hide the menu (it hides itself below 110 columns; on a phone it opens as a page) | `q` | Quit |
-| `g` | AI news briefing (needs `ANTHROPIC_API_KEY`) | `e` | Settings (ntfy alerts) |
+| `g` | AI news briefing (needs `ANTHROPIC_API_KEY`) | | |
 
-The Player finder has its own keys. Letters it does not use (`d`, `s`, `o`...) still jump
+The Players screen has its own keys. Letters it does not use (`d`, `s`, `o`...) still jump
 to the other screens, except while you type in the search box.
 
-| Key | In the Player finder |
+| Key | In Players |
 |---|---|
 | `1` `2` `3` `4` | Free agents, players on a team, your watch list, everyone |
 | `[` `]` | Previous or next position |
@@ -289,6 +290,7 @@ Run `benchboss --help` or `benchboss <command> --help` for every flag. Read comm
 | `benchboss playoffs [--pick "Winner>Loser"] [--view games]` | Playoff odds. `--pick` fixes a result (add `@WEEK` for a given week, repeat for more); `--view games` lists the matchups left |
 | `benchboss optimize [today\|tomorrow\|week\|11-04]` | Best lineup for a day or the rest of the week (`--dry-run` to only look) |
 | `benchboss trash [POS] [-n N]` | Most valuable free agents for this week |
+| `benchboss radar [-n N] [--days 2]` | Free agents who just had a big night, played far more minutes or started: box scores of the games that ended, plus the stat splits |
 | `benchboss players [NAME] [--from fa\|rostered\|watch\|all] [--pos C] [--sort l7]` | Player finder: every split and the box score (`--view` picks the split for the box score) |
 | `benchboss watch [list\|add\|remove] [PLAYER]` | Your ESPN watch list; `add` and `remove` ask first (`--dry-run` to only look) |
 | `benchboss fa [POS]` · `benchboss trending` | Free agents by % rostered, or rising the fastest |

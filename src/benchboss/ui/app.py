@@ -56,14 +56,15 @@ MENU = [
     ("autoswap", "Auto-swap", "u"),
     ("activity", "Workload", "a"),
     ("trash", "Best trash", "f"),
-    ("players", "Player finder", "p"),
+    ("radar", "Trash radar", "F"),
+    ("players", "Players", "p"),
     ("news", "Player news", "n"),
     ("trades", "Trade finder", "x"),
     ("inbox", "Inbox", "i"),
     ("standings", "Standings", "s"),
     ("playoffs", "Playoff race", "y"),
     ("roster", "Roster", "o"),
-    ("settings", "Settings", "e"),
+    ("settings", "Settings", "S"),
 ]
 PLANS = ("today", "week")  # the screens that can send moves to ESPN
 MENU_WIDTH = 26  # the width of #menu in the CSS below

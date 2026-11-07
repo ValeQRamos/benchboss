@@ -8,7 +8,7 @@
   // dash --watch (it never exits), alerts --mark-read, monitor --live or --notify-test (a real
   // push), autoswap resume and account commands always ask.
   "chat.tools.terminal.autoApprove": {
-    "/^benchboss (status|doctor|dash|matchup|roster|activity|players|trash|fa|trending|news|trades|alerts|standings|playoffs)\\b/": true,
+    "/^benchboss (status|doctor|dash|matchup|roster|activity|players|trash|radar|fa|trending|news|trades|alerts|standings|playoffs)\\b/": true,
     "/^benchboss watch( --json| list)*$/": true,
     "/^benchboss chat( --json| -n \\d+| --to [\\w-]+)*$/": true,
     "/^benchboss (optimize|add|drop|trade|chat|watch) .*--dry-run(\\s|$)/": true,

@@ -50,7 +50,7 @@ change. It also caches the NBA schedule for a day. Demo mode (`--demo`) writes n
   `lineup` (auto-swap starts or benches a player), `watchlist` (a watch-list player turns
   healthy), `armed` (a player you armed for alerts turns healthy) and `problems` (cookies
   expired, ESPN unreachable, live mode refused). Without it, all four are on. The Inbox and the
-  log always keep everything. Press `e` in the app to change it.
+  log always keep everything. Press `S` in the app to change it.
 
 ## seen-news.json
 
