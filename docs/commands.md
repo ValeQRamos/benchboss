@@ -436,7 +436,7 @@ benchboss web [-h] [--json] [--demo] [--theme {dark,light}]
 | `--login-user` | The user name for the password (default owner) |
 | `--github-client-id` | Turn on Sign in with GitHub (also needs --github-users, --url and the BENCHBOSS_GITHUB_CLIENT_SECRET environment variable) |
 | `--github-users` | GitHub logins (or numeric ids) allowed in, comma separated |
-| `--session-hours` | How long a sign in lasts (default 12) |
+| `--session-hours` | How long a sign in lasts (default 24) |
 | `--accounts` | Many people, each with their own password and folder of settings (manage them with benchboss users) |
 | `--max-sessions` | Most browser tabs open at once, about 70 MB each (default: no limit) |
 | `--max-per-user` | Most tabs one person may have open (default: no limit) |

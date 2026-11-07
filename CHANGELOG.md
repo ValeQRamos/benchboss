@@ -22,6 +22,9 @@ Setting up phone alerts no longer needs a text editor, and you choose which aler
 
 ### Fixed
 
+- A sign in to `benchboss web` now lasts 24 hours instead of 12 (`--session-hours` still
+  changes it), so going back and forth on a phone through the day does not send you to the
+  sign in page.
 - ntfy pushes failed with "certificate verify failed" on a python.org build of Python on
   macOS, which ships without root certificates. They now use the same certificates as the ESPN
   and news requests.

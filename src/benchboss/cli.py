@@ -1269,7 +1269,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "BENCHBOSS_GITHUB_CLIENT_SECRET environment variable)")
     p.add_argument("--github-users", metavar="LOGINS",
                    help="GitHub logins (or numeric ids) allowed in, comma separated")
-    p.add_argument("--session-hours", type=float, default=12, metavar="HOURS",
+    p.add_argument("--session-hours", type=float, default=24, metavar="HOURS",
                    help="how long a sign in lasts (default 12)")
     p.add_argument("--accounts", action="store_true",
                    help="many people, each with their own password and folder of settings "

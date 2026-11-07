@@ -68,7 +68,7 @@ class AuthConfig:
     github_secret: str = ""
     github_users: frozenset[str] = field(default_factory=frozenset)  # lowercase logins or ids
     public_url: str = ""               # where people type the address; needed for GitHub
-    session_hours: float = 12
+    session_hours: float = 24
     accounts: Accounts | None = None   # many people, each with their own password and folder
 
     @property
@@ -442,7 +442,7 @@ footer{{margin-top:22px;font-size:12px;color:var(--dim)}}
 """
 
 
-def render_page(*, password: bool, github: bool, error: str = "", hours: float = 12) -> str:
+def render_page(*, password: bool, github: bool, error: str = "", hours: float = 24) -> str:
     parts = [f'<div class="brand">{_ball()}<div><h1>benchboss</h1>'
              f'<div class="dim">{html.escape(__version__)}</div></div></div>']
     if error:

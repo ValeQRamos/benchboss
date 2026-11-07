@@ -292,7 +292,7 @@ By hand, a `--password-file` must not be readable by other users and the passwor
 characters or more. What the sign in does:
 
 - A signed session cookie (`HttpOnly`, `SameSite=Lax`, `Secure` when `--url` is `https`) that
-  lasts 12 hours (`--session-hours`). Open `/logout` to end it. With accounts it also ends when
+  lasts 24 hours (`--session-hours`). Open `/logout` to end it. With accounts it also ends when
   the person is removed or their password changes.
 - Five wrong passwords from one address lock it out for ten minutes, and every wrong try
   waits half a second. The page tells you nothing about which half was wrong.

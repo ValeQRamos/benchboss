@@ -115,7 +115,7 @@ def test_the_password_signs_you_in_and_the_session_lasts_until_logout():
         r = await sign_in(client)
         assert r.status == 303 and r.headers["Location"] == "/"
         c = cookie(r)
-        assert c["httponly"] and c["samesite"] == "Lax" and c["max-age"] == str(12 * 3600)
+        assert c["httponly"] and c["samesite"] == "Lax" and c["max-age"] == str(24 * 3600)
         assert await (await client.get("/")).text() == "the app"
         assert (await client.get("/login", allow_redirects=False)).status == 303  # already in
         r = await client.get("/logout", allow_redirects=False)

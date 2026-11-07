@@ -136,7 +136,7 @@ What an update does:
 
 Expect the app to be unreachable for a few seconds during a restart, and for about 40 extra
 seconds when a release fails and is rolled back. Browser sessions in progress end, and people
-sign in again only if their 12 hours ran out.
+sign in again only if their 24 hours ran out.
 
 To see why a release failed:
 
@@ -173,7 +173,7 @@ sudo benchboss-users add bob --password-file FILE   # choose the password yourse
 ```
 
 Removing a person or changing their password signs them out on their next click, even if their
-12 hours have not passed.
+24 hours have not passed.
 
 **Sign in with GitHub.** One GitHub OAuth app serves everyone. Register it on GitHub (Settings,
 Developer settings, OAuth Apps, New) with the server's address as homepage and
